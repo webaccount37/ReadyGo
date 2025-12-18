@@ -1,0 +1,152 @@
+/**
+ * Estimate types matching backend schemas.
+ */
+
+export type EstimateStatus = "draft" | "submitted" | "approved" | "rejected";
+
+export type AutoFillPattern = "uniform" | "ramp_up" | "ramp_down" | "custom";
+
+export interface EstimateWeeklyHours {
+  id: string;
+  week_start_date: string;
+  hours: string;
+}
+
+export interface EstimatePhase {
+  id: string;
+  estimate_id: string;
+  name: string;
+  start_date: string;
+  end_date: string;
+  color: string;
+  row_order: number;
+}
+
+export interface EstimateLineItem {
+  id: string;
+  estimate_id: string;
+  role_id: string;
+  role_name?: string;
+  delivery_center_id: string;
+  delivery_center_name?: string;
+  employee_id?: string;
+  employee_name?: string;
+  rate: string;
+  cost: string;
+  currency: string;
+  start_date: string;
+  end_date: string;
+  row_order: number;
+  weekly_hours?: EstimateWeeklyHours[];
+}
+
+export interface Estimate {
+  id: string;
+  release_id: string;
+  release_name?: string;
+  engagement_id?: string;
+  engagement_name?: string;
+  name: string;
+  currency: string;
+  status: EstimateStatus;
+  description?: string;
+  phases?: EstimatePhase[];
+  created_by?: string;
+  created_by_name?: string;
+  attributes?: Record<string, unknown>;
+  line_items?: EstimateLineItem[];
+}
+
+export interface EstimateCreate {
+  release_id: string;
+  name: string;
+  currency?: string;
+  status?: EstimateStatus;
+  description?: string;
+  attributes?: Record<string, unknown>;
+}
+
+export interface EstimateUpdate {
+  name?: string;
+  currency?: string;
+  status?: EstimateStatus;
+  description?: string;
+  attributes?: Record<string, unknown>;
+}
+
+export type EstimateResponse = Estimate;
+export type EstimateDetailResponse = Estimate;
+export type EstimateLineItemResponse = EstimateLineItem;
+
+export interface EstimateListResponse {
+  items: EstimateResponse[];
+  total: number;
+}
+
+export interface EstimateLineItemCreate {
+  role_id: string;
+  delivery_center_id: string;
+  employee_id?: string;
+  rate?: string;
+  cost?: string;
+  currency?: string;
+  start_date: string;
+  end_date: string;
+  row_order?: number;
+}
+
+export interface EstimateLineItemUpdate {
+  role_id?: string;
+  delivery_center_id?: string;
+  employee_id?: string;
+  rate?: string;
+  cost?: string;
+  currency?: string;
+  start_date?: string;
+  end_date?: string;
+  row_order?: number;
+}
+
+export interface AutoFillRequest {
+  pattern: AutoFillPattern;
+  hours_per_week?: string;
+  start_hours?: string;
+  end_hours?: string;
+  custom_hours?: Record<string, string>;
+}
+
+export interface WeeklyTotal {
+  week_start_date: string;
+  total_hours: string;
+  total_cost: string;
+  total_revenue: string;
+}
+
+export interface MonthlyTotal {
+  year: number;
+  month: number;
+  total_hours: string;
+  total_cost: string;
+  total_revenue: string;
+}
+
+export interface RoleTotal {
+  role_id: string;
+  role_name: string;
+  total_hours: string;
+  total_cost: string;
+  total_revenue: string;
+}
+
+export interface EstimateTotalsResponse {
+  estimate_id: string;
+  weekly_totals: WeeklyTotal[];
+  monthly_totals: MonthlyTotal[];
+  role_totals: RoleTotal[];
+  overall_total_hours: string;
+  overall_total_cost: string;
+  overall_total_revenue: string;
+}
+
+
+

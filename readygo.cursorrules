@@ -1,0 +1,100 @@
+rules:
+  - id: python-fastapi-backend-guidelines
+    description: >
+      Comprehensive backend guidelines for Python and FastAPI,
+      including architecture, code style, error handling, and performance.
+    applies_to: ["python"]
+    pattern:
+      enforce:
+        - Use async def for asynchronous functions.
+        - Type hint all function signatures; prefer Pydantic models for validation.
+        - Follow clear directory structure (controllers, services, repositories, models, schemas, deps, db, core/integrations).
+        - Apply RORO pattern: receive an object, return an object.
+        - All functions execute fully to completion; avoid early returns.
+        - Centralized exception handling:
+            * Do not handle exceptions internally in functions.
+            * Let exceptions propagate to application entry points (FastAPI routes).
+            * Master controller handles logging, reporting, and telemetry (e.g., OpenTelemetry).
+        - Use guard clauses and avoid deeply nested if statements.
+        - Implement proper logging; do not create custom exception types.
+        - Modularize code; avoid duplication.
+        - Use descriptive variable names with auxiliary verbs (is_active, has_permission, has_error, etc.).
+        - Minimize blocking I/O operations; favor async/await patterns.
+        - Implement caching for frequently accessed data (Redis or in-memory).
+        - Use lazy loading for large datasets or API responses.
+
+  - id: typescript-nextjs-frontend-guidelines
+    description: >
+      Comprehensive frontend guidelines for TypeScript, React, Next.js App Router, Shadcn UI, Tailwind, and Framer Motion.
+    applies_to: ["typescript"]
+    pattern:
+      enforce:
+        - Use functional and declarative programming patterns; avoid classes unless absolutely necessary.
+        - Modularize code; avoid duplication.
+        - Use descriptive variable names with auxiliary verbs (isLoading, hasError, isActive, hasPermission, etc.).
+        - Follow directory conventions: lowercase with dashes for folders, proper naming for files.
+        - Structure /app/components by type or feature; private components in _components subfolders.
+        - Export components using named exports.
+        - Favor server components and SSR; minimize client-side rendering.
+        - Wrap client components in Suspense with fallback.
+        - Optimize dynamic loading, lazy loading of images (WebP), and non-critical components.
+        - Implement responsive design; follow mobile-first approach.
+        - Use Shadcn UI + Tailwind for styling.
+        - Use TypeScript interfaces over types; avoid enums; prefer maps for key/value constants.
+        - Use concise JSX syntax; avoid unnecessary curly braces in conditionals.
+        - Use "function" keyword for pure functions; no classes unless necessary.
+        - Optimize Web Vitals: LCP, CLS, FID.
+        - Use 'nuqs' for URL search parameter state management.
+        - Follow Next.js best practices for data fetching, rendering, and routing.
+        - Use https://placekitten.com/ for placeholder images in seed data.
+        - Ensure all interfaces are responsive user interfaces in support of mobile and tablet.
+
+  - id: naming-and-structure-guidelines
+    description: >
+      Naming conventions, file structure, and project organization for frontend and backend.
+    applies_to: ["python", "typescript"]
+    pattern:
+      enforce:
+        - Backend (Python/FastAPI):
+            * Directories: lowercase with underscores (e.g., routers/user_routes.py)
+            * Follow RESTful API design principles.
+            * Use FastAPI dependency injection for shared resources.
+            * SQLAlchemy 2.0 for ORM features if applicable.
+            * Ensure CORS is configured for local development.
+        - Frontend (TypeScript/React):
+            * Directories: lowercase with dashes (e.g., components/auth-wizard)
+            * Components: new-component.tsx naming convention.
+            * Structure by type or feature.
+            * Separate shared vs. private components.
+            * Modular structure for scaling.
+
+  - id: database-modeling-guidelines
+    description: >
+      Standardized rules for database table and column design,
+      including primary keys, naming conventions, foreign keys, and audit columns.
+    applies_to: ["python", "sql"]
+    pattern:
+      enforce:
+        - Primary Keys:
+            * Every table must have a single PRIMARY KEY; composite keys are not allowed.
+            * Primary key naming: <TABLE_NAME>_ID.
+            * Default type: autoincrementing integer.
+            * For very large or fast-moving tables, use GUIDs instead of autoincrement.
+        - Column Naming:
+            * All columns must be prefixed with the table name.
+            * Boolean columns must end with _FLAG.
+            * Numeric columns must end with _NUMBER.
+            * Currency columns must end with _AMOUNT.
+            * Timestamp columns must end with _TIMESTAMP.
+            * Date columns must end with _DATE.
+            * Text columns can be named freely but must not use reserved endings (_ID, _FLAG, _NUMBER, _AMOUNT, _TIMESTAMP, _DATE).
+              - Columns representing names or descriptions must end with _NAME or _DESCRIPTION.
+        - Foreign Keys:
+            * Foreign key columns must match the referenced table’s primary key name (e.g., ORDER_ID referencing ORDER.ORDER_ID).
+        - Audit Columns:
+            * Every table must include CREATE_TIMESTAMP and UPDATE_TIMESTAMP columns.
+            * CREATE_TIMESTAMP should default to current timestamp on insert.
+            * UPDATE_TIMESTAMP should default to current timestamp on insert or update.
+        - General:
+            * Maintain consistent naming; avoid unnecessary abbreviations.
+            * Any deviation from these rules must be explicitly justified.
