@@ -43,14 +43,12 @@ class EstimateController(BaseController):
         skip: int = 0,
         limit: int = 100,
         release_id: Optional[UUID] = None,
-        status: Optional[str] = None,
     ) -> EstimateListResponse:
         """List estimates with optional filters."""
         estimates, total = await self.estimate_service.list_estimates(
             skip=skip,
             limit=limit,
             release_id=release_id,
-            status=status,
         )
         return EstimateListResponse(items=estimates, total=total)
     
@@ -66,7 +64,11 @@ class EstimateController(BaseController):
         """Delete an estimate."""
         return await self.estimate_service.delete_estimate(estimate_id)
     
-    async def clone_estimate(self, estimate_id: UUID, new_name: str) -> EstimateDetailResponse:
+    async def set_active_version(self, estimate_id: UUID) -> Optional[EstimateResponse]:
+        """Set an estimate as the active version for its release."""
+        return await self.estimate_service.set_active_version(estimate_id)
+    
+    async def clone_estimate(self, estimate_id: UUID, new_name: Optional[str] = None) -> EstimateDetailResponse:
         """Clone an estimate to create a variation."""
         return await self.estimate_service.clone_estimate(estimate_id, new_name)
     
@@ -106,49 +108,4 @@ class EstimateController(BaseController):
         """Get calculated totals for an estimate."""
         return await self.estimate_service.calculate_totals(estimate_id)
     
-    # Backward compatibility aliases (for gradual migration)
-    async def create_quote(self, quote_data: EstimateCreate) -> EstimateResponse:
-        """Backward compatibility alias."""
-        return await self.create_estimate(quote_data)
-    
-    async def get_quote(self, quote_id: UUID, include_details: bool = False) -> Optional[EstimateResponse]:
-        """Backward compatibility alias."""
-        return await self.get_estimate(quote_id, include_details)
-    
-    async def get_quote_detail(self, quote_id: UUID) -> Optional[EstimateDetailResponse]:
-        """Backward compatibility alias."""
-        return await self.get_estimate_detail(quote_id)
-    
-    async def list_quotes(
-        self,
-        skip: int = 0,
-        limit: int = 100,
-        release_id: Optional[UUID] = None,
-        status: Optional[str] = None,
-    ) -> EstimateListResponse:
-        """Backward compatibility alias."""
-        return await self.list_estimates(skip, limit, release_id, status)
-    
-    async def update_quote(
-        self,
-        quote_id: UUID,
-        quote_data: EstimateUpdate,
-    ) -> Optional[EstimateResponse]:
-        """Backward compatibility alias."""
-        return await self.update_estimate(quote_id, quote_data)
-    
-    async def delete_quote(self, quote_id: UUID) -> bool:
-        """Backward compatibility alias."""
-        return await self.delete_estimate(quote_id)
-    
-    async def clone_quote(self, quote_id: UUID, new_name: str) -> EstimateDetailResponse:
-        """Backward compatibility alias."""
-        return await self.clone_estimate(quote_id, new_name)
-    
-    # Note: create_line_item, update_line_item, delete_line_item, and auto_fill_hours
-    # already accept estimate_id, so they work with both naming conventions
-    
-    async def get_quote_totals(self, quote_id: UUID) -> EstimateTotalsResponse:
-        """Backward compatibility alias."""
-        return await self.get_estimate_totals(quote_id)
 

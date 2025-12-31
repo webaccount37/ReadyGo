@@ -44,7 +44,6 @@ export function useEstimates(
     skip?: number;
     limit?: number;
     release_id?: string;
-    status?: string;
   },
   options?: Omit<UseQueryOptions<EstimateListResponse>, "queryKey" | "queryFn">
 ) {
@@ -126,6 +125,23 @@ export function useUpdateEstimate(
 }
 
 /**
+ * Set an estimate as the active version.
+ */
+export function useSetActiveVersion(
+  options?: UseMutationOptions<EstimateResponse, Error, string>
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation<EstimateResponse, Error, string>({
+    mutationFn: (estimateId) => estimatesApi.setActiveVersion(estimateId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+    },
+    ...options,
+  });
+}
+
+/**
  * Delete an estimate.
  */
 export function useDeleteEstimate(
@@ -150,7 +166,7 @@ export function useCloneEstimate(
   options?: UseMutationOptions<
     EstimateDetailResponse,
     Error,
-    { estimateId: string; newName: string }
+    { estimateId: string; newName?: string }
   >
 ) {
   const queryClient = useQueryClient();
@@ -158,7 +174,7 @@ export function useCloneEstimate(
   return useMutation<
     EstimateDetailResponse,
     Error,
-    { estimateId: string; newName: string }
+    { estimateId: string; newName?: string }
   >({
     mutationFn: ({ estimateId, newName }) => estimatesApi.cloneEstimate(estimateId, newName),
     onSuccess: () => {

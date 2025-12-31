@@ -20,8 +20,6 @@ class DeliveryCenter(Base):
     code = Column(String(50), unique=True, nullable=False, index=True)  # e.g., "north-america"
     
     # Relationships
-    employee_engagements = relationship("EmployeeEngagement", back_populates="delivery_center")
-    employee_releases = relationship("EmployeeRelease", back_populates="delivery_center")
     engagements = relationship("Engagement", back_populates="delivery_center")
     releases = relationship("Release", back_populates="delivery_center")
 

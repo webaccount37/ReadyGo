@@ -65,6 +65,7 @@ export function EstimateEmptyRow({
       end_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split("T")[0],
+      billable: true,
     };
   };
 
@@ -417,6 +418,13 @@ export function EstimateEmptyRow({
     return week.toISOString().split("T")[0];
   };
 
+  // Helper function to parse date string as local date (avoid timezone conversion)
+  const parseLocalDate = (dateStr: string): Date => {
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    return new Date(year, month - 1, day); // month is 0-indexed in JS
+  };
+
   // Calculate totals
   const totalHours: number = Array.from(weeklyHoursValues.values()).reduce(
     (sum, hours) => sum + parseFloat(hours || "0"),
@@ -483,7 +491,7 @@ export function EstimateEmptyRow({
       </td>
 
       {/* Cost */}
-      <td className="border border-gray-300 px-2 py-1">
+      <td className="border border-gray-300 px-2 py-1" style={{ width: '120px', minWidth: '120px' }}>
         <Input
           type="number"
           step="0.01"
@@ -497,7 +505,7 @@ export function EstimateEmptyRow({
       </td>
 
       {/* Rate */}
-      <td className="border border-gray-300 px-2 py-1">
+      <td className="border border-gray-300 px-2 py-1" style={{ width: '120px', minWidth: '120px' }}>
         <Input
           type="number"
           step="0.01"
@@ -530,20 +538,50 @@ export function EstimateEmptyRow({
         />
       </td>
 
+      {/* Billable */}
+      <td className="border border-gray-300 px-2 py-1 text-center">
+        <input
+          type="checkbox"
+          checked={formData.billable ?? true}
+          onChange={(e) => setFormData({ ...formData, billable: e.target.checked })}
+          className="h-4 w-4"
+        />
+      </td>
+
+      {/* Actions - Empty for empty rows */}
+      <td className="border border-gray-300 px-2 py-1">
+        {isSaving && (
+          <span className="text-xs text-gray-400" title="Saving...">
+            ...
+          </span>
+        )}
+      </td>
+
       {/* Weekly Hours */}
       {weeks.map((week) => {
         const weekKey = getWeekKey(week);
         const hours = weeklyHoursValues.get(weekKey) || "";
-        const weekDate = new Date(weekKey);
-        const startDate = new Date(formData.start_date);
-        const endDate = new Date(formData.end_date);
-        const isWithinRange = weekDate >= startDate && weekDate <= endDate;
+        
+        const weekDate = parseLocalDate(weekKey);
+        const startDate = parseLocalDate(formData.start_date);
+        const endDate = parseLocalDate(formData.end_date);
+        // Check if week overlaps with date range (week starts Sunday, ends Saturday)
+        // A week overlaps if the Start or End Date is ON or BETWEEN Sunday through Saturday
+        const weekEnd = new Date(weekDate);
+        weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
+        // Normalize dates to midnight for accurate comparison
+        const weekStartNormalized = new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate());
+        const weekEndNormalized = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+        const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+        const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+        const isWithinRange = weekStartNormalized <= endDateNormalized && weekEndNormalized >= startDateNormalized;
         const canEdit = formData.role_id && formData.delivery_center_id && isWithinRange;
         
         return (
           <td
             key={week.toISOString()}
             className="border border-gray-300 px-1 py-1"
+            style={{ width: '120px', minWidth: '120px' }}
           >
             <Input
               type="number"
@@ -563,27 +601,28 @@ export function EstimateEmptyRow({
       })}
 
       {/* Total Hours */}
-      <td className="sticky right-[200px] z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+      <td className="sticky right-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
         {totalHours > 0 ? totalHours.toFixed(1) : "-"}
       </td>
 
       {/* Total Cost */}
-      <td className="sticky right-[100px] z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
         {totalCost > 0 ? totalCost.toFixed(2) : "-"}
       </td>
 
       {/* Total Revenue */}
-      <td className="sticky right-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
         {totalRevenue > 0 ? totalRevenue.toFixed(2) : "-"}
       </td>
 
-      {/* Actions - Empty for empty rows */}
-      <td className="border border-gray-300 px-2 py-1">
-        {isSaving && (
-          <span className="text-xs text-gray-400" title="Saving...">
-            ...
-          </span>
-        )}
+      {/* Margin Amount */}
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+        {(totalRevenue - totalCost) > 0 ? (totalRevenue - totalCost).toFixed(2) : "-"}
+      </td>
+
+      {/* Margin Percentage */}
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+        {totalRevenue > 0 ? (((totalRevenue - totalCost) / totalRevenue) * 100).toFixed(1) : "-"}%
       </td>
     </tr>
   );

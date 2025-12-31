@@ -13,14 +13,6 @@ from app.models.contact import Contact
 from app.models.role import Role
 from app.models.delivery_center import DeliveryCenter
 from app.models.role_rate import RoleRate
-from app.models.association_models import (
-    EmployeeEngagement,
-    EmployeeRelease,
-)
-from app.models.association_tables import (
-    engagement_roles,
-    release_roles,
-)
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours, EstimatePhase
 
 __all__ = [
@@ -32,16 +24,12 @@ __all__ = [
     "Account",
     "Contact",
     "Role",
-    "EmployeeEngagement",
-    "EmployeeRelease",
     "DeliveryCenter",
     "RoleRate",
     "Estimate",
     "EstimateLineItem",
     "EstimateWeeklyHours",
     "EstimatePhase",
-    "engagement_roles",
-    "release_roles",
 ]
 
 

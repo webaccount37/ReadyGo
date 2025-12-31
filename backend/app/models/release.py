@@ -5,7 +5,6 @@ Release model for project releases and iterations.
 from sqlalchemy import Column, String, Float, Date, JSON, ForeignKey, Enum as SQLEnum, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.associationproxy import association_proxy
 import uuid
 import enum
 
@@ -42,19 +41,6 @@ class Release(Base):
     engagement = relationship("Engagement", back_populates="releases")
     billing_term = relationship("BillingTerm", back_populates="releases")
     delivery_center = relationship("DeliveryCenter", back_populates="releases")
-    # Use association objects instead of simple many-to-many
-    # Explicitly specify foreign_keys to ensure correct filtering
-    employee_associations = relationship(
-        "EmployeeRelease", 
-        back_populates="release", 
-        cascade="all, delete-orphan",
-        foreign_keys="[EmployeeRelease.release_id]",
-        primaryjoin="Release.id == EmployeeRelease.release_id"
-    )
-    # Convenience proxy to access employees through associations (for backward compatibility)
-    employees = association_proxy("employee_associations", "employee")
-    
-    roles = relationship("Role", secondary="release_roles", back_populates="releases")
     estimates = relationship("Estimate", back_populates="release", cascade="all, delete-orphan")
 
 

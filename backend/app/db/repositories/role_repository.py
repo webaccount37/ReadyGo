@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.role import Role, RoleStatus
+from app.models.role_rate import RoleRate
 
 
 class RoleRepository(BaseRepository[Role]):
@@ -45,7 +46,7 @@ class RoleRepository(BaseRepository[Role]):
                 selectinload(Role.employees),
                 selectinload(Role.projects),
                 selectinload(Role.releases),
-                selectinload(Role.role_rates).selectinload("delivery_center"),
+                selectinload(Role.role_rates).selectinload(RoleRate.delivery_center),
             )
             .where(Role.id == role_id)
         )

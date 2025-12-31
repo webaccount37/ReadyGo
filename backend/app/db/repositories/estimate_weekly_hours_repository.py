@@ -35,7 +35,7 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
         result = await self.session.execute(
             select(EstimateWeeklyHours).where(
                 and_(
-                    EstimateWeeklyHours.quote_line_item_id == line_item_id,
+                    EstimateWeeklyHours.estimate_line_item_id == line_item_id,
                     EstimateWeeklyHours.week_start_date == week_start_date
                 )
             )
@@ -49,7 +49,7 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
         """List weekly hours for a line item, ordered by week_start_date."""
         result = await self.session.execute(
             select(EstimateWeeklyHours)
-            .where(EstimateWeeklyHours.quote_line_item_id == line_item_id)
+            .where(EstimateWeeklyHours.estimate_line_item_id == line_item_id)
             .order_by(EstimateWeeklyHours.week_start_date)
         )
         return list(result.scalars().all())
@@ -65,7 +65,7 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
             select(EstimateWeeklyHours)
             .where(
                 and_(
-                    EstimateWeeklyHours.quote_line_item_id == line_item_id,
+                    EstimateWeeklyHours.estimate_line_item_id == line_item_id,
                     EstimateWeeklyHours.week_start_date >= start_date,
                     EstimateWeeklyHours.week_start_date <= end_date
                 )
@@ -76,7 +76,7 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
     
     async def create(self, **kwargs) -> EstimateWeeklyHours:
         """Create or update weekly hours (upsert behavior)."""
-        line_item_id = kwargs.get("quote_line_item_id")
+        line_item_id = kwargs.get("estimate_line_item_id")
         week_start_date = kwargs.get("week_start_date")
         
         # Check if exists
@@ -107,7 +107,7 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
         """Bulk create or update weekly hours."""
         results = []
         for week_data in weekly_hours:
-            week_data["quote_line_item_id"] = line_item_id
+            week_data["estimate_line_item_id"] = line_item_id
             result = await self.create(**week_data)
             results.append(result)
         return results
@@ -150,7 +150,7 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
         result = await self.session.execute(
             delete(EstimateWeeklyHours).where(
                 and_(
-                    EstimateWeeklyHours.quote_line_item_id == line_item_id,
+                    EstimateWeeklyHours.estimate_line_item_id == line_item_id,
                     EstimateWeeklyHours.week_start_date >= start_date,
                     EstimateWeeklyHours.week_start_date <= end_date
                 )

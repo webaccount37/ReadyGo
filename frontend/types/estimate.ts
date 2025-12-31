@@ -2,7 +2,7 @@
  * Estimate types matching backend schemas.
  */
 
-export type EstimateStatus = "draft" | "submitted" | "approved" | "rejected";
+// EstimateStatus removed - status is no longer used
 
 export type AutoFillPattern = "uniform" | "ramp_up" | "ramp_down" | "custom";
 
@@ -37,6 +37,7 @@ export interface EstimateLineItem {
   start_date: string;
   end_date: string;
   row_order: number;
+  billable: boolean;
   weekly_hours?: EstimateWeeklyHours[];
 }
 
@@ -47,8 +48,8 @@ export interface Estimate {
   engagement_id?: string;
   engagement_name?: string;
   name: string;
-  currency: string;
-  status: EstimateStatus;
+  currency?: string; // Derived from release, optional in response
+  active_version?: boolean;
   description?: string;
   phases?: EstimatePhase[];
   created_by?: string;
@@ -60,17 +61,15 @@ export interface Estimate {
 export interface EstimateCreate {
   release_id: string;
   name: string;
-  currency?: string;
-  status?: EstimateStatus;
   description?: string;
+  active_version?: boolean;
   attributes?: Record<string, unknown>;
 }
 
 export interface EstimateUpdate {
   name?: string;
-  currency?: string;
-  status?: EstimateStatus;
   description?: string;
+  active_version?: boolean;
   attributes?: Record<string, unknown>;
 }
 
@@ -93,6 +92,7 @@ export interface EstimateLineItemCreate {
   start_date: string;
   end_date: string;
   row_order?: number;
+  billable?: boolean;
 }
 
 export interface EstimateLineItemUpdate {
@@ -105,6 +105,7 @@ export interface EstimateLineItemUpdate {
   start_date?: string;
   end_date?: string;
   row_order?: number;
+  billable?: boolean;
 }
 
 export interface AutoFillRequest {

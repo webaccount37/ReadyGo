@@ -102,20 +102,15 @@ class EngagementRepository(BaseRepository[Engagement]):
     
     async def get_with_relationships(self, engagement_id: UUID) -> Optional[Engagement]:
         """Get engagement with related entities."""
-        from app.models.association_models import EmployeeEngagement, EmployeeRelease
+        # TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models
         from app.models.release import Release
         
         result = await self.session.execute(
             select(Engagement)
             .options(
                 selectinload(Engagement.account),
-                selectinload(Engagement.employee_associations).selectinload(EmployeeEngagement.employee),
-                selectinload(Engagement.employee_associations).selectinload(EmployeeEngagement.role),
-                selectinload(Engagement.employee_associations).selectinload(EmployeeEngagement.delivery_center),
-                selectinload(Engagement.releases).selectinload(Release.employee_associations).selectinload(EmployeeRelease.employee),
-                selectinload(Engagement.releases).selectinload(Release.employee_associations).selectinload(EmployeeRelease.role),
-                selectinload(Engagement.releases).selectinload(Release.employee_associations).selectinload(EmployeeRelease.delivery_center),
-                selectinload(Engagement.roles),
+                # TODO: Load employees from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
+                selectinload(Engagement.releases),
                 selectinload(Engagement.parent_engagement),
             )
             .where(Engagement.id == engagement_id)

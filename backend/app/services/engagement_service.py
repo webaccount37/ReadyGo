@@ -12,9 +12,15 @@ from app.services.base_service import BaseService
 from app.db.repositories.engagement_repository import EngagementRepository
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
+from app.db.repositories.estimate_repository import EstimateRepository
+from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
+from app.db.repositories.release_repository import ReleaseRepository
 from app.schemas.engagement import EngagementCreate, EngagementUpdate, EngagementResponse
 from app.models.engagement import EngagementStatus
 from app.utils.currency_converter import convert_to_usd
+from sqlalchemy import select, and_
+from app.models.estimate import Estimate, EstimateLineItem
+from app.models.release import Release
 
 
 class EngagementService(BaseService):
@@ -25,6 +31,9 @@ class EngagementService(BaseService):
         self.engagement_repo = EngagementRepository(session)
         self.employee_repo = EmployeeRepository(session)
         self.role_repo = RoleRepository(session)
+        self.estimate_repo = EstimateRepository(session)
+        self.line_item_repo = EstimateLineItemRepository(session)
+        self.release_repo = ReleaseRepository(session)
     
     @staticmethod
     def calculate_probability_from_status(status: EngagementStatus) -> float:
@@ -123,21 +132,21 @@ class EngagementService(BaseService):
         engagement = await self.engagement_repo.get(engagement.id)
         if not engagement:
             raise ValueError("Failed to retrieve created engagement")
-        return self._to_response(engagement)
+        return await self._to_response(engagement)
     
-    async def get_engagement(self, engagement_id: UUID) -> Optional[EngagementResponse]:
+    async def get_engagement(self, engagement_id: UUID, include_relationships: bool = False) -> Optional[EngagementResponse]:
         """Get engagement by ID."""
-        engagement = await self.engagement_repo.get(engagement_id)
+        if include_relationships:
+            engagement = await self.engagement_repo.get_with_relationships(engagement_id)
+        else:
+            engagement = await self.engagement_repo.get(engagement_id)
         if not engagement:
             return None
-        return self._to_response(engagement)
+        return await self._to_response(engagement, include_relationships=include_relationships)
     
     async def get_engagement_with_relationships(self, engagement_id: UUID) -> Optional[EngagementResponse]:
-        """Get engagement with related entities."""
-        engagement = await self.engagement_repo.get_with_relationships(engagement_id)
-        if not engagement:
-            return None
-        return self._to_response(engagement, include_relationships=True)
+        """Get engagement with related entities (alias for get_engagement with include_relationships=True)."""
+        return await self.get_engagement(engagement_id, include_relationships=True)
     
     async def list_engagements(
         self,
@@ -165,7 +174,10 @@ class EngagementService(BaseService):
             engagements = await self.engagement_repo.list(skip=skip, limit=limit)
         
         total = len(engagements)
-        return [self._to_response(eng) for eng in engagements], total
+        responses = []
+        for eng in engagements:
+            responses.append(await self._to_response(eng))
+        return responses, total
     
     async def list_child_engagements(
         self,
@@ -176,7 +188,10 @@ class EngagementService(BaseService):
         """List child engagements of a parent."""
         engagements = await self.engagement_repo.list_child_engagements(parent_id, skip, limit)
         total = len(engagements)
-        return [self._to_response(eng) for eng in engagements], total
+        responses = []
+        for eng in engagements:
+            responses.append(await self._to_response(eng))
+        return responses, total
     
     async def update_engagement(
         self,
@@ -282,7 +297,7 @@ class EngagementService(BaseService):
         updated = await self.engagement_repo.get(engagement_id)
         if not updated:
             return None
-        return self._to_response(updated)
+        return await self._to_response(updated)
     
     async def delete_engagement(self, engagement_id: UUID) -> bool:
         """Delete an engagement."""
@@ -295,19 +310,14 @@ class EngagementService(BaseService):
         engagement_id: UUID,
         role_ids: List[UUID],
     ) -> bool:
-        """Link roles to an engagement."""
-        engagement = await self.engagement_repo.get_with_relationships(engagement_id)
-        if not engagement:
-            return False
+        """Link roles to an engagement.
         
-        roles = []
-        for role_id in role_ids:
-            role = await self.role_repo.get(role_id)
-            if role:
-                roles.append(role)
-        
-        engagement.roles.extend(roles)
-        await self.session.commit()
+        Note: Roles are now linked through estimate line items, not directly.
+        This method is kept for API compatibility but does nothing.
+        To link roles, create estimate line items with the desired role_rates.
+        """
+        # Roles are now linked through estimate line items, not directly to engagements
+        # This method is kept for backward compatibility but does nothing
         return True
     
     async def unlink_roles_from_engagement(
@@ -315,16 +325,144 @@ class EngagementService(BaseService):
         engagement_id: UUID,
         role_ids: List[UUID],
     ) -> bool:
-        """Unlink roles from an engagement."""
-        engagement = await self.engagement_repo.get_with_relationships(engagement_id)
-        if not engagement:
-            return False
+        """Unlink roles from an engagement.
         
-        engagement.roles = [role for role in engagement.roles if role.id not in role_ids]
-        await self.session.commit()
+        Note: Roles are now linked through estimate line items, not directly.
+        This method is kept for API compatibility but does nothing.
+        To unlink roles, remove estimate line items with the desired role_rates.
+        """
+        # Roles are now linked through estimate line items, not directly to engagements
+        # This method is kept for backward compatibility but does nothing
         return True
     
-    def _to_response(self, engagement, include_relationships: bool = False) -> EngagementResponse:
+    async def _get_employees_from_active_estimates_for_engagement(self, engagement_id: UUID) -> List[dict]:
+        """Get employees from active estimate line items for all releases in an engagement."""
+        # Get all releases for this engagement
+        releases_result = await self.session.execute(
+            select(Release).where(Release.engagement_id == engagement_id)
+        )
+        releases = releases_result.scalars().all()
+        
+        employees_dict = {}  # employee_id -> employee data
+        
+        for release in releases:
+            # Get active estimate for this release
+            estimate_result = await self.session.execute(
+                select(Estimate).where(
+                    and_(
+                        Estimate.release_id == release.id,
+                        Estimate.active_version == True
+                    )
+                )
+            )
+            active_estimate = estimate_result.scalar_one_or_none()
+            
+            if not active_estimate:
+                continue
+            
+            # Get line items from active estimate
+            line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
+            
+            for li in line_items:
+                if not li.employee_id:
+                    continue
+                
+                employee_id = str(li.employee_id)
+                
+                # Get employee if not already in dict
+                if employee_id not in employees_dict:
+                    employee = await self.employee_repo.get(li.employee_id)
+                    if not employee:
+                        continue
+                    
+                    # Get role and delivery center from role_rate
+                    role_id = None
+                    role_name = None
+                    delivery_center_code = None
+                    
+                    if li.role_rate:
+                        if li.role_rate.role:
+                            role_id = str(li.role_rate.role.id)
+                            role_name = li.role_rate.role.role_name
+                        if li.role_rate.delivery_center:
+                            delivery_center_code = li.role_rate.delivery_center.code
+                    
+                    employees_dict[employee_id] = {
+                        "id": employee_id,
+                        "first_name": employee.first_name,
+                        "last_name": employee.last_name,
+                        "email": employee.email,
+                        "role_id": role_id,
+                        "role_name": role_name,
+                        "start_date": li.start_date.isoformat() if li.start_date else None,
+                        "end_date": li.end_date.isoformat() if li.end_date else None,
+                        "project_rate": float(li.rate) if li.rate else None,
+                        "delivery_center": delivery_center_code,
+                    }
+        
+        return list(employees_dict.values())
+    
+    async def _get_employees_from_active_estimates_for_release(self, release_id: UUID) -> List[dict]:
+        """Get employees from active estimate line items for a release."""
+        # Get active estimate for this release
+        result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
+            )
+        )
+        active_estimate = result.scalar_one_or_none()
+        
+        if not active_estimate:
+            return []
+        
+        # Get line items from active estimate
+        line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
+        
+        employees_dict = {}  # employee_id -> employee data
+        
+        for li in line_items:
+            if not li.employee_id:
+                continue
+            
+            employee_id = str(li.employee_id)
+            
+            # Get employee if not already in dict
+            if employee_id not in employees_dict:
+                employee = await self.employee_repo.get(li.employee_id)
+                if not employee:
+                    continue
+                
+                # Get role and delivery center from role_rate
+                role_id = None
+                role_name = None
+                delivery_center_code = None
+                
+                if li.role_rate:
+                    if li.role_rate.role:
+                        role_id = str(li.role_rate.role.id)
+                        role_name = li.role_rate.role.role_name
+                    if li.role_rate.delivery_center:
+                        delivery_center_code = li.role_rate.delivery_center.code
+                
+                employees_dict[employee_id] = {
+                    "id": employee_id,
+                    "first_name": employee.first_name,
+                    "last_name": employee.last_name,
+                    "email": employee.email,
+                    "role_id": role_id,
+                    "role_name": role_name,
+                    "start_date": li.start_date.isoformat() if li.start_date else None,
+                    "end_date": li.end_date.isoformat() if li.end_date else None,
+                    "project_rate": float(li.rate) if li.rate else None,
+                    "delivery_center": delivery_center_code,
+                }
+        
+        return list(employees_dict.values())
+    
+    async def _to_response(self, engagement, include_relationships: bool = False) -> EngagementResponse:
         """Convert engagement model to response schema."""
         account_name = None
         if hasattr(engagement, 'account') and engagement.account:
@@ -368,19 +506,12 @@ class EngagementService(BaseService):
         }
         
         if include_relationships:
-            # Include releases with their employee associations
-            # IMPORTANT: Only include releases that actually belong to this engagement
+            # Include releases with their employee associations from active estimates
             releases = []
             if hasattr(engagement, 'releases') and engagement.releases:
                 for release in engagement.releases:
                     # Safety check: ensure release belongs to this engagement
                     if release.engagement_id != engagement.id:
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.warning(
-                            f"Release {release.id} ({release.name}) has engagement_id {release.engagement_id} "
-                            f"but is in releases list for engagement {engagement.id} ({engagement.name}). Skipping."
-                        )
                         continue
                     
                     release_dict = {
@@ -390,105 +521,13 @@ class EngagementService(BaseService):
                         "start_date": release.start_date.isoformat() if release.start_date else None,
                         "end_date": release.end_date.isoformat() if release.end_date else None,
                         "status": release.status.value if hasattr(release.status, 'value') else str(release.status),
-                        "employees": []
+                        "employees": await self._get_employees_from_active_estimates_for_release(release.id)
                     }
-                    # Include employees linked to this release
-                    # IMPORTANT: Only include associations that actually belong to this release
-                    if hasattr(release, 'employee_associations') and release.employee_associations:
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.info(
-                            f"Processing release {release.id} ({release.name}) with {len(release.employee_associations)} employee_associations"
-                        )
-                        for assoc in release.employee_associations:
-                            # Safety check: ensure association belongs to this release
-                            logger.info(
-                                f"  Checking association: employee_id={assoc.employee_id}, release_id={assoc.release_id}, "
-                                f"release.id={release.id}, match={assoc.release_id == release.id}"
-                            )
-                            if assoc.release_id != release.id:
-                                logger.warning(
-                                    f"  ⚠️ SKIPPING: EmployeeRelease association {assoc.employee_id}->{assoc.release_id} "
-                                    f"has release_id {assoc.release_id} but is in employee_associations "
-                                    f"for release {release.id} ({release.name}). This should not happen!"
-                                )
-                                continue
-                            
-                            if assoc.employee:
-                                # Log dates for debugging (similar to Quote and Release services)
-                                import logging
-                                logger = logging.getLogger(__name__)
-                                start_date_iso = assoc.start_date.isoformat() if assoc.start_date else None
-                                end_date_iso = assoc.end_date.isoformat() if assoc.end_date else None
-                                logger.info(f"  === ENGAGEMENT SERVICE: SERIALIZING EMPLOYEE DATES (in release) ===")
-                                logger.info(f"  Employee {assoc.employee.id} on Release {release.id}")
-                                logger.info(f"  assoc.start_date = {assoc.start_date} (type: {type(assoc.start_date)})")
-                                logger.info(f"  assoc.end_date = {assoc.end_date} (type: {type(assoc.end_date)})")
-                                if assoc.start_date:
-                                    logger.info(f"  assoc.start_date.isoformat() = {start_date_iso}")
-                                if assoc.end_date:
-                                    logger.info(f"  assoc.end_date.isoformat() = {end_date_iso}")
-                                logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
-                                
-                                release_dict["employees"].append({
-                                    "id": str(assoc.employee.id),
-                                    "first_name": assoc.employee.first_name,
-                                    "last_name": assoc.employee.last_name,
-                                    "email": assoc.employee.email,
-                                    "role_id": str(assoc.role_id) if assoc.role_id else None,
-                                    "role_name": getattr(assoc.role, "role_name", None) if assoc.role else None,
-                                    "start_date": start_date_iso,
-                                    "end_date": end_date_iso,
-                                    "project_rate": float(assoc.project_rate) if assoc.project_rate else None,
-                                    "delivery_center": getattr(assoc.delivery_center, "code", None) if assoc.delivery_center else None,
-                                })
                     releases.append(release_dict)
             engagement_dict["releases"] = releases
             
-            # Include employees directly linked to engagement
-            # IMPORTANT: Only include associations that actually belong to this engagement
-            employees = []
-            if hasattr(engagement, 'employee_associations') and engagement.employee_associations:
-                for assoc in engagement.employee_associations:
-                    # Safety check: ensure association belongs to this engagement
-                    if assoc.engagement_id != engagement.id:
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        logger.warning(
-                            f"EmployeeEngagement association {assoc.employee_id}->{assoc.engagement_id} "
-                            f"has engagement_id {assoc.engagement_id} but is in employee_associations "
-                            f"for engagement {engagement.id} ({engagement.name}). Skipping."
-                        )
-                        continue
-                    
-                    if assoc.employee:
-                        # Log dates for debugging (similar to Quote and Release services)
-                        import logging
-                        logger = logging.getLogger(__name__)
-                        start_date_iso = assoc.start_date.isoformat() if assoc.start_date else None
-                        end_date_iso = assoc.end_date.isoformat() if assoc.end_date else None
-                        logger.info(f"  === ENGAGEMENT SERVICE: SERIALIZING EMPLOYEE DATES (direct) ===")
-                        logger.info(f"  Employee {assoc.employee.id} on Engagement {engagement.id}")
-                        logger.info(f"  assoc.start_date = {assoc.start_date} (type: {type(assoc.start_date)})")
-                        logger.info(f"  assoc.end_date = {assoc.end_date} (type: {type(assoc.end_date)})")
-                        if assoc.start_date:
-                            logger.info(f"  assoc.start_date.isoformat() = {start_date_iso}")
-                        if assoc.end_date:
-                            logger.info(f"  assoc.end_date.isoformat() = {end_date_iso}")
-                        logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
-                        
-                        employees.append({
-                            "id": str(assoc.employee.id),
-                            "first_name": assoc.employee.first_name,
-                            "last_name": assoc.employee.last_name,
-                            "email": assoc.employee.email,
-                            "role_id": str(assoc.role_id) if assoc.role_id else None,
-                            "role_name": getattr(assoc.role, "role_name", None) if assoc.role else None,
-                            "start_date": start_date_iso,
-                            "end_date": end_date_iso,
-                            "project_rate": float(assoc.project_rate) if assoc.project_rate else None,
-                            "delivery_center": getattr(assoc.delivery_center, "code", None) if assoc.delivery_center else None,
-                        })
+            # Include employees directly linked to engagement (from all releases' active estimates)
+            employees = await self._get_employees_from_active_estimates_for_engagement(engagement.id)
             engagement_dict["employees"] = employees
         else:
             engagement_dict["releases"] = []

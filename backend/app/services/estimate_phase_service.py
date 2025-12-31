@@ -34,7 +34,7 @@ class EstimatePhaseService(BaseService):
         row_order = max_order + 1
         
         phase_dict = phase_data.model_dump(exclude_unset=True)
-        phase_dict["quote_id"] = estimate_id  # Keep column name for database compatibility
+        phase_dict["estimate_id"] = estimate_id
         phase_dict["row_order"] = row_order
         
         phase = await self.phase_repo.create(**phase_dict)
@@ -50,7 +50,7 @@ class EstimatePhaseService(BaseService):
     async def get_phase(self, estimate_id: UUID, phase_id: UUID) -> Optional[EstimatePhaseResponse]:
         """Get phase by ID."""
         phase = await self.phase_repo.get(phase_id)
-        if not phase or phase.quote_id != estimate_id:  # Keep column name for database compatibility
+        if not phase or phase.estimate_id != estimate_id:
             return None
         return EstimatePhaseResponse.model_validate(phase)
     
@@ -67,7 +67,7 @@ class EstimatePhaseService(BaseService):
     ) -> Optional[EstimatePhaseResponse]:
         """Update a phase."""
         phase = await self.phase_repo.get(phase_id)
-        if not phase or phase.quote_id != estimate_id:  # Keep column name for database compatibility
+        if not phase or phase.estimate_id != estimate_id:
             return None
         
         update_dict = phase_data.model_dump(exclude_unset=True)
@@ -91,7 +91,7 @@ class EstimatePhaseService(BaseService):
     async def delete_phase(self, estimate_id: UUID, phase_id: UUID) -> bool:
         """Delete a phase."""
         phase = await self.phase_repo.get(phase_id)
-        if not phase or phase.quote_id != estimate_id:  # Keep column name for database compatibility
+        if not phase or phase.estimate_id != estimate_id:
             return False
         
         deleted = await self.phase_repo.delete(phase_id)

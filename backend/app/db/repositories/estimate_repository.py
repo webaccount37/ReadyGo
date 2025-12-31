@@ -9,7 +9,7 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
-from app.models.estimate import Estimate, EstimateStatus
+from app.models.estimate import Estimate
 
 
 class EstimateRepository(BaseRepository[Estimate]):
@@ -75,23 +75,13 @@ class EstimateRepository(BaseRepository[Estimate]):
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def list_by_status(
-        self,
-        status: EstimateStatus,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> List[Estimate]:
-        """List estimates by status."""
-        query = self._base_query().where(Estimate.status == status)
-        query = query.offset(skip).limit(limit)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
-    
-    async def get_with_line_items(self, quote_id: UUID) -> Optional[Estimate]:
+    async def get_with_line_items(self, estimate_id: UUID) -> Optional[Estimate]:
         """Get estimate with all line items and weekly hours."""
         from app.models.estimate import EstimateLineItem, EstimateWeeklyHours
         from app.models.release import Release
-        from app.models.engagement import Engagement
+        from app.models.role_rate import RoleRate
+        from app.models.role import Role
+        from app.models.delivery_center import DeliveryCenter
         
         result = await self.session.execute(
             select(Estimate)
@@ -100,15 +90,17 @@ class EstimateRepository(BaseRepository[Estimate]):
                 selectinload(Estimate.created_by_employee),
                 selectinload(Estimate.phases),
                 selectinload(Estimate.line_items)
-                .selectinload(EstimateLineItem.role),
+                .selectinload(EstimateLineItem.role_rate)
+                .selectinload(RoleRate.role),
                 selectinload(Estimate.line_items)
-                .selectinload(EstimateLineItem.delivery_center),
+                .selectinload(EstimateLineItem.role_rate)
+                .selectinload(RoleRate.delivery_center),
                 selectinload(Estimate.line_items)
                 .selectinload(EstimateLineItem.employee),
                 selectinload(Estimate.line_items)
                 .selectinload(EstimateLineItem.weekly_hours),
             )
-            .where(Estimate.id == quote_id)
+            .where(Estimate.id == estimate_id)
         )
         return result.scalar_one_or_none()
     

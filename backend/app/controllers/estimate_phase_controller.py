@@ -59,6 +59,4 @@ class EstimatePhaseController:
         """Delete a phase."""
         return await self.phase_service.delete_phase(estimate_id, phase_id)
     
-    # Backward compatibility aliases (quote_id parameter names for API compatibility)
-    # Note: The methods above already work with both naming conventions since parameter names don't affect functionality
 

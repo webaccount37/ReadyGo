@@ -2,7 +2,7 @@
 Estimate API endpoints.
 """
 
-from typing import List
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, status, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -30,91 +30,105 @@ router = APIRouter()
 
 
 @router.post("", response_model=EstimateResponse, status_code=status.HTTP_201_CREATED)
-async def create_quote(
-    quote_data: EstimateCreate,
+async def create_estimate(
+    estimate_data: EstimateCreate,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateResponse:
     """Create a new estimate."""
     controller = EstimateController(db)
-    return await controller.create_quote(quote_data)
+    return await controller.create_estimate(estimate_data)
 
 
 @router.get("", response_model=EstimateListResponse)
-async def list_quotes(
+async def list_estimates(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     release_id: UUID = Query(None),
-    status: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> EstimateListResponse:
     """List estimates with optional filters."""
     controller = EstimateController(db)
-    return await controller.list_quotes(
+    return await controller.list_estimates(
         skip=skip,
         limit=limit,
         release_id=release_id,
-        status=status,
     )
 
 
-@router.get("/{quote_id}", response_model=EstimateResponse)
-async def get_quote(
-    quote_id: UUID,
+@router.get("/{estimate_id}", response_model=EstimateResponse)
+async def get_estimate(
+    estimate_id: UUID,
     include_details: bool = Query(False, alias="include-details"),
     db: AsyncSession = Depends(get_db),
 ) -> EstimateResponse:
     """Get estimate by ID."""
     controller = EstimateController(db)
-    quote = await controller.get_quote(quote_id, include_details=include_details)
-    if not quote:
+    estimate = await controller.get_estimate(estimate_id, include_details=include_details)
+    if not estimate:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estimate not found",
         )
-    return quote
+    return estimate
 
 
-@router.get("/{quote_id}/detail", response_model=EstimateDetailResponse)
-async def get_quote_detail(
-    quote_id: UUID,
+@router.get("/{estimate_id}/detail", response_model=EstimateDetailResponse)
+async def get_estimate_detail(
+    estimate_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateDetailResponse:
-    """Get quote with all line items and weekly hours."""
+    """Get estimate with all line items and weekly hours."""
     controller = EstimateController(db)
-    quote = await controller.get_quote_detail(quote_id)
-    if not quote:
+    estimate = await controller.get_estimate_detail(estimate_id)
+    if not estimate:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estimate not found",
         )
-    return quote
+    return estimate
 
 
-@router.put("/{quote_id}", response_model=EstimateResponse)
-async def update_quote(
-    quote_id: UUID,
-    quote_data: EstimateUpdate,
+@router.put("/{estimate_id}", response_model=EstimateResponse)
+async def update_estimate(
+    estimate_id: UUID,
+    estimate_data: EstimateUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateResponse:
-    """Update a quote."""
+    """Update an estimate."""
     controller = EstimateController(db)
-    quote = await controller.update_quote(quote_id, quote_data)
-    if not quote:
+    estimate = await controller.update_estimate(estimate_id, estimate_data)
+    if not estimate:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Estimate not found",
         )
-    return quote
+    return estimate
 
 
-@router.delete("/{quote_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_quote(
-    quote_id: UUID,
+@router.post("/{estimate_id}/set-active", response_model=EstimateResponse)
+async def set_active_version(
+    estimate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> EstimateResponse:
+    """Set an estimate as the active version for its release."""
+    controller = EstimateController(db)
+    estimate = await controller.set_active_version(estimate_id)
+    if not estimate:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Estimate not found",
+        )
+    return estimate
+
+
+@router.delete("/{estimate_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_estimate(
+    estimate_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a quote."""
+    """Delete an estimate."""
     controller = EstimateController(db)
-    deleted = await controller.delete_quote(quote_id)
+    deleted = await controller.delete_estimate(estimate_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -122,16 +136,16 @@ async def delete_quote(
         )
 
 
-@router.post("/{quote_id}/clone", response_model=EstimateDetailResponse, status_code=status.HTTP_201_CREATED)
-async def clone_quote(
-    quote_id: UUID,
-    new_name: str = Body(..., embed=True),
+@router.post("/{estimate_id}/clone", response_model=EstimateDetailResponse, status_code=status.HTTP_201_CREATED)
+async def clone_estimate(
+    estimate_id: UUID,
+    new_name: Optional[str] = Body(None, embed=True),
     db: AsyncSession = Depends(get_db),
 ) -> EstimateDetailResponse:
-    """Clone a quote to create a variation."""
+    """Clone an estimate to create a variation."""
     controller = EstimateController(db)
     try:
-        return await controller.clone_quote(quote_id, new_name)
+        return await controller.clone_estimate(estimate_id, new_name)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -139,16 +153,16 @@ async def clone_quote(
         )
 
 
-@router.post("/{quote_id}/line-items", response_model=EstimateLineItemResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{estimate_id}/line-items", response_model=EstimateLineItemResponse, status_code=status.HTTP_201_CREATED)
 async def create_line_item(
-    quote_id: UUID,
+    estimate_id: UUID,
     line_item_data: EstimateLineItemCreate,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateLineItemResponse:
     """Create a new line item."""
     controller = EstimateController(db)
     try:
-        return await controller.create_line_item(quote_id, line_item_data)
+        return await controller.create_line_item(estimate_id, line_item_data)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -156,16 +170,16 @@ async def create_line_item(
         )
 
 
-@router.put("/{quote_id}/line-items/{line_item_id}", response_model=EstimateLineItemResponse)
+@router.put("/{estimate_id}/line-items/{line_item_id}", response_model=EstimateLineItemResponse)
 async def update_line_item(
-    quote_id: UUID,
+    estimate_id: UUID,
     line_item_id: UUID,
     line_item_data: EstimateLineItemUpdate,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateLineItemResponse:
     """Update a line item."""
     controller = EstimateController(db)
-    line_item = await controller.update_line_item(quote_id, line_item_id, line_item_data)
+    line_item = await controller.update_line_item(estimate_id, line_item_id, line_item_data)
     if not line_item:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -174,15 +188,15 @@ async def update_line_item(
     return line_item
 
 
-@router.delete("/{quote_id}/line-items/{line_item_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{estimate_id}/line-items/{line_item_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_line_item(
-    quote_id: UUID,
+    estimate_id: UUID,
     line_item_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a line item."""
     controller = EstimateController(db)
-    deleted = await controller.delete_line_item(quote_id, line_item_id)
+    deleted = await controller.delete_line_item(estimate_id, line_item_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -190,9 +204,9 @@ async def delete_line_item(
         )
 
 
-@router.post("/{quote_id}/line-items/{line_item_id}/auto-fill", response_model=list[EstimateLineItemResponse])
+@router.post("/{estimate_id}/line-items/{line_item_id}/auto-fill", response_model=list[EstimateLineItemResponse])
 async def auto_fill_hours(
-    quote_id: UUID,
+    estimate_id: UUID,
     line_item_id: UUID,
     auto_fill_data: AutoFillRequest,
     db: AsyncSession = Depends(get_db),
@@ -200,7 +214,7 @@ async def auto_fill_hours(
     """Auto-fill weekly hours for a line item."""
     controller = EstimateController(db)
     try:
-        return await controller.auto_fill_hours(quote_id, line_item_id, auto_fill_data)
+        return await controller.auto_fill_hours(estimate_id, line_item_id, auto_fill_data)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -208,15 +222,15 @@ async def auto_fill_hours(
         )
 
 
-@router.get("/{quote_id}/totals", response_model=EstimateTotalsResponse)
-async def get_quote_totals(
-    quote_id: UUID,
+@router.get("/{estimate_id}/totals", response_model=EstimateTotalsResponse)
+async def get_estimate_totals(
+    estimate_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateTotalsResponse:
-    """Get calculated totals for a quote."""
+    """Get calculated totals for an estimate."""
     controller = EstimateController(db)
     try:
-        return await controller.get_quote_totals(quote_id)
+        return await controller.get_estimate_totals(estimate_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -225,16 +239,16 @@ async def get_quote_totals(
 
 
 # Phase endpoints
-@router.post("/{quote_id}/phases", response_model=EstimatePhaseResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/{estimate_id}/phases", response_model=EstimatePhaseResponse, status_code=status.HTTP_201_CREATED)
 async def create_phase(
-    quote_id: UUID,
+    estimate_id: UUID,
     phase_data: EstimatePhaseCreate,
     db: AsyncSession = Depends(get_db),
 ) -> EstimatePhaseResponse:
-    """Create a new phase for a quote."""
+    """Create a new phase for an estimate."""
     controller = EstimatePhaseController(db)
     try:
-        return await controller.create_phase(quote_id, phase_data)
+        return await controller.create_phase(estimate_id, phase_data)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -242,26 +256,26 @@ async def create_phase(
         )
 
 
-@router.get("/{quote_id}/phases", response_model=List[EstimatePhaseResponse])
+@router.get("/{estimate_id}/phases", response_model=List[EstimatePhaseResponse])
 async def list_phases(
-    quote_id: UUID,
+    estimate_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> List[EstimatePhaseResponse]:
-    """List all phases for a quote."""
+    """List all phases for an estimate."""
     controller = EstimatePhaseController(db)
-    return await controller.list_phases(quote_id)
+    return await controller.list_phases(estimate_id)
 
 
-@router.get("/{quote_id}/phases/{phase_id}", response_model=EstimatePhaseResponse)
+@router.get("/{estimate_id}/phases/{phase_id}", response_model=EstimatePhaseResponse)
 async def get_phase(
-    quote_id: UUID,
+    estimate_id: UUID,
     phase_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> EstimatePhaseResponse:
     """Get a phase by ID."""
     controller = EstimatePhaseController(db)
     try:
-        return await controller.get_phase(quote_id, phase_id)
+        return await controller.get_phase(estimate_id, phase_id)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -269,9 +283,9 @@ async def get_phase(
         )
 
 
-@router.put("/{quote_id}/phases/{phase_id}", response_model=EstimatePhaseResponse)
+@router.put("/{estimate_id}/phases/{phase_id}", response_model=EstimatePhaseResponse)
 async def update_phase(
-    quote_id: UUID,
+    estimate_id: UUID,
     phase_id: UUID,
     phase_data: EstimatePhaseUpdate,
     db: AsyncSession = Depends(get_db),
@@ -279,7 +293,7 @@ async def update_phase(
     """Update a phase."""
     controller = EstimatePhaseController(db)
     try:
-        return await controller.update_phase(quote_id, phase_id, phase_data)
+        return await controller.update_phase(estimate_id, phase_id, phase_data)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -287,15 +301,15 @@ async def update_phase(
         )
 
 
-@router.delete("/{quote_id}/phases/{phase_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{estimate_id}/phases/{phase_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_phase(
-    quote_id: UUID,
+    estimate_id: UUID,
     phase_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a phase."""
     controller = EstimatePhaseController(db)
-    deleted = await controller.delete_phase(quote_id, phase_id)
+    deleted = await controller.delete_phase(estimate_id, phase_id)
     if not deleted:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

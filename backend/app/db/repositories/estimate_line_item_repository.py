@@ -21,11 +21,14 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
     
     def _base_query(self):
         """Base query with eager loading of relationships."""
+        from app.models.role_rate import RoleRate
+        
         return select(EstimateLineItem).options(
-            selectinload(EstimateLineItem.role),
-            selectinload(EstimateLineItem.delivery_center),
+            selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
+            selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center),
             selectinload(EstimateLineItem.employee),
             selectinload(EstimateLineItem.estimate),
+            selectinload(EstimateLineItem.weekly_hours),
         )
     
     async def get(self, id: UUID) -> Optional[EstimateLineItem]:
@@ -36,10 +39,10 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
     
     async def list_by_quote(
         self,
-        quote_id: UUID,
+        estimate_id: UUID,
     ) -> List[EstimateLineItem]:
         """List line items for an estimate, ordered by row_order."""
-        query = self._base_query().where(EstimateLineItem.quote_id == quote_id)
+        query = self._base_query().where(EstimateLineItem.estimate_id == estimate_id)
         query = query.order_by(EstimateLineItem.row_order)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -54,12 +57,13 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
     async def get_with_weekly_hours(self, line_item_id: UUID) -> Optional[EstimateLineItem]:
         """Get line item with weekly hours."""
         from app.models.estimate import EstimateWeeklyHours
+        from app.models.role_rate import RoleRate
         
         result = await self.session.execute(
             select(EstimateLineItem)
             .options(
-                selectinload(EstimateLineItem.role),
-                selectinload(EstimateLineItem.delivery_center),
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center),
                 selectinload(EstimateLineItem.employee),
                 selectinload(EstimateLineItem.estimate),
                 selectinload(EstimateLineItem.weekly_hours),
@@ -68,11 +72,11 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
         )
         return result.scalar_one_or_none()
     
-    async def get_max_row_order(self, quote_id: UUID) -> int:
+    async def get_max_row_order(self, estimate_id: UUID) -> int:
         """Get the maximum row_order for an estimate."""
         result = await self.session.execute(
             select(func.max(EstimateLineItem.row_order))
-            .where(EstimateLineItem.quote_id == quote_id)
+            .where(EstimateLineItem.estimate_id == estimate_id)
         )
         max_order = result.scalar_one_or_none()
         return max_order if max_order is not None else -1
@@ -103,10 +107,10 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
         await self.session.flush()
         return result.rowcount > 0
     
-    async def delete_by_quote(self, quote_id: UUID) -> int:
+    async def delete_by_quote(self, estimate_id: UUID) -> int:
         """Delete all line items for an estimate."""
         result = await self.session.execute(
-            delete(EstimateLineItem).where(EstimateLineItem.quote_id == quote_id)
+            delete(EstimateLineItem).where(EstimateLineItem.estimate_id == estimate_id)
         )
         await self.session.flush()
         return result.rowcount

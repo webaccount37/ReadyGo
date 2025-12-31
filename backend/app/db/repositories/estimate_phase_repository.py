@@ -19,19 +19,19 @@ class EstimatePhaseRepository(BaseRepository[EstimatePhase]):
     
     async def list_by_quote(
         self,
-        quote_id: UUID,
+        estimate_id: UUID,
     ) -> List[EstimatePhase]:
         """List phases for an estimate, ordered by row_order."""
-        query = select(EstimatePhase).where(EstimatePhase.quote_id == quote_id)
+        query = select(EstimatePhase).where(EstimatePhase.estimate_id == estimate_id)
         query = query.order_by(EstimatePhase.row_order)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def get_max_row_order(self, quote_id: UUID) -> int:
+    async def get_max_row_order(self, estimate_id: UUID) -> int:
         """Get the maximum row_order for an estimate."""
         result = await self.session.execute(
             select(func.max(EstimatePhase.row_order))
-            .where(EstimatePhase.quote_id == quote_id)
+            .where(EstimatePhase.estimate_id == estimate_id)
         )
         max_order = result.scalar_one_or_none()
         return max_order if max_order is not None else -1

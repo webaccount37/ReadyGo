@@ -3,12 +3,13 @@ Estimate service with business logic.
 """
 
 import logging
+import re
 from typing import List, Optional, Tuple, Dict
 from uuid import UUID
 from datetime import date, timedelta, datetime
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +21,7 @@ from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.release_repository import ReleaseRepository
-from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours, EstimateStatus
+from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours
 from app.models.role_rate import RoleRate
 from app.models.role import Role
 from app.models.employee import Employee
@@ -49,178 +50,97 @@ class EstimateService(BaseService):
     
     async def create_estimate(self, estimate_data: EstimateCreate) -> EstimateResponse:
         """Create a new estimate."""
-        # Get release with employee associations to inherit employees
-        # Use the same method the Release service uses to get correct dates
-        release = await self.release_repo.get_with_relationships(estimate_data.release_id)
+        # Get release to check for existing active estimate
+        release = await self.release_repo.get(estimate_data.release_id)
         if not release:
             raise ValueError("Release not found")
         
-        # Also get the release via ReleaseService to ensure we have the same data structure
-        # This ensures dates are handled the same way as the Release page
-        from app.services.release_service import ReleaseService
-        release_service = ReleaseService(self.session)
-        release_response = await release_service.get_release_with_relationships(estimate_data.release_id)
-        if not release_response:
-            raise ValueError("Release not found")
-        
         estimate_dict = estimate_data.model_dump(exclude_unset=True)
-        if not estimate_dict.get("currency") and release.default_currency:
-            estimate_dict["currency"] = release.default_currency
+        
+        # Auto-generate version name if name is "NEW", empty, or None
+        name = estimate_dict.get("name")
+        if not name or name.strip() == "" or name == "NEW":
+            # Get all existing estimates for this release to find the highest version number
+            existing_estimates = await self.estimate_repo.list_by_release(
+                release_id=estimate_data.release_id,
+                skip=0,
+                limit=1000  # Get all estimates
+            )
+            
+            # Extract version numbers from existing estimate names
+            version_numbers = []
+            for est in existing_estimates:
+                # Match "VERSION X" pattern (case insensitive, with optional whitespace)
+                match = re.search(r'VERSION\s+(\d+)', est.name, re.IGNORECASE)
+                if match:
+                    version_numbers.append(int(match.group(1)))
+            
+            # Find the next available version number
+            if version_numbers:
+                next_version = max(version_numbers) + 1
+            else:
+                # No existing VERSION estimates, start at 2 (since INITIAL is typically 1)
+                # But check if INITIAL exists - if so, start at 2, otherwise start at 1
+                has_initial = any(est.name.upper() == "INITIAL" for est in existing_estimates)
+                next_version = 2 if has_initial else 1
+            
+            estimate_dict["name"] = f"VERSION {next_version}"
+        
+        # Set active_version based on whether there's already an active estimate
+        # If this is the first estimate or explicitly set, use the provided value
+        # Otherwise, ensure only one active estimate per release
+        if estimate_dict.get("active_version", False):
+            # If setting this as active, deactivate all other estimates for this release
+            await self._deactivate_other_estimates(estimate_data.release_id)
+        else:
+            # Check if there's already an active estimate
+            existing_active = await self._get_active_estimate(estimate_data.release_id)
+            if not existing_active:
+                # No active estimate exists, make this one active by default
+                estimate_dict["active_version"] = True
         
         estimate = await self.estimate_repo.create(**estimate_dict)
         await self.session.flush()  # Flush to get estimate.id
         
-        # Create default line items from release employees
-        # Get the release response to use the same dates that the Release page shows
-        from app.services.release_service import ReleaseService
-        release_service = ReleaseService(self.session)
-        release_response = await release_service.get_release_with_relationships(estimate_data.release_id)
-        
-        # Create a map of employee_id -> dates from the release response (these are correct)
-        employee_date_map = {}
-        if release_response and release_response.employees:
-            logger.info(f"Release response has {len(release_response.employees)} employees")
-            for emp in release_response.employees:
-                if emp.get("start_date") and emp.get("end_date"):
-                    employee_date_map[emp["id"]] = {
-                        "start_date": emp["start_date"],
-                        "end_date": emp["end_date"],
-                    }
-                    logger.info(f"  Mapped employee {emp['id']}: start_date={emp['start_date']}, end_date={emp['end_date']}")
-        logger.info(f"Created employee_date_map with {len(employee_date_map)} entries")
-        
-        if release.employee_associations:
-            logger.info(f"Creating default line items from {len(release.employee_associations)} release employees for estimate {estimate.id}")
+        # Create default line items from active estimate if one exists
+        active_estimate = await self._get_active_estimate(estimate_data.release_id)
+        if active_estimate and active_estimate.id != estimate.id:
+            # Copy line items from active estimate
+            active_line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
+            logger.info(f"Copying {len(active_line_items)} line items from active estimate {active_estimate.id} to new estimate {estimate.id}")
             row_order = 0
             
-            for emp_assoc in release.employee_associations:
-                logger.info(f"  Processing employee {emp_assoc.employee_id}, role {emp_assoc.role_id}, dc {emp_assoc.delivery_center_id}")
-                
-                # LOG: What does Release service see?
-                logger.info(f"  === DATE DEBUG ===")
-                logger.info(f"  emp_assoc.start_date = {emp_assoc.start_date} (type: {type(emp_assoc.start_date)})")
-                logger.info(f"  emp_assoc.end_date = {emp_assoc.end_date} (type: {type(emp_assoc.end_date)})")
-                if isinstance(emp_assoc.start_date, date):
-                    logger.info(f"  emp_assoc.start_date.isoformat() = {emp_assoc.start_date.isoformat()}")
-                if isinstance(emp_assoc.end_date, date):
-                    logger.info(f"  emp_assoc.end_date.isoformat() = {emp_assoc.end_date.isoformat()}")
-                
-                # Use project_rate from EmployeeRelease association as the rate
-                # Get cost from employee's internal_cost_rate
-                employee = await self.employee_repo.get(emp_assoc.employee_id)
-                if employee:
-                    project_rate = Decimal(str(emp_assoc.project_rate))
-                    internal_cost = Decimal(str(employee.internal_cost_rate))
-                else:
-                    # Fallback to default rates if employee not found
-                    project_rate, internal_cost = await self._get_default_rates(
-                        emp_assoc.role_id,
-                        emp_assoc.delivery_center_id,
-                        estimate_dict.get("currency", "USD"),
-                        emp_assoc.employee_id,
-                    )
-                
-                logger.info(f"  Using project_rate={project_rate}, cost={internal_cost}")
-                
-                # CRITICAL: Use the exact same date values as Release service
-                # Release service does: assoc.start_date.isoformat() which produces "2025-12-31"
-                # We must use the exact same date objects, ensuring no timezone conversion
-                
-                # Extract dates exactly as they are stored in EmployeeRelease
-                # Use year/month/day directly to avoid any timezone conversion
-                if isinstance(emp_assoc.start_date, date):
-                    # Pure date object - use directly (same as Release service does)
-                    start_date_val = date(emp_assoc.start_date.year, emp_assoc.start_date.month, emp_assoc.start_date.day)
-                elif isinstance(emp_assoc.start_date, datetime):
-                    # If datetime, extract date part using year/month/day directly
-                    # This avoids any timezone conversion
-                    start_date_val = date(emp_assoc.start_date.year, emp_assoc.start_date.month, emp_assoc.start_date.day)
-                    logger.warning(f"  emp_assoc.start_date is datetime! Original: {emp_assoc.start_date}, Extracted: {start_date_val}")
-                else:
-                    # String - parse as date
-                    date_str = str(emp_assoc.start_date).split("T")[0].split(" ")[0]
-                    parsed = date.fromisoformat(date_str)
-                    start_date_val = date(parsed.year, parsed.month, parsed.day)
-                
-                if isinstance(emp_assoc.end_date, date):
-                    end_date_val = date(emp_assoc.end_date.year, emp_assoc.end_date.month, emp_assoc.end_date.day)
-                elif isinstance(emp_assoc.end_date, datetime):
-                    end_date_val = date(emp_assoc.end_date.year, emp_assoc.end_date.month, emp_assoc.end_date.day)
-                    logger.warning(f"  emp_assoc.end_date is datetime! Original: {emp_assoc.end_date}, Extracted: {end_date_val}")
-                else:
-                    date_str = str(emp_assoc.end_date).split("T")[0].split(" ")[0]
-                    parsed = date.fromisoformat(date_str)
-                    end_date_val = date(parsed.year, parsed.month, parsed.day)
-                
-                logger.info(f"  === DATE PROCESSING ===")
-                logger.info(f"  emp_assoc.start_date = {emp_assoc.start_date} (type: {type(emp_assoc.start_date)})")
-                logger.info(f"  emp_assoc.end_date = {emp_assoc.end_date} (type: {type(emp_assoc.end_date)})")
-                logger.info(f"  Final start_date_val = {start_date_val} (isoformat: {start_date_val.isoformat()})")
-                logger.info(f"  Final end_date_val = {end_date_val} (isoformat: {end_date_val.isoformat()})")
-                if isinstance(emp_assoc.start_date, date):
-                    logger.info(f"  Release service would send: start_date={emp_assoc.start_date.isoformat()}, end_date={emp_assoc.end_date.isoformat()}")
-                
-                # Create line item for this employee
-                # Log the exact date values before storing
-                logger.info(f"  STORING dates: start_date={start_date_val} (type: {type(start_date_val)}), end_date={end_date_val} (type: {type(end_date_val)})")
-                logger.info(f"  Date ISO strings: start_date={start_date_val.isoformat()}, end_date={end_date_val.isoformat()}")
-                
+            for active_li in active_line_items:
+                # Copy line item from active estimate
                 line_item_dict = {
-                    "quote_id": estimate.id,  # Database column name is still quote_id
-                    "role_id": emp_assoc.role_id,
-                    "delivery_center_id": emp_assoc.delivery_center_id,
-                    "employee_id": emp_assoc.employee_id,
-                    "rate": project_rate,
-                    "cost": internal_cost,
-                    "currency": estimate_dict.get("currency", "USD"),
-                    "start_date": start_date_val,
-                    "end_date": end_date_val,
+                    "estimate_id": estimate.id,
+                    "role_rates_id": active_li.role_rates_id,
+                    "employee_id": active_li.employee_id,
+                    "rate": active_li.rate,
+                    "cost": active_li.cost,
+                    "currency": active_li.currency,
+                    "start_date": active_li.start_date,
+                    "end_date": active_li.end_date,
                     "row_order": row_order,
                 }
                 
-                logger.info(f"  === STORING IN DB ===")
-                logger.info(f"  About to store: start_date={start_date_val} (type: {type(start_date_val)}), end_date={end_date_val} (type: {type(end_date_val)})")
-                
                 line_item = await self.line_item_repo.create(**line_item_dict)
-                await self.session.flush()  # Flush to ensure it's saved
+                await self.session.flush()
                 
-                # Query the database directly to see what's actually stored
-                from sqlalchemy import text
-                result = await self.session.execute(
-                    text("SELECT start_date, end_date FROM quote_line_items WHERE id = :id"),
-                    {"id": str(line_item.id)}
-                )
-                db_row = result.fetchone()
-                if db_row:
-                    logger.info(f"  === DIRECT DB QUERY (AFTER STORE) ===")
-                    logger.info(f"  DB start_date = {db_row[0]} (type: {type(db_row[0])})")
-                    logger.info(f"  DB end_date = {db_row[1]} (type: {type(db_row[1])})")
-                    if isinstance(db_row[0], date):
-                        logger.info(f"  DB start_date.isoformat() = {db_row[0].isoformat()}")
-                    if isinstance(db_row[1], date):
-                        logger.info(f"  DB end_date.isoformat() = {db_row[1].isoformat()}")
+                # Copy weekly hours if they exist
+                if active_li.weekly_hours:
+                    from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
+                    weekly_hours_repo = EstimateWeeklyHoursRepository(self.session)
+                    for wh in active_li.weekly_hours:
+                        await weekly_hours_repo.create(
+                            estimate_line_item_id=line_item.id,
+                            week_start_date=wh.week_start_date,
+                            hours=wh.hours,
+                        )
                 
-                # Log what SQLAlchemy returns
-                logger.info(f"  === SQLALCHEMY RETRIEVAL (AFTER STORE) ===")
-                logger.info(f"  line_item.start_date = {line_item.start_date} (type: {type(line_item.start_date)})")
-                logger.info(f"  line_item.end_date = {line_item.end_date} (type: {type(line_item.end_date)})")
-                if isinstance(line_item.start_date, date):
-                    logger.info(f"  line_item.start_date.isoformat() = {line_item.start_date.isoformat()}")
-                elif isinstance(line_item.start_date, datetime):
-                    logger.info(f"  line_item.start_date.isoformat() = {line_item.start_date.isoformat()}")
-                    logger.info(f"  line_item.start_date.date() = {line_item.start_date.date()}")
-                    logger.info(f"  line_item.start_date.date().isoformat() = {line_item.start_date.date().isoformat()}")
-                if isinstance(line_item.end_date, date):
-                    logger.info(f"  line_item.end_date.isoformat() = {line_item.end_date.isoformat()}")
-                elif isinstance(line_item.end_date, datetime):
-                    logger.info(f"  line_item.end_date.isoformat() = {line_item.end_date.isoformat()}")
-                    logger.info(f"  line_item.end_date.date() = {line_item.end_date.date()}")
-                    logger.info(f"  line_item.end_date.date().isoformat() = {line_item.end_date.date().isoformat()}")
                 row_order += 1
             
-            logger.info(f"Created {row_order} default line items from release employees")
-        else:
-            logger.warning(f"Release {estimate_data.release_id} has no employee associations")
+            logger.info(f"Copied {row_order} line items from active estimate")
         
         await self.session.commit()
         
@@ -235,7 +155,7 @@ class EstimateService(BaseService):
         logger.info(f"Estimate {estimate.id} has {len(estimate.line_items) if estimate.line_items else 0} line items after creation")
         if estimate.line_items:
             for li in estimate.line_items:
-                logger.info(f"  Line item {li.id}: employee_id={li.employee_id}, role_id={li.role_id}")
+                logger.info(f"  Line item {li.id}: employee_id={li.employee_id}, role_rates_id={li.role_rates_id}")
         
         response = self._to_response(estimate, include_line_items=True)
         logger.info(f"Response has {len(response.line_items) if response.line_items else 0} line items")
@@ -260,17 +180,11 @@ class EstimateService(BaseService):
         skip: int = 0,
         limit: int = 100,
         release_id: Optional[UUID] = None,
-        status: Optional[str] = None,
     ) -> Tuple[List[EstimateResponse], int]:
         """List estimates with optional filters."""
         filters = {}
         if release_id:
             filters["release_id"] = release_id
-        if status:
-            try:
-                filters["status"] = EstimateStatus(status)
-            except ValueError:
-                pass
         
         estimates = await self.estimate_repo.list(skip=skip, limit=limit, **filters)
         total = await self.estimate_repo.count(**filters)
@@ -288,6 +202,11 @@ class EstimateService(BaseService):
             return None
         
         update_dict = estimate_data.model_dump(exclude_unset=True)
+        
+        # Handle active_version changes - ensure only one active estimate per release
+        if "active_version" in update_dict and update_dict["active_version"]:
+            await self._deactivate_other_estimates(estimate.release_id)
+        
         updated = await self.estimate_repo.update(estimate_id, **update_dict)
         await self.session.commit()
         
@@ -302,18 +221,62 @@ class EstimateService(BaseService):
         await self.session.commit()
         return deleted
     
-    async def clone_estimate(self, estimate_id: UUID, new_name: str) -> EstimateResponse:
+    async def set_active_version(self, estimate_id: UUID) -> Optional[EstimateResponse]:
+        """Set an estimate as the active version for its release."""
+        estimate = await self.estimate_repo.get(estimate_id)
+        if not estimate:
+            return None
+        
+        # Deactivate all other estimates for this release
+        await self._deactivate_other_estimates(estimate.release_id)
+        
+        # Set this estimate as active
+        updated = await self.estimate_repo.update(estimate_id, active_version=True)
+        await self.session.commit()
+        
+        updated = await self.estimate_repo.get(estimate_id)
+        if not updated:
+            return None
+        return self._to_response(updated, include_line_items=False)
+    
+    async def clone_estimate(self, estimate_id: UUID, new_name: Optional[str] = None) -> EstimateResponse:
         """Clone an estimate to create a variation."""
         estimate = await self.estimate_repo.get_with_line_items(estimate_id)
         if not estimate:
             raise ValueError("Estimate not found")
         
+        # Auto-generate version name if not provided
+        if not new_name:
+            # Get all existing estimates for this release to find the highest version number
+            existing_estimates = await self.estimate_repo.list_by_release(
+                release_id=estimate.release_id,
+                skip=0,
+                limit=1000  # Get all estimates
+            )
+            
+            # Extract version numbers from existing estimate names
+            version_numbers = []
+            for est in existing_estimates:
+                # Match "VERSION X" pattern (case insensitive, with optional whitespace)
+                match = re.search(r'VERSION\s+(\d+)', est.name, re.IGNORECASE)
+                if match:
+                    version_numbers.append(int(match.group(1)))
+            
+            # Find the next available version number
+            if version_numbers:
+                next_version = max(version_numbers) + 1
+            else:
+                # No existing VERSION estimates, start at 2 (since INITIAL is typically 1)
+                # But check if INITIAL exists - if so, start at 2, otherwise start at 1
+                has_initial = any(est.name.upper() == "INITIAL" for est in existing_estimates)
+                next_version = 2 if has_initial else 1
+            
+            new_name = f"VERSION {next_version}"
+        
         # Create new estimate
         new_estimate_dict = {
             "release_id": estimate.release_id,
             "name": new_name,
-            "currency": estimate.currency,
-            "status": EstimateStatus.DRAFT,
             "description": estimate.description,
             "attributes": estimate.attributes.copy() if estimate.attributes else {},
         }
@@ -325,7 +288,7 @@ class EstimateService(BaseService):
         if estimate.phases:
             for phase in estimate.phases:
                 await phase_repo.create(
-                    quote_id=new_estimate.id,  # Database column name is still quote_id
+                    estimate_id=new_estimate.id,
                     name=phase.name,
                     start_date=phase.start_date,
                     end_date=phase.end_date,
@@ -337,9 +300,8 @@ class EstimateService(BaseService):
         if estimate.line_items:
             for line_item in estimate.line_items:
                 new_line_item_dict = {
-                    "quote_id": new_estimate.id,  # Database column name is still quote_id
-                    "role_id": line_item.role_id,
-                    "delivery_center_id": line_item.delivery_center_id,
+                    "estimate_id": new_estimate.id,
+                    "role_rates_id": line_item.role_rates_id,
                     "employee_id": line_item.employee_id,
                     "rate": line_item.rate,
                     "cost": line_item.cost,
@@ -347,6 +309,7 @@ class EstimateService(BaseService):
                     "start_date": line_item.start_date,
                     "end_date": line_item.end_date,
                     "row_order": line_item.row_order,
+                    "billable": line_item.billable,
                 }
                 new_line_item = await self.line_item_repo.create(**new_line_item_dict)
                 
@@ -354,7 +317,7 @@ class EstimateService(BaseService):
                 if line_item.weekly_hours:
                     for weekly_hour in line_item.weekly_hours:
                         await self.weekly_hours_repo.create(
-                            quote_line_item_id=new_line_item.id,  # Database column name is still quote_line_item_id
+                            estimate_line_item_id=new_line_item.id,
                             week_start_date=weekly_hour.week_start_date,
                             hours=weekly_hour.hours,
                         )
@@ -366,19 +329,16 @@ class EstimateService(BaseService):
             raise ValueError("Failed to retrieve cloned estimate")
         return self._to_detail_response(new_estimate)
     
-    async def _get_default_rates(
+    async def _get_default_rates_from_role_rate(
         self,
-        role_id: UUID,
-        delivery_center_id: UUID,
-        currency: str,
+        role_rates_id: UUID,
         employee_id: Optional[UUID] = None,
     ) -> Tuple[Decimal, Decimal]:
-        """Get default rate and cost for a role/delivery center/currency combination.
+        """Get default rate and cost from a role_rate.
         
         Priority:
         1. Employee rates (if employee_id provided)
-        2. RoleRate for (role_id, delivery_center_id, currency)
-        3. Role default rates
+        2. RoleRate rates
         
         Returns:
             Tuple of (rate, cost)
@@ -389,28 +349,38 @@ class EstimateService(BaseService):
             if employee:
                 return Decimal(str(employee.external_bill_rate)), Decimal(str(employee.internal_cost_rate))
         
-        # Try to get RoleRate
-        result = await self.session.execute(
-            select(RoleRate).where(
-                and_(
-                    RoleRate.role_id == role_id,
-                    RoleRate.delivery_center_id == delivery_center_id,
-                    RoleRate.currency == currency
-                )
-            )
-        )
-        role_rate = result.scalar_one_or_none()
+        # Get RoleRate
+        role_rate = await self.role_rate_repo.get(role_rates_id)
         if role_rate:
             return Decimal(str(role_rate.external_rate)), Decimal(str(role_rate.internal_cost_rate))
         
-        # Fallback to Role default rates
-        role = await self.role_repo.get(role_id)
-        if role:
-            rate = Decimal(str(role.role_external_rate)) if role.role_external_rate else Decimal("0")
-            cost = Decimal(str(role.role_internal_cost_rate)) if role.role_internal_cost_rate else Decimal("0")
-            return rate, cost
-        
         return Decimal("0"), Decimal("0")
+    
+    async def _get_active_estimate(self, release_id: UUID) -> Optional[Estimate]:
+        """Get the active estimate for a release."""
+        result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+    
+    async def _deactivate_other_estimates(self, release_id: UUID) -> None:
+        """Deactivate all estimates for a release except the current one being created."""
+        await self.session.execute(
+            update(Estimate)
+            .where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
+            )
+            .values(active_version=False)
+        )
+        await self.session.flush()
     
     async def create_line_item(
         self,
@@ -422,15 +392,32 @@ class EstimateService(BaseService):
         if not estimate:
             raise ValueError("Estimate not found")
         
+        # Get release to get currency
+        release = await self.release_repo.get(estimate.release_id)
+        if not release:
+            raise ValueError("Release not found")
+        
+        # Convert role_id + delivery_center_id to role_rates_id if needed
+        role_rates_id = line_item_data.role_rates_id
+        if not role_rates_id and line_item_data.role_id and line_item_data.delivery_center_id:
+            # Get or create role rate - use currency from release
+            currency = line_item_data.currency or release.default_currency
+            role_rate = await self._get_or_create_role_rate(
+                line_item_data.role_id,
+                line_item_data.delivery_center_id,
+                currency
+            )
+            role_rates_id = role_rate.id
+        elif not role_rates_id:
+            raise ValueError("Either role_rates_id OR (role_id + delivery_center_id) must be provided")
+        
         # Get default rates if not provided
         rate = line_item_data.rate
         cost = line_item_data.cost
         
         if rate == 0 or cost == 0:
-            default_rate, default_cost = await self._get_default_rates(
-                line_item_data.role_id,
-                line_item_data.delivery_center_id,
-                line_item_data.currency or estimate.currency,
+            default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                role_rates_id,
                 line_item_data.employee_id,
             )
             if rate == 0:
@@ -442,19 +429,21 @@ class EstimateService(BaseService):
         max_order = await self.line_item_repo.get_max_row_order(estimate_id)
         row_order = max_order + 1
         
-        line_item_dict = line_item_data.model_dump(exclude_unset=True)
-        line_item_dict["quote_id"] = estimate_id  # Database column name is still quote_id
-        line_item_dict["rate"] = rate
-        line_item_dict["cost"] = cost
-        line_item_dict["currency"] = line_item_dict.get("currency") or estimate.currency
-        line_item_dict["row_order"] = row_order
+        line_item_dict = {
+            "estimate_id": estimate_id,
+            "role_rates_id": role_rates_id,
+            "employee_id": line_item_data.employee_id,
+            "rate": rate,
+            "cost": cost,
+            "currency": line_item_data.currency or release.default_currency,
+            "start_date": line_item_data.start_date,
+            "end_date": line_item_data.end_date,
+            "row_order": row_order,
+            "billable": getattr(line_item_data, 'billable', True),
+        }
         
         line_item = await self.line_item_repo.create(**line_item_dict)
         await self.session.flush()  # Flush to get the line item ID
-        
-        # Sync to EmployeeRelease if employee is assigned
-        if line_item.employee_id:
-            await self._sync_line_item_to_employee_release(line_item, estimate.release_id)
         
         await self.session.commit()
         
@@ -463,76 +452,33 @@ class EstimateService(BaseService):
             raise ValueError("Failed to retrieve created line item")
         return self._line_item_to_response(line_item)
     
-    async def _sync_line_item_to_employee_release(self, line_item: EstimateLineItem, release_id: UUID) -> None:
-        """Sync an estimate line item to EmployeeRelease association."""
-        from app.models.association_models import EmployeeRelease
-        
-        if not line_item.employee_id:
-            return  # No employee assigned, nothing to sync
-        
-        # Check if EmployeeRelease association already exists
+    async def _get_or_create_role_rate(self, role_id: UUID, delivery_center_id: UUID, currency: str) -> RoleRate:
+        """Get or create a role rate for the given role, delivery center, and currency."""
         result = await self.session.execute(
-            select(EmployeeRelease).where(
-                EmployeeRelease.release_id == release_id,
-                EmployeeRelease.employee_id == line_item.employee_id
-            )
-        )
-        association = result.scalar_one_or_none()
-        
-        if association:
-            # Update existing association with values from line item
-            association.role_id = line_item.role_id
-            association.start_date = line_item.start_date
-            association.end_date = line_item.end_date
-            association.project_rate = float(line_item.rate)  # Use rate as project_rate
-            association.delivery_center_id = line_item.delivery_center_id
-            logger.info(f"Updated EmployeeRelease: employee_id={line_item.employee_id}, release_id={release_id}")
-        else:
-            # Create new association
-            association = EmployeeRelease(
-                employee_id=line_item.employee_id,
-                release_id=release_id,
-                role_id=line_item.role_id,
-                start_date=line_item.start_date,
-                end_date=line_item.end_date,
-                project_rate=float(line_item.rate),  # Use rate as project_rate
-                delivery_center_id=line_item.delivery_center_id,
-            )
-            self.session.add(association)
-            logger.info(f"Created EmployeeRelease: employee_id={line_item.employee_id}, release_id={release_id}")
-    
-    async def _sync_employee_with_release(self, estimate_id: UUID, employee_id: UUID) -> None:
-        """Remove employee from release if they're no longer in any estimate line items."""
-        from app.models.association_models import EmployeeRelease
-        
-        # Get the estimate to find the release
-        estimate = await self.estimate_repo.get(estimate_id)
-        if not estimate:
-            return
-        
-        # Check if employee is still in any line items for this estimate
-        line_items = await self.line_item_repo.list_by_estimate(estimate_id)
-        employee_still_in_estimate = any(
-            item.employee_id == employee_id for item in line_items if item.employee_id
-        )
-        
-        if not employee_still_in_estimate:
-            # Employee is no longer in any line items, remove from release
-            logger.info(f"Employee {employee_id} no longer in estimate {estimate_id}, removing from release {estimate.release_id}")
-            
-            # Find and delete the EmployeeRelease association
-            result = await self.session.execute(
-                select(EmployeeRelease).where(
-                    EmployeeRelease.release_id == estimate.release_id,
-                    EmployeeRelease.employee_id == employee_id
+            select(RoleRate).where(
+                and_(
+                    RoleRate.role_id == role_id,
+                    RoleRate.delivery_center_id == delivery_center_id,
+                    RoleRate.default_currency == currency
                 )
             )
-            association = result.scalar_one_or_none()
-            
-            if association:
-                await self.session.delete(association)
-                await self.session.commit()
-                logger.info(f"Removed employee {employee_id} from release {estimate.release_id}")
+        )
+        role_rate = result.scalar_one_or_none()
+        if role_rate:
+            return role_rate
+        
+        # Create a new role rate with default values
+        role_rate = RoleRate(
+            role_id=role_id,
+            delivery_center_id=delivery_center_id,
+            default_currency=currency,
+            internal_cost_rate=0.0,
+            external_rate=0.0
+        )
+        self.session.add(role_rate)
+        await self.session.flush()
+        return role_rate
+    
     
     async def update_line_item(
         self,
@@ -542,25 +488,37 @@ class EstimateService(BaseService):
     ) -> Optional[EstimateLineItemResponse]:
         """Update a line item."""
         line_item = await self.line_item_repo.get(line_item_id)
-        if not line_item or line_item.quote_id != estimate_id:  # Database column name is still quote_id
+        if not line_item or line_item.estimate_id != estimate_id:
             return None
-        
-        # Store old employee_id before update to check if we need to remove from release
-        old_employee_id = line_item.employee_id
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
         
-        # Recalculate rates if role/delivery_center/employee changed
-        if "role_id" in update_dict or "delivery_center_id" in update_dict or "employee_id" in update_dict:
-            new_role_id = update_dict.get("role_id", line_item.role_id)
-            new_dc_id = update_dict.get("delivery_center_id", line_item.delivery_center_id)
-            new_employee_id = update_dict.get("employee_id", line_item.employee_id)
-            new_currency = update_dict.get("currency", line_item.currency)
+        # Convert role_id + delivery_center_id to role_rates_id if provided
+        if "role_id" in update_dict and "delivery_center_id" in update_dict:
+            # Get currency from update_dict or existing line item or release
+            estimate = await self.estimate_repo.get(estimate_id)
+            release = await self.release_repo.get(estimate.release_id) if estimate else None
+            currency = update_dict.get("currency") or line_item.currency or (release.default_currency if release else "USD")
             
-            default_rate, default_cost = await self._get_default_rates(
-                new_role_id,
-                new_dc_id,
-                new_currency,
+            role_rate = await self._get_or_create_role_rate(
+                update_dict["role_id"],
+                update_dict["delivery_center_id"],
+                currency
+            )
+            update_dict["role_rates_id"] = role_rate.id
+            # Remove role_id and delivery_center_id from update_dict as they're not in the model
+            update_dict.pop("role_id", None)
+            update_dict.pop("delivery_center_id", None)
+        elif "role_id" in update_dict or "delivery_center_id" in update_dict:
+            raise ValueError("Both role_id and delivery_center_id must be provided together")
+        
+        # Recalculate rates if role_rates_id/employee changed
+        if "role_rates_id" in update_dict or "employee_id" in update_dict:
+            new_role_rates_id = update_dict.get("role_rates_id", line_item.role_rates_id)
+            new_employee_id = update_dict.get("employee_id", line_item.employee_id)
+            
+            default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                new_role_rates_id,
                 new_employee_id,
             )
             
@@ -572,22 +530,6 @@ class EstimateService(BaseService):
         
         updated = await self.line_item_repo.update(line_item_id, **update_dict)
         await self.session.flush()  # Flush to get updated values
-        
-        # Get the estimate to access release_id
-        estimate = await self.estimate_repo.get(estimate_id)
-        if not estimate:
-            return None
-        
-        # Check if employee was removed or changed - if so, check if old employee should be removed from release
-        new_employee_id = update_dict.get("employee_id", old_employee_id)
-        if old_employee_id and old_employee_id != new_employee_id:
-            await self._sync_employee_with_release(estimate_id, old_employee_id)
-        
-        # Sync to EmployeeRelease if employee is assigned (new or existing)
-        if new_employee_id:
-            updated_line_item = await self.line_item_repo.get(line_item_id)
-            if updated_line_item:
-                await self._sync_line_item_to_employee_release(updated_line_item, estimate.release_id)
         
         await self.session.commit()
         
@@ -605,12 +547,9 @@ class EstimateService(BaseService):
             logger.warning(f"Line item {line_item_id} not found")
             return False
         
-        if line_item.quote_id != estimate_id:  # Database column name is still quote_id
-            logger.warning(f"Line item {line_item_id} belongs to estimate {line_item.quote_id}, not {estimate_id}")
+        if line_item.estimate_id != estimate_id:
+            logger.warning(f"Line item {line_item_id} belongs to estimate {line_item.estimate_id}, not {estimate_id}")
             return False
-        
-        # Store employee_id before deletion to check if we need to remove from release
-        employee_id_to_check = line_item.employee_id
         
         logger.info(f"Line item found, deleting weekly hours first")
         # Explicitly delete weekly hours first (cascade should handle this, but being explicit)
@@ -624,10 +563,6 @@ class EstimateService(BaseService):
             logger.info(f"Line item {line_item_id} deleted successfully, committing transaction")
             await self.session.commit()
             logger.info(f"Transaction committed for line item {line_item_id}")
-            
-            # Check if employee should be removed from release
-            if employee_id_to_check:
-                await self._sync_employee_with_release(estimate_id, employee_id_to_check)
         else:
             logger.warning(f"Delete operation returned False for line item {line_item_id}")
             await self.session.rollback()
@@ -642,7 +577,7 @@ class EstimateService(BaseService):
     ) -> List[EstimateLineItemResponse]:
         """Auto-fill weekly hours for a line item based on pattern."""
         line_item = await self.line_item_repo.get(line_item_id)
-        if not line_item or line_item.quote_id != estimate_id:  # Database column name is still quote_id
+        if not line_item or line_item.estimate_id != estimate_id:
             raise ValueError("Line item not found")
         
         # Generate weeks between start_date and end_date
@@ -683,7 +618,7 @@ class EstimateService(BaseService):
         weekly_hours_list = []
         for week_start, hours in hours_by_week.items():
             weekly_hour = await self.weekly_hours_repo.create(
-                quote_line_item_id=line_item_id,
+                estimate_line_item_id=line_item_id,
                 week_start_date=week_start,
                 hours=hours,
             )
@@ -728,7 +663,14 @@ class EstimateService(BaseService):
         overall_total_revenue = Decimal("0")
         
         for line_item in estimate.line_items:
-            role_id = line_item.role_id
+            # Get role_id from role_rate relationship
+            role_id = None
+            if line_item.role_rate and line_item.role_rate.role:
+                role_id = line_item.role_rate.role.id
+            
+            if not role_id:
+                continue  # Skip if no role found
+            
             rate = Decimal(str(line_item.rate))
             cost_rate = Decimal(str(line_item.cost))
             
@@ -830,7 +772,7 @@ class EstimateService(BaseService):
             )
         
         return EstimateTotalsResponse(
-            quote_id=estimate_id,  # Schema field name is still quote_id for database compatibility
+            estimate_id=estimate_id,
             weekly_totals=weekly_totals,
             monthly_totals=monthly_totals,
             role_totals=role_totals,
@@ -845,8 +787,9 @@ class EstimateService(BaseService):
         
         inspector = inspect(estimate)
         
-        # Safely get release name if loaded
+        # Safely get release name and currency if loaded
         release_name = None
+        release_currency = None
         engagement_id = None
         engagement_name = None
         try:
@@ -854,6 +797,7 @@ class EstimateService(BaseService):
                 release = inspector.attrs.release.loaded_value
                 if release:
                     release_name = release.name
+                    release_currency = release.default_currency
                     # Check if engagement is loaded on release
                     release_inspector = inspect(release)
                     if release_inspector.attrs.engagement.loaded_value is not None:
@@ -887,9 +831,9 @@ class EstimateService(BaseService):
             "id": estimate.id,
             "release_id": estimate.release_id,
             "name": estimate.name,
-            "currency": estimate.currency,
-            "status": estimate.status,
+            "currency": release_currency or "USD",  # Get currency from release
             "description": estimate.description,
+            "active_version": estimate.active_version,
             "phases": phases_list,
             "attributes": estimate.attributes or {},
             "release_name": release_name,
@@ -933,23 +877,19 @@ class EstimateService(BaseService):
         
         inspector = inspect(line_item)
         
-        # Safely get role name if loaded
+        # Safely get role name and delivery center name from role_rate if loaded
         role_name = None
-        try:
-            if inspector.attrs.role.loaded_value is not None:
-                role = inspector.attrs.role.loaded_value
-                if role:
-                    role_name = role.role_name
-        except (AttributeError, KeyError):
-            pass
-        
-        # Safely get delivery center name if loaded
         delivery_center_name = None
         try:
-            if inspector.attrs.delivery_center.loaded_value is not None:
-                dc = inspector.attrs.delivery_center.loaded_value
-                if dc:
-                    delivery_center_name = dc.name
+            if inspector.attrs.role_rate.loaded_value is not None:
+                role_rate = inspector.attrs.role_rate.loaded_value
+                if role_rate:
+                    # Get role name from role_rate.role
+                    if hasattr(role_rate, 'role') and role_rate.role:
+                        role_name = role_rate.role.role_name
+                    # Get delivery center name from role_rate.delivery_center
+                    if hasattr(role_rate, 'delivery_center') and role_rate.delivery_center:
+                        delivery_center_name = role_rate.delivery_center.name
         except (AttributeError, KeyError):
             pass
         
@@ -1001,11 +941,21 @@ class EstimateService(BaseService):
         
         # Serialize dates directly as ISO strings (EXACTLY like Release/Engagement services)
         # Release service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
+        # Get role_id and delivery_center_id from role_rate for backward compatibility
+        role_id = None
+        delivery_center_id = None
+        if line_item.role_rate:
+            if line_item.role_rate.role:
+                role_id = line_item.role_rate.role.id
+            if line_item.role_rate.delivery_center:
+                delivery_center_id = line_item.role_rate.delivery_center.id
+        
         line_item_dict = {
             "id": line_item.id,
-            "quote_id": line_item.quote_id,
-            "role_id": line_item.role_id,
-            "delivery_center_id": line_item.delivery_center_id,
+            "estimate_id": line_item.estimate_id,
+            "role_rates_id": line_item.role_rates_id,
+            "role_id": role_id,  # Included for backward compatibility
+            "delivery_center_id": delivery_center_id,  # Included for backward compatibility
             "employee_id": line_item.employee_id,
             "rate": line_item.rate,
             "cost": line_item.cost,
@@ -1013,6 +963,7 @@ class EstimateService(BaseService):
             "start_date": start_date_iso,  # ISO string (same as Release service)
             "end_date": end_date_iso,  # ISO string (same as Release service)
             "row_order": line_item.row_order,
+            "billable": line_item.billable,
             "role_name": role_name,
             "delivery_center_name": delivery_center_name,
             "employee_name": employee_name,
@@ -1065,7 +1016,7 @@ class EstimateService(BaseService):
         from app.models.estimate import EstimatePhase
         return EstimatePhaseResponse.model_validate({
             "id": phase.id,
-            "quote_id": phase.quote_id,
+            "estimate_id": phase.estimate_id,
             "name": phase.name,
             "start_date": phase.start_date,
             "end_date": phase.end_date,

@@ -12,7 +12,7 @@ from app.models.role import RoleStatus
 class RoleRateBase(BaseModel):
     """Base schema for a role rate tied to delivery center + currency."""
     delivery_center_code: str = Field(..., min_length=1, max_length=50)
-    currency: str = Field(..., min_length=1, max_length=3)
+    default_currency: str = Field(..., min_length=1, max_length=3)
     internal_cost_rate: float = Field(..., ge=0)
     external_rate: float = Field(..., ge=0)
 
@@ -43,11 +43,7 @@ class RoleRateResponse(RoleRateBase):
 class RoleBase(BaseModel):
     """Base role schema with common fields."""
     role_name: str = Field(..., min_length=1, max_length=100)
-    # Legacy fields kept for compatibility; primary rates now live on role_rates
-    role_internal_cost_rate: Optional[float] = Field(None, ge=0)
-    role_external_rate: Optional[float] = Field(None, ge=0)
     status: RoleStatus = RoleStatus.ACTIVE
-    default_currency: str = Field(..., min_length=1, max_length=3)
     role_rates: List[RoleRateCreate] = Field(..., min_length=1)
 
     @model_validator(mode="after")
@@ -65,10 +61,7 @@ class RoleCreate(RoleBase):
 class RoleUpdate(BaseModel):
     """Schema for updating a role."""
     role_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    role_internal_cost_rate: Optional[float] = Field(None, ge=0)
-    role_external_rate: Optional[float] = Field(None, ge=0)
     status: Optional[RoleStatus] = None
-    default_currency: Optional[str] = Field(None, min_length=1, max_length=3)
     role_rates: Optional[List[RoleRateCreate]] = Field(None, min_length=1)
 
 

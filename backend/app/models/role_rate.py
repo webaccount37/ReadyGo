@@ -15,18 +15,19 @@ class RoleRate(Base):
 
     __tablename__ = "role_rates"
     __table_args__ = (
-        UniqueConstraint("role_id", "delivery_center_id", "currency", name="uq_role_dc_currency"),
+        UniqueConstraint("role_id", "delivery_center_id", "default_currency", name="uq_role_dc_currency"),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False, index=True)
     delivery_center_id = Column(UUID(as_uuid=True), ForeignKey("delivery_centers.id"), nullable=False, index=True)
-    currency = Column(String(3), nullable=False)
+    default_currency = Column(String(3), nullable=False)
     internal_cost_rate = Column(Float, nullable=False)
     external_rate = Column(Float, nullable=False)
 
     # Relationships
     role = relationship("Role", back_populates="role_rates")
     delivery_center = relationship("DeliveryCenter")
+    estimate_line_items = relationship("EstimateLineItem", back_populates="role_rate")
 
 

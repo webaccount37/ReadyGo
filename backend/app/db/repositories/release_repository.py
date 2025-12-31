@@ -94,18 +94,14 @@ class ReleaseRepository(BaseRepository[Release]):
     
     async def get_with_relationships(self, release_id: UUID) -> Optional[Release]:
         """Get release with related entities."""
-        from app.models.association_models import EmployeeRelease
-        
+        # Note: Employees are now loaded from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
+        # This is handled in the service layer, not the repository
         result = await self.session.execute(
             select(Release)
             .options(
                 selectinload(Release.engagement),
                 selectinload(Release.billing_term),
                 selectinload(Release.delivery_center),
-                selectinload(Release.employee_associations).selectinload(EmployeeRelease.employee),
-                selectinload(Release.employee_associations).selectinload(EmployeeRelease.role),
-                selectinload(Release.employee_associations).selectinload(EmployeeRelease.delivery_center),
-                selectinload(Release.roles),
             )
             .where(Release.id == release_id)
         )

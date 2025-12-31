@@ -9,7 +9,7 @@ from uuid import UUID
 from decimal import Decimal
 import enum
 
-from app.models.estimate import EstimateStatus
+# EstimateStatus enum removed - status is no longer used
 
 
 class EstimatePhaseBase(BaseModel):
@@ -38,7 +38,7 @@ class EstimatePhaseUpdate(BaseModel):
 class EstimatePhaseResponse(EstimatePhaseBase):
     """Response schema for estimate phase."""
     id: UUID
-    quote_id: UUID  # Keep column name for database compatibility
+    estimate_id: UUID
     
     class Config:
         from_attributes = True
@@ -82,8 +82,10 @@ class EstimateWeeklyHoursResponse(BaseModel):
 
 class EstimateLineItemBase(BaseModel):
     """Base schema for estimate line item."""
-    role_id: UUID
-    delivery_center_id: UUID
+    # Accept either role_rates_id OR role_id + delivery_center_id (for backward compatibility)
+    role_rates_id: Optional[UUID] = None
+    role_id: Optional[UUID] = None  # For backward compatibility with frontend
+    delivery_center_id: Optional[UUID] = None  # For backward compatibility with frontend
     employee_id: Optional[UUID] = None
     rate: Decimal = Field(..., ge=0)
     cost: Decimal = Field(..., ge=0)
@@ -91,6 +93,16 @@ class EstimateLineItemBase(BaseModel):
     start_date: date
     end_date: date
     row_order: int = Field(default=0, ge=0)
+    billable: bool = Field(default=True)
+    
+    @model_validator(mode="after")
+    def validate_role_reference(self) -> "EstimateLineItemBase":
+        """Ensure either role_rates_id OR (role_id + delivery_center_id) is provided."""
+        if self.role_rates_id:
+            return self
+        if self.role_id and self.delivery_center_id:
+            return self
+        raise ValueError("Either role_rates_id OR (role_id + delivery_center_id) must be provided")
 
 
 class EstimateLineItemCreate(EstimateLineItemBase):
@@ -100,8 +112,9 @@ class EstimateLineItemCreate(EstimateLineItemBase):
 
 class EstimateLineItemUpdate(BaseModel):
     """Update schema for estimate line item (all fields optional)."""
-    role_id: Optional[UUID] = None
-    delivery_center_id: Optional[UUID] = None
+    role_rates_id: Optional[UUID] = None
+    role_id: Optional[UUID] = None  # For backward compatibility with frontend
+    delivery_center_id: Optional[UUID] = None  # For backward compatibility with frontend
     employee_id: Optional[UUID] = None
     rate: Optional[Decimal] = Field(None, ge=0)
     cost: Optional[Decimal] = Field(None, ge=0)
@@ -109,6 +122,7 @@ class EstimateLineItemUpdate(BaseModel):
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     row_order: Optional[int] = Field(None, ge=0)
+    billable: Optional[bool] = None
 
 
 class EstimateLineItemResponse(BaseModel):
@@ -116,9 +130,10 @@ class EstimateLineItemResponse(BaseModel):
     # Don't inherit from EstimateLineItemBase to avoid date parsing issues
     # Define all fields explicitly, using strings for dates (like Release service)
     id: UUID
-    quote_id: UUID  # Keep column name for database compatibility
-    role_id: UUID
-    delivery_center_id: UUID
+    estimate_id: UUID
+    role_rates_id: UUID
+    role_id: Optional[UUID] = None  # Included for backward compatibility with frontend
+    delivery_center_id: Optional[UUID] = None  # Included for backward compatibility with frontend
     employee_id: Optional[UUID] = None
     rate: Decimal = Field(..., ge=0)
     cost: Decimal = Field(..., ge=0)
@@ -126,6 +141,7 @@ class EstimateLineItemResponse(BaseModel):
     start_date: str  # ISO date string "YYYY-MM-DD" (already serialized, no parsing)
     end_date: str  # ISO date string "YYYY-MM-DD" (already serialized, no parsing)
     row_order: int = Field(default=0, ge=0)
+    billable: bool = Field(default=True)
     role_name: Optional[str] = None
     delivery_center_name: Optional[str] = None
     employee_name: Optional[str] = None
@@ -138,24 +154,26 @@ class EstimateLineItemResponse(BaseModel):
 class EstimateBase(BaseModel):
     """Base estimate schema with common fields."""
     release_id: UUID
-    name: str = Field(..., min_length=1, max_length=255)
-    currency: str = Field(default="USD", min_length=3, max_length=3)
-    status: EstimateStatus = EstimateStatus.DRAFT
+    name: Optional[str] = Field(None, min_length=0, max_length=255)  # Allow empty for auto-generation
     description: Optional[str] = Field(None, max_length=2000)
+    active_version: bool = Field(default=False)
     attributes: Optional[dict] = None
 
 
-class EstimateCreate(EstimateBase):
+class EstimateCreate(BaseModel):
     """Schema for creating an estimate."""
-    pass
+    release_id: UUID
+    name: Optional[str] = Field(None, min_length=0, max_length=255)  # Optional for auto-generation
+    description: Optional[str] = Field(None, max_length=2000)
+    active_version: Optional[bool] = Field(default=False)
+    attributes: Optional[dict] = None
 
 
 class EstimateUpdate(BaseModel):
     """Schema for updating an estimate (all fields optional)."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    currency: Optional[str] = Field(None, min_length=3, max_length=3)
-    status: Optional[EstimateStatus] = None
     description: Optional[str] = Field(None, max_length=2000)
+    active_version: Optional[bool] = None
     attributes: Optional[dict] = None
 
 
@@ -225,7 +243,7 @@ class RoleTotal(BaseModel):
 
 class EstimateTotalsResponse(BaseModel):
     """Response schema for estimate totals."""
-    quote_id: UUID  # Keep column name for database compatibility
+    estimate_id: UUID
     weekly_totals: List[WeeklyTotal]
     monthly_totals: List[MonthlyTotal]
     role_totals: List[RoleTotal]

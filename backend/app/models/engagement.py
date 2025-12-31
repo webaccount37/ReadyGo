@@ -5,7 +5,6 @@ Engagement model for quoting and staff planning system.
 from sqlalchemy import Column, String, Float, Date, JSON, ForeignKey, Enum as SQLEnum, Boolean, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.associationproxy import association_proxy
 import uuid
 import enum
 
@@ -103,17 +102,4 @@ class Engagement(Base):
     billing_term = relationship("BillingTerm", back_populates="engagements")
     delivery_center = relationship("DeliveryCenter", back_populates="engagements")
     engagement_owner = relationship("Employee", foreign_keys=[engagement_owner_id], back_populates="owned_engagements")
-    # Use association objects instead of simple many-to-many
-    # Explicitly specify foreign_keys to ensure correct filtering
-    employee_associations = relationship(
-        "EmployeeEngagement", 
-        back_populates="engagement", 
-        cascade="all, delete-orphan",
-        foreign_keys="[EmployeeEngagement.engagement_id]",
-        primaryjoin="Engagement.id == EmployeeEngagement.engagement_id"
-    )
-    # Convenience proxy to access employees through associations (for backward compatibility)
-    employees = association_proxy("employee_associations", "employee")
-    
     releases = relationship("Release", back_populates="engagement", cascade="all, delete-orphan")
-    roles = relationship("Role", secondary="engagement_roles", back_populates="engagements")

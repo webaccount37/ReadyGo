@@ -163,3 +163,4 @@ class QuoteWeeklyHoursRepository(BaseRepository[QuoteWeeklyHours]):
 
 
 
+

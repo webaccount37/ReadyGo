@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import {
   useReleases,
   useCreateRelease,
   useUpdateRelease,
   useDeleteRelease,
 } from "@/hooks/useReleases";
+import { estimatesApi } from "@/lib/api/estimates";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
@@ -18,8 +20,10 @@ import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useRelease } from "@/hooks/useReleases";
 import { ReleaseRelationships } from "@/components/releases/release-relationships";
+import { Calculator } from "lucide-react";
 
 export default function ReleasesPage() {
+  const router = useRouter();
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -35,6 +39,37 @@ export default function ReleasesPage() {
   // Fetch billing terms and delivery centers for display names
   const { data: billingTermsData } = useBillingTerms();
   const { data: deliveryCentersData } = useDeliveryCenters();
+
+  // Helper function to format date without timezone conversion
+  const formatDate = (dateStr: string | undefined): string => {
+    if (!dateStr) return "—";
+    // Parse date string as local date (avoid timezone conversion)
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    const date = new Date(year, month - 1, day); // month is 0-indexed in JS
+    return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  };
+
+  // Helper function to handle opening estimate
+  const handleOpenEstimate = async (releaseId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      // Fetch estimates for this release
+      const estimatesData = await estimatesApi.getEstimates({ release_id: releaseId });
+      
+      // Find the active estimate
+      const activeEstimate = estimatesData.items?.find((est) => est.active_version === true);
+      
+      if (activeEstimate) {
+        router.push(`/estimates/${activeEstimate.id}`);
+      } else {
+        alert("No active estimate found for this release");
+      }
+    } catch (err) {
+      console.error("Failed to open estimate:", err);
+      alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const filteredItems = useMemo(() => {
     if (!data?.items || !searchQuery.trim()) {
@@ -173,8 +208,8 @@ export default function ReleasesPage() {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Name</th>
                             <th className="text-left p-3 font-semibold">Engagement</th>
+                            <th className="text-left p-3 font-semibold">Name</th>
                             <th className="text-left p-3 font-semibold">Status</th>
                             <th className="text-left p-3 font-semibold">Start Date</th>
                             <th className="text-left p-3 font-semibold">End Date</th>
@@ -188,8 +223,8 @@ export default function ReleasesPage() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingRelease(release.id)}
                           >
-                            <td className="p-3 font-medium">{highlightText(release.name, searchQuery)}</td>
                             <td className="p-3">{highlightText(release.engagement_name || release.engagement_id, searchQuery)}</td>
+                            <td className="p-3 font-medium">{highlightText(release.name, searchQuery)}</td>
                             <td className="p-3">
                               <span
                                 className={`px-2 py-1 text-xs rounded ${
@@ -206,17 +241,21 @@ export default function ReleasesPage() {
                               </span>
                             </td>
                             <td className="p-3">
-                              {release.start_date
-                                ? new Date(release.start_date).toLocaleDateString()
-                                : "—"}
+                              {formatDate(release.start_date)}
                             </td>
                             <td className="p-3">
-                              {release.end_date
-                                ? new Date(release.end_date).toLocaleDateString()
-                                : "—"}
+                              {formatDate(release.end_date)}
                             </td>
                             <td className="p-3">
                               <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  title="Open Estimate"
+                                  onClick={(e) => handleOpenEstimate(release.id, e)}
+                                >
+                                  <Calculator className="w-4 h-4" />
+                                </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
@@ -258,15 +297,15 @@ export default function ReleasesPage() {
                             <div className="space-y-3">
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Name
-                                </div>
-                                <div className="text-sm font-medium">{highlightText(release.name, searchQuery)}</div>
-                              </div>
-                              <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                                   Engagement
                                 </div>
                                 <div className="text-sm">{highlightText(release.engagement_name || release.engagement_id, searchQuery)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                  Name
+                                </div>
+                                <div className="text-sm font-medium">{highlightText(release.name, searchQuery)}</div>
                               </div>
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
@@ -293,7 +332,7 @@ export default function ReleasesPage() {
                                     Start Date
                                   </div>
                                   <div className="text-sm">
-                                    {new Date(release.start_date).toLocaleDateString()}
+                                    {formatDate(release.start_date)}
                                   </div>
                                 </div>
                               )}
@@ -303,12 +342,20 @@ export default function ReleasesPage() {
                                     End Date
                                   </div>
                                   <div className="text-sm">
-                                    {new Date(release.end_date).toLocaleDateString()}
+                                    {formatDate(release.end_date)}
                                   </div>
                                 </div>
                               )}
                             </div>
                             <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                title="Open Estimate"
+                                onClick={(e) => handleOpenEstimate(release.id, e)}
+                              >
+                                <Calculator className="w-4 h-4" />
+                              </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
@@ -429,7 +476,7 @@ export default function ReleasesPage() {
                 <div>
                   <p className="text-sm font-semibold text-gray-800">Start Date</p>
                   <p className="text-sm text-gray-700">
-                    {new Date(releaseToView.start_date).toLocaleDateString()}
+                    {formatDate(releaseToView.start_date)}
                   </p>
                 </div>
               )}
@@ -437,7 +484,7 @@ export default function ReleasesPage() {
                 <div>
                   <p className="text-sm font-semibold text-gray-800">End Date</p>
                   <p className="text-sm text-gray-700">
-                    {new Date(releaseToView.end_date).toLocaleDateString()}
+                    {formatDate(releaseToView.end_date)}
                   </p>
                 </div>
               )}

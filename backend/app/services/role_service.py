@@ -18,8 +18,7 @@ from app.models.delivery_center import DeliveryCenter
 from app.models.role import Role, RoleStatus
 import uuid
 from sqlalchemy import func
-from app.models.association_models import EmployeeEngagement, EmployeeRelease
-from app.models.association_tables import engagement_roles, release_roles
+# TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models/tables
 from app.models.delivery_center import DeliveryCenter
 
 
@@ -35,13 +34,6 @@ class RoleService(BaseService):
         """Create a new role."""
         role_dict = role_data.model_dump(exclude_unset=True)
         rates = role_dict.pop("role_rates", [])
-
-        # Default legacy fields from first rate if not provided
-        if rates:
-            primary_rate = rates[0]
-            role_dict.setdefault("role_internal_cost_rate", primary_rate["internal_cost_rate"])
-            role_dict.setdefault("role_external_rate", primary_rate["external_rate"])
-            role_dict.setdefault("default_currency", primary_rate["currency"])
 
         role = await self.role_repo.create(**role_dict)
         await self._upsert_role_rates(role.id, rates)
@@ -104,13 +96,6 @@ class RoleService(BaseService):
         if rates is not None:
             await self._validate_role_rates_update(role_id, rates)
 
-        # Refresh legacy fields if we have rates
-        if rates:
-            primary_rate = rates[0]
-            update_dict.setdefault("role_internal_cost_rate", primary_rate["internal_cost_rate"])
-            update_dict.setdefault("role_external_rate", primary_rate["external_rate"])
-            update_dict.setdefault("default_currency", primary_rate["currency"])
-
         updated = await self.role_repo.update(role_id, **update_dict)
 
         if rates is not None:
@@ -140,21 +125,24 @@ class RoleService(BaseService):
         # Gather used delivery center codes from assignments
         used_dc_codes: set[str] = set()
 
+        # Query ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
+        from app.models.estimate import EstimateLineItem, Estimate
+        from app.models.role_rate import RoleRate
+        
         ep_result = await self.session.execute(
             select(DeliveryCenter.code)
-            .join(EmployeeEngagement, EmployeeEngagement.delivery_center_id == DeliveryCenter.id)
-            .where(EmployeeEngagement.role_id == role_id)
+            .join(RoleRate, RoleRate.delivery_center_id == DeliveryCenter.id)
+            .join(EstimateLineItem, EstimateLineItem.role_rates_id == RoleRate.id)
+            .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
+            .where(
+                and_(
+                    RoleRate.role_id == role_id,
+                    Estimate.active_version == True
+                )
+            )
             .distinct()
         )
         used_dc_codes.update([row[0] for row in ep_result.fetchall() if row[0]])
-
-        er_result = await self.session.execute(
-            select(DeliveryCenter.code)
-            .join(EmployeeRelease, EmployeeRelease.delivery_center_id == DeliveryCenter.id)
-            .where(EmployeeRelease.role_id == role_id)
-            .distinct()
-        )
-        used_dc_codes.update([row[0] for row in er_result.fetchall() if row[0]])
 
         if not used_dc_codes:
             return
@@ -168,9 +156,9 @@ class RoleService(BaseService):
         for r in role_obj.role_rates:
             dc_code = getattr(r.delivery_center, "code", None)
             if dc_code:
-                current_rate_currency_by_dc[dc_code] = r.currency
+                current_rate_currency_by_dc[dc_code] = r.default_currency
 
-        proposed_currency_by_dc = {r["delivery_center_code"]: r["currency"] for r in new_rates if r.get("delivery_center_code")}
+        proposed_currency_by_dc = {r["delivery_center_code"]: r["default_currency"] for r in new_rates if r.get("delivery_center_code")}
 
         missing_dcs = [dc for dc in used_dc_codes if dc not in proposed_currency_by_dc]
         if missing_dcs:
@@ -192,32 +180,17 @@ class RoleService(BaseService):
 
     async def _role_in_use(self, role_id: UUID) -> bool:
         """Check if a role is referenced by projects, releases, or employee assignments."""
-        # engagement_roles
-        proj = await self.session.execute(
-            select(func.count()).select_from(engagement_roles).where(engagement_roles.c.role_id == role_id)
+        # Check ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
+        from app.models.estimate import EstimateLineItem, Estimate
+        from app.models.role_rate import RoleRate
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(EstimateLineItem)
+            .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
+            .join(RoleRate, RoleRate.id == EstimateLineItem.role_rates_id)
+            .where(and_(RoleRate.role_id == role_id, Estimate.active_version == True))
         )
-        if proj.scalar_one() > 0:
-            return True
-
-        # release_roles
-        rel = await self.session.execute(
-            select(func.count()).select_from(release_roles).where(release_roles.c.role_id == role_id)
-        )
-        if rel.scalar_one() > 0:
-            return True
-
-        # employee_engagements
-        ep = await self.session.execute(
-            select(func.count()).select_from(EmployeeEngagement).where(EmployeeEngagement.role_id == role_id)
-        )
-        if ep.scalar_one() > 0:
-            return True
-
-        # employee_releases
-        er = await self.session.execute(
-            select(func.count()).select_from(EmployeeRelease).where(EmployeeRelease.role_id == role_id)
-        )
-        if er.scalar_one() > 0:
+        if result.scalar_one() > 0:
             return True
 
         return False
@@ -235,7 +208,7 @@ class RoleService(BaseService):
         if not role:
             return None
 
-        # Build response payload, adding a fallback rate for legacy roles missing role_rates
+        # Build response payload
         rates_payload = []
         if role.role_rates:
             for r in role.role_rates:
@@ -244,33 +217,21 @@ class RoleService(BaseService):
                         "id": r.id,
                         "delivery_center_code": getattr(r.delivery_center, "code", None)
                         or getattr(r, "delivery_center_code", None),
-                        "currency": r.currency,
+                        "default_currency": r.default_currency,
                         "internal_cost_rate": r.internal_cost_rate,
                         "external_rate": r.external_rate,
                         "delivery_center_id": getattr(r.delivery_center, "id", None),
                     }
                 )
         else:
-            # Fallback for existing roles without role_rates to avoid validation errors
-            dc_code = "north-america"
-            rates_payload.append(
-                {
-                    "id": uuid.uuid4(),
-                    "delivery_center_code": dc_code,
-                    "currency": role.default_currency or "USD",
-                    "internal_cost_rate": role.role_internal_cost_rate or 0.0,
-                    "external_rate": role.role_external_rate or 0.0,
-                    "delivery_center_id": None,
-                }
-            )
+            # Roles must have at least one role_rate - if none exist, return empty list
+            # This should not happen in normal operation as roles require role_rates
+            pass
 
         role_payload = {
             "id": role.id,
             "role_name": role.role_name,
-            "role_internal_cost_rate": role.role_internal_cost_rate,
-            "role_external_rate": role.role_external_rate,
             "status": role.status,
-            "default_currency": role.default_currency,
             "role_rates": rates_payload,
         }
 
@@ -291,7 +252,7 @@ class RoleService(BaseService):
             role_rate = RoleRate(
                 role_id=role_id,
                 delivery_center_id=delivery_center.id,
-                currency=rate_data["currency"],
+                default_currency=rate_data["default_currency"],
                 internal_cost_rate=rate_data["internal_cost_rate"],
                 external_rate=rate_data["external_rate"],
             )

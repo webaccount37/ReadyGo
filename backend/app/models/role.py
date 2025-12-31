@@ -24,15 +24,9 @@ class Role(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     role_name = Column(String(100), nullable=False, unique=True, index=True)
-    role_internal_cost_rate = Column(Float, nullable=True)
-    role_external_rate = Column(Float, nullable=True)
     status = Column(SQLEnum(RoleStatus), nullable=False, default=RoleStatus.ACTIVE)
-    default_currency = Column(String(3), default="USD", nullable=False)
     
     # Relationships
-    employees = relationship("Employee", back_populates="role", foreign_keys="Employee.role_id")
-    engagements = relationship("Engagement", secondary="engagement_roles", back_populates="roles")
-    releases = relationship("Release", secondary="release_roles", back_populates="roles")
     role_rates = relationship("RoleRate", back_populates="role", cascade="all, delete-orphan")
 
 

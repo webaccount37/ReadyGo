@@ -11,7 +11,11 @@ from app.services.base_service import BaseService
 from app.db.repositories.release_repository import ReleaseRepository
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
+from app.db.repositories.estimate_repository import EstimateRepository
+from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
 from app.schemas.release import ReleaseCreate, ReleaseUpdate, ReleaseResponse
+from sqlalchemy import select, and_
+from app.models.estimate import Estimate, EstimateLineItem
 
 
 class ReleaseService(BaseService):
@@ -22,31 +26,57 @@ class ReleaseService(BaseService):
         self.release_repo = ReleaseRepository(session)
         self.employee_repo = EmployeeRepository(session)
         self.role_repo = RoleRepository(session)
+        self.estimate_repo = EstimateRepository(session)
+        self.line_item_repo = EstimateLineItemRepository(session)
     
     async def create_release(self, release_data: ReleaseCreate) -> ReleaseResponse:
         """Create a new release."""
         release_dict = release_data.model_dump(exclude_unset=True)
         release = await self.release_repo.create(**release_dict)
+        await self.session.flush()  # Flush to get release.id
+        
+        # Auto-create "INITIAL" estimate for the release
+        # Check if an "INITIAL" estimate already exists (shouldn't happen, but safety check)
+        from sqlalchemy import select, and_
+        from app.models.estimate import Estimate
+        existing_initial = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.release_id == release.id,
+                    Estimate.name == "INITIAL"
+                )
+            )
+        )
+        if not existing_initial.scalar_one_or_none():
+            # Create the INITIAL estimate
+            initial_estimate = Estimate(
+                release_id=release.id,
+                name="INITIAL",
+                active_version=True,  # First estimate is always active
+            )
+            self.session.add(initial_estimate)
+            await self.session.flush()
+        
         await self.session.commit()
         # Reload with engagement relationship
         release = await self.release_repo.get(release.id)
         if not release:
             raise ValueError("Failed to retrieve created release")
-        return self._to_response(release, include_relationships=False)
+        return await self._to_response(release, include_relationships=False)
     
     async def get_release(self, release_id: UUID) -> Optional[ReleaseResponse]:
         """Get release by ID."""
         release = await self.release_repo.get(release_id)
         if not release:
             return None
-        return self._to_response(release, include_relationships=False)
+        return await self._to_response(release, include_relationships=False)
     
     async def get_release_with_relationships(self, release_id: UUID) -> Optional[ReleaseResponse]:
         """Get release with related entities."""
         release = await self.release_repo.get_with_relationships(release_id)
         if not release:
             return None
-        return self._to_response(release, include_relationships=True)
+        return await self._to_response(release, include_relationships=True)
     
     async def list_releases(
         self,
@@ -74,7 +104,10 @@ class ReleaseService(BaseService):
             releases = await self.release_repo.list(skip=skip, limit=limit)
         
         total = len(releases)
-        return [self._to_response(rel, include_relationships=False) for rel in releases], total
+        responses = []
+        for rel in releases:
+            responses.append(await self._to_response(rel, include_relationships=False))
+        return responses, total
     
     async def update_release(
         self,
@@ -93,7 +126,7 @@ class ReleaseService(BaseService):
         updated = await self.release_repo.get(release_id)
         if not updated:
             return None
-        return self._to_response(updated, include_relationships=False)
+        return await self._to_response(updated, include_relationships=False)
     
     async def delete_release(self, release_id: UUID) -> bool:
         """Delete a release."""
@@ -101,41 +134,67 @@ class ReleaseService(BaseService):
         await self.session.commit()
         return deleted
     
-    async def link_roles_to_release(
-        self,
-        release_id: UUID,
-        role_ids: List[UUID],
-    ) -> bool:
-        """Link roles to a release."""
-        release = await self.release_repo.get_with_relationships(release_id)
-        if not release:
-            return False
+    async def _get_employees_from_active_estimates(self, release_id: UUID) -> List[dict]:
+        """Get employees from active estimate line items for a release."""
+        # Get active estimate for this release
+        result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
+            )
+        )
+        active_estimate = result.scalar_one_or_none()
         
-        roles = []
-        for role_id in role_ids:
-            role = await self.role_repo.get(role_id)
-            if role:
-                roles.append(role)
+        if not active_estimate:
+            return []
         
-        release.roles.extend(roles)
-        await self.session.commit()
-        return True
+        # Get line items from active estimate
+        line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
+        
+        employees_dict = {}  # employee_id -> employee data
+        
+        for li in line_items:
+            if not li.employee_id:
+                continue
+            
+            employee_id = str(li.employee_id)
+            
+            # Get employee if not already in dict
+            if employee_id not in employees_dict:
+                employee = await self.employee_repo.get(li.employee_id)
+                if not employee:
+                    continue
+                
+                # Get role and delivery center from role_rate
+                role_id = None
+                role_name = None
+                delivery_center_code = None
+                
+                if li.role_rate:
+                    if li.role_rate.role:
+                        role_id = str(li.role_rate.role.id)
+                        role_name = li.role_rate.role.role_name
+                    if li.role_rate.delivery_center:
+                        delivery_center_code = li.role_rate.delivery_center.code
+                
+                employees_dict[employee_id] = {
+                    "id": employee_id,
+                    "first_name": employee.first_name,
+                    "last_name": employee.last_name,
+                    "email": employee.email,
+                    "role_id": role_id,
+                    "role_name": role_name,
+                    "start_date": li.start_date.isoformat() if li.start_date else None,
+                    "end_date": li.end_date.isoformat() if li.end_date else None,
+                    "project_rate": float(li.rate) if li.rate else None,
+                    "delivery_center": delivery_center_code,
+                }
+        
+        return list(employees_dict.values())
     
-    async def unlink_roles_from_release(
-        self,
-        release_id: UUID,
-        role_ids: List[UUID],
-    ) -> bool:
-        """Unlink roles from a release."""
-        release = await self.release_repo.get_with_relationships(release_id)
-        if not release:
-            return False
-        
-        release.roles = [role for role in release.roles if role.id not in role_ids]
-        await self.session.commit()
-        return True
-    
-    def _to_response(self, release, include_relationships: bool = False) -> ReleaseResponse:
+    async def _to_response(self, release, include_relationships: bool = False) -> ReleaseResponse:
         """Convert release model to response schema."""
         import logging
         logger = logging.getLogger(__name__)
@@ -171,51 +230,41 @@ class ReleaseService(BaseService):
         
         # Include employees if relationships are requested
         if include_relationships:
-            employees = []
-            if hasattr(release, 'employee_associations') and release.employee_associations:
-                for assoc in release.employee_associations:
-                    # Safety check: ensure association belongs to this release
-                    if assoc.release_id != release.id:
-                        continue
-                    
-                    if assoc.employee:
-                        # Log dates for debugging (similar to Quote service)
-                        start_date_iso = assoc.start_date.isoformat() if assoc.start_date else None
-                        end_date_iso = assoc.end_date.isoformat() if assoc.end_date else None
-                        logger.info(f"  === RELEASE SERVICE: SERIALIZING EMPLOYEE DATES ===")
-                        logger.info(f"  Employee {assoc.employee.id} on Release {release.id}")
-                        logger.info(f"  assoc.start_date = {assoc.start_date} (type: {type(assoc.start_date)})")
-                        logger.info(f"  assoc.end_date = {assoc.end_date} (type: {type(assoc.end_date)})")
-                        if assoc.start_date:
-                            logger.info(f"  assoc.start_date.isoformat() = {start_date_iso}")
-                        if assoc.end_date:
-                            logger.info(f"  assoc.end_date.isoformat() = {end_date_iso}")
-                        logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
-                        logger.info(f"  About to add to employees list: start_date={start_date_iso} (type: {type(start_date_iso)}), end_date={end_date_iso} (type: {type(end_date_iso)})")
-                        
-                        employees.append({
-                            "id": str(assoc.employee.id),
-                            "first_name": assoc.employee.first_name,
-                            "last_name": assoc.employee.last_name,
-                            "email": assoc.employee.email,
-                            "role_id": str(assoc.role_id) if assoc.role_id else None,
-                            "role_name": getattr(assoc.role, "role_name", None) if assoc.role else None,
-                            "start_date": start_date_iso,  # Already ISO string "YYYY-MM-DD"
-                            "end_date": end_date_iso,  # Already ISO string "YYYY-MM-DD"
-                            "project_rate": float(assoc.project_rate) if assoc.project_rate else None,
-                            "delivery_center": getattr(assoc.delivery_center, "code", None) if assoc.delivery_center else None,
-                        })
-                        logger.info(f"  Added employee to list. Dict start_date={employees[-1]['start_date']} (type: {type(employees[-1]['start_date'])}), end_date={employees[-1]['end_date']} (type: {type(employees[-1]['end_date'])})")
+            employees = await self._get_employees_from_active_estimates(release.id)
             release_dict["employees"] = employees
-            logger.info(f"  === AFTER ADDING EMPLOYEES TO RELEASE_DICT ===")
-            if employees:
-                logger.info(f"  First employee start_date={employees[0].get('start_date')} (type: {type(employees[0].get('start_date'))})")
-                logger.info(f"  First employee end_date={employees[0].get('end_date')} (type: {type(employees[0].get('end_date'))})")
+        else:
+            release_dict["employees"] = []
         
         response = ReleaseResponse.model_validate(release_dict)
-        logger.info(f"  === AFTER PYDANTIC VALIDATION ===")
-        if response.employees:
-            logger.info(f"  Response employees[0].start_date={response.employees[0].get('start_date')} (type: {type(response.employees[0].get('start_date'))})")
-            logger.info(f"  Response employees[0].end_date={response.employees[0].get('end_date')} (type: {type(response.employees[0].get('end_date'))})")
         return response
+    
+    async def link_roles_to_release(
+        self,
+        release_id: UUID,
+        role_ids: List[UUID],
+    ) -> bool:
+        """Link roles to a release.
+        
+        Note: Roles are now linked through estimate line items, not directly.
+        This method is kept for API compatibility but does nothing.
+        To link roles, create estimate line items with the desired role_rates.
+        """
+        # Roles are now linked through estimate line items, not directly to releases
+        # This method is kept for backward compatibility but does nothing
+        return True
+    
+    async def unlink_roles_from_release(
+        self,
+        release_id: UUID,
+        role_ids: List[UUID],
+    ) -> bool:
+        """Unlink roles from a release.
+        
+        Note: Roles are now linked through estimate line items, not directly.
+        This method is kept for API compatibility but does nothing.
+        To unlink roles, remove estimate line items with the desired role_rates.
+        """
+        # Roles are now linked through estimate line items, not directly to releases
+        # This method is kept for backward compatibility but does nothing
+        return True
 

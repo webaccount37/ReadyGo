@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.employee import Employee, EmployeeStatus, EmployeeType
-from app.models.association_models import EmployeeEngagement, EmployeeRelease
+# TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models
 from app.models.delivery_center import DeliveryCenter
 from app.models.engagement import Engagement
 from app.models.release import Release
@@ -44,13 +44,7 @@ class EmployeeRepository(BaseRepository[Employee]):
     def _base_query(self):
         return select(Employee).options(
             selectinload(Employee.delivery_center),
-            selectinload(Employee.engagement_associations).selectinload(EmployeeEngagement.engagement),
-            selectinload(Employee.engagement_associations).selectinload(EmployeeEngagement.role),
-            selectinload(Employee.engagement_associations).selectinload(EmployeeEngagement.delivery_center),
-            selectinload(Employee.release_associations).selectinload(EmployeeRelease.release).selectinload(Release.engagement),
-            selectinload(Employee.release_associations).selectinload(EmployeeRelease.role),
-            selectinload(Employee.release_associations).selectinload(EmployeeRelease.delivery_center),
-            selectinload(Employee.role),
+            # TODO: Load relationships from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
         )
 
     async def list(
@@ -108,16 +102,10 @@ class EmployeeRepository(BaseRepository[Employee]):
     
     async def get_with_relationships(self, employee_id: UUID) -> Optional[Employee]:
         """Get employee with related engagements and releases."""
+        # TODO: Refactor to load relationships from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
         result = await self.session.execute(
             select(Employee)
             .options(
-                selectinload(Employee.engagement_associations).selectinload(EmployeeEngagement.engagement),
-                selectinload(Employee.engagement_associations).selectinload(EmployeeEngagement.role),
-                selectinload(Employee.engagement_associations).selectinload(EmployeeEngagement.delivery_center),
-                selectinload(Employee.release_associations).selectinload(EmployeeRelease.release).selectinload(Release.engagement),
-                selectinload(Employee.release_associations).selectinload(EmployeeRelease.role),
-                selectinload(Employee.release_associations).selectinload(EmployeeRelease.delivery_center),
-                selectinload(Employee.role),
                 selectinload(Employee.delivery_center),
             )
             .where(Employee.id == employee_id)

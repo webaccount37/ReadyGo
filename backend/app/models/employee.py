@@ -5,7 +5,6 @@ Employee model for staff planning and quoting system.
 from sqlalchemy import Column, String, Boolean, Float, Date, JSON, ForeignKey, Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
-from sqlalchemy.ext.associationproxy import association_proxy
 import uuid
 import enum
 
@@ -37,7 +36,6 @@ class Employee(Base):
     employee_type = Column(SQLEnum(EmployeeType), nullable=False, default=EmployeeType.FULL_TIME)
     status = Column(SQLEnum(EmployeeStatus), nullable=False, default=EmployeeStatus.ACTIVE)
     role_title = Column(String(100), nullable=True)
-    role_id = Column(UUID(as_uuid=True), ForeignKey("roles.id"), nullable=True)
     skills = Column(JSON, nullable=True, default=list)
     internal_cost_rate = Column(Float, nullable=False)  # ICR
     internal_bill_rate = Column(Float, nullable=False)  # IBR
@@ -51,14 +49,6 @@ class Employee(Base):
     delivery_center_id = Column(UUID(as_uuid=True), ForeignKey("delivery_centers.id"), nullable=True)
     
     # Relationships
-    role = relationship("Role", back_populates="employees", foreign_keys=[role_id])
-    # Use association objects instead of simple many-to-many
-    engagement_associations = relationship("EmployeeEngagement", back_populates="employee", cascade="all, delete-orphan")
-    release_associations = relationship("EmployeeRelease", back_populates="employee", cascade="all, delete-orphan")
-    # Convenience proxies to access engagements/releases through associations (for backward compatibility)
-    engagements = association_proxy("engagement_associations", "engagement")
-    releases = association_proxy("release_associations", "release")
-    
     availability_calendar = relationship("Calendar", foreign_keys=[availability_calendar_id])
     delivery_center = relationship("DeliveryCenter")
     owned_engagements = relationship("Engagement", foreign_keys="Engagement.engagement_owner_id", back_populates="engagement_owner")

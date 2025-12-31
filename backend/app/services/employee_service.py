@@ -10,9 +10,18 @@ from app.services.base_service import BaseService
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.engagement_repository import EngagementRepository
 from app.db.repositories.release_repository import ReleaseRepository
+from app.db.repositories.estimate_repository import EstimateRepository
+from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
+from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EngagementReference, ReleaseReference
 from app.schemas.relationships import LinkEmployeesToEngagementRequest, LinkEmployeesToReleaseRequest
 from app.models.employee import Employee
+from app.models.estimate import Estimate, EstimateLineItem
+from app.models.release import Release
+from app.models.role_rate import RoleRate
+from sqlalchemy import select, and_, func, update
+from uuid import UUID
+from decimal import Decimal
 
 
 class EmployeeService(BaseService):
@@ -23,6 +32,9 @@ class EmployeeService(BaseService):
         self.employee_repo = EmployeeRepository(session)
         self.engagement_repo = EngagementRepository(session)
         self.release_repo = ReleaseRepository(session)
+        self.estimate_repo = EstimateRepository(session)
+        self.line_item_repo = EstimateLineItemRepository(session)
+        self.role_rate_repo = RoleRateRepository(session)
     
     async def create_employee(self, employee_data: EmployeeCreate) -> EmployeeResponse:
         """Create a new employee."""
@@ -34,14 +46,14 @@ class EmployeeService(BaseService):
         employee = await self.employee_repo.create(**employee_dict)
         await self.session.commit()
         await self.session.refresh(employee)
-        return self._employee_to_response(employee, include_relationships=False)
+        return await self._employee_to_response(employee, include_relationships=False)
     
     async def get_employee(self, employee_id: UUID) -> Optional[EmployeeResponse]:
         """Get employee by ID."""
         employee = await self.employee_repo.get(employee_id)
         if not employee:
             return None
-        return self._employee_to_response(employee, include_relationships=False)
+        return await self._employee_to_response(employee, include_relationships=False)
     
     async def get_employee_with_relationships(self, employee_id: UUID) -> Optional[EmployeeResponse]:
         """Get employee with related engagements and releases."""
@@ -52,14 +64,14 @@ class EmployeeService(BaseService):
             employee = await self.employee_repo.get_with_relationships(employee_id)
             if not employee:
                 return None
-            return self._employee_to_response(employee, include_relationships=True)
+            return await self._employee_to_response(employee, include_relationships=True)
         except Exception as e:
             logger.error(f"Error in get_employee_with_relationships: {e}", exc_info=True)
             # Fallback to basic employee retrieval without relationships
             employee = await self.employee_repo.get(employee_id)
             if not employee:
                 return None
-            return self._employee_to_response(employee, include_relationships=False)
+            return await self._employee_to_response(employee, include_relationships=False)
     
     async def list_employees(
         self,
@@ -93,7 +105,7 @@ class EmployeeService(BaseService):
         # Build responses without relationships (set to empty lists to avoid lazy loading issues)
         responses = []
         for emp in employees:
-            responses.append(self._employee_to_response(emp, include_relationships=False))
+            responses.append(await self._employee_to_response(emp, include_relationships=False))
         return responses, total
     
     async def update_employee(
@@ -145,7 +157,140 @@ class EmployeeService(BaseService):
         await self.session.commit()
         return deleted
 
-    def _employee_to_response(self, employee, include_relationships: bool) -> EmployeeResponse:
+    async def _get_engagements_from_active_estimates(self, employee_id: UUID) -> List[dict]:
+        """Get engagements from active estimate line items for an employee."""
+        # Get all active estimates with line items for this employee
+        from sqlalchemy.orm import selectinload
+        from app.models.role_rate import RoleRate
+        
+        result = await self.session.execute(
+            select(EstimateLineItem)
+            .options(
+                selectinload(EstimateLineItem.estimate).selectinload(Estimate.release),
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center)
+            )
+            .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
+            .join(Release, Release.id == Estimate.release_id)
+            .where(
+                and_(
+                    EstimateLineItem.employee_id == employee_id,
+                    Estimate.active_version == True
+                )
+            )
+        )
+        line_items = result.scalars().all()
+        
+        engagements_dict = {}  # engagement_id -> engagement data
+        
+        for li in line_items:
+            # Get release and engagement from loaded relationships
+            if not li.estimate or not li.estimate.release:
+                continue
+            
+            release = li.estimate.release
+            if not release.engagement_id:
+                continue
+            
+            engagement_id = str(release.engagement_id)
+            
+            if engagement_id not in engagements_dict:
+                engagement = await self.engagement_repo.get(release.engagement_id)
+                if not engagement:
+                    continue
+                
+                # Get role and delivery center from role_rate
+                role_id = None
+                role_name = None
+                delivery_center_code = None
+                
+                if li.role_rate:
+                    if li.role_rate.role:
+                        role_id = str(li.role_rate.role.id)
+                        role_name = li.role_rate.role.role_name
+                    if li.role_rate.delivery_center:
+                        delivery_center_code = li.role_rate.delivery_center.code
+                
+                engagements_dict[engagement_id] = {
+                    "id": engagement_id,
+                    "name": engagement.name,
+                    "role_id": role_id,
+                    "role_name": role_name,
+                    "start_date": li.start_date.isoformat() if li.start_date else None,
+                    "end_date": li.end_date.isoformat() if li.end_date else None,
+                    "project_rate": float(li.rate) if li.rate else None,
+                    "delivery_center": delivery_center_code,
+                }
+        
+        return list(engagements_dict.values())
+    
+    async def _get_releases_from_active_estimates(self, employee_id: UUID) -> List[dict]:
+        """Get releases from active estimate line items for an employee."""
+        # Get all active estimates with line items for this employee
+        from sqlalchemy.orm import selectinload
+        from app.models.role_rate import RoleRate
+        
+        result = await self.session.execute(
+            select(EstimateLineItem)
+            .options(
+                selectinload(EstimateLineItem.estimate).selectinload(Estimate.release),
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center)
+            )
+            .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
+            .where(
+                and_(
+                    EstimateLineItem.employee_id == employee_id,
+                    Estimate.active_version == True
+                )
+            )
+        )
+        line_items = result.scalars().all()
+        
+        releases_dict = {}  # release_id -> release data
+        
+        for li in line_items:
+            # Get release from loaded relationship
+            if not li.estimate or not li.estimate.release:
+                continue
+            
+            release = li.estimate.release
+            release_id = str(release.id)
+            
+            # Always update the release entry to get the most recent line item data
+            # Get role and delivery center from role_rate
+            role_id = None
+            role_name = None
+            delivery_center_code = None
+            
+            if li.role_rate:
+                if li.role_rate.role:
+                    role_id = str(li.role_rate.role.id)
+                    role_name = li.role_rate.role.role_name
+                if li.role_rate.delivery_center:
+                    delivery_center_code = li.role_rate.delivery_center.code
+            
+            # Use the first line item's dates/rates
+            if release_id not in releases_dict:
+                # Skip releases without engagement_id (shouldn't happen, but be safe)
+                if not release.engagement_id:
+                    continue
+                    
+                releases_dict[release_id] = {
+                    "id": release_id,  # Pydantic will convert string to UUID
+                    "name": release.name,
+                    "engagement_id": str(release.engagement_id),  # Pydantic will convert string to UUID
+                    "role_id": role_id,  # Already a string or None, Pydantic will convert to UUID if not None
+                    "role_name": role_name,
+                    "start_date": li.start_date.isoformat() if li.start_date else None,
+                    "end_date": li.end_date.isoformat() if li.end_date else None,
+                    "project_rate": float(li.rate) if li.rate else None,
+                    "delivery_center": delivery_center_code,
+                }
+        
+        return list(releases_dict.values())
+    
+    async def _employee_to_response(self, employee, include_relationships: bool) -> EmployeeResponse:
         """Build EmployeeResponse from model with eager-loaded relationships."""
         # Base dict without lazy attributes
         base = {
@@ -156,7 +301,7 @@ class EmployeeService(BaseService):
             "employee_type": employee.employee_type,
             "status": employee.status,
             "role_title": employee.role_title,
-            "role_id": employee.role_id,
+            "role_id": None,  # Removed - no longer stored on employee
             "skills": employee.skills,
             "internal_cost_rate": employee.internal_cost_rate,
             "internal_bill_rate": employee.internal_bill_rate,
@@ -171,55 +316,115 @@ class EmployeeService(BaseService):
         }
 
         if include_relationships:
-            # Build engagements and releases from eager-loaded associations
-            engagements = []
-            for assoc in getattr(employee, "engagement_associations", []) or []:
-                if assoc.engagement:
-                    engagements.append({
-                        "id": str(assoc.engagement.id),
-                        "name": assoc.engagement.name,
-                        "role_id": str(assoc.role_id) if assoc.role_id else None,
-                        "role_name": getattr(assoc.role, "role_name", None),
-                        "start_date": assoc.start_date.isoformat() if assoc.start_date else None,
-                        "end_date": assoc.end_date.isoformat() if assoc.end_date else None,
-                        "project_rate": float(assoc.project_rate) if assoc.project_rate is not None else None,
-                        "delivery_center": getattr(assoc.delivery_center, "code", None),
-                    })
-            releases = []
-            for assoc in getattr(employee, "release_associations", []) or []:
-                if assoc.release:
-                    releases.append({
-                        "id": str(assoc.release.id),
-                        "name": assoc.release.name,
-                        "engagement_id": str(assoc.release.engagement_id) if assoc.release.engagement_id else None,
-                        "role_id": str(assoc.role_id) if assoc.role_id else None,
-                        "role_name": getattr(assoc.role, "role_name", None),
-                        "start_date": assoc.start_date.isoformat() if assoc.start_date else None,
-                        "end_date": assoc.end_date.isoformat() if assoc.end_date else None,
-                        "project_rate": float(assoc.project_rate) if assoc.project_rate is not None else None,
-                        "delivery_center": getattr(assoc.delivery_center, "code", None),
-                    })
+            # Build engagements and releases from active estimate line items
+            engagements = await self._get_engagements_from_active_estimates(employee.id)
+            releases = await self._get_releases_from_active_estimates(employee.id)
             base["engagements"] = engagements
             base["releases"] = releases
         else:
             base["engagements"] = []
             base["releases"] = []
 
-        return EmployeeResponse.model_validate(base)
+        # Validate and return response
+        try:
+            response = EmployeeResponse.model_validate(base)
+            return response
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error validating employee response: {e}")
+            logger.error(f"Base dict: {base}")
+            logger.error(f"Engagements: {base.get('engagements', [])}")
+            logger.error(f"Releases: {base.get('releases', [])}")
+            raise
+    
+    async def _get_or_create_role_rate(self, role_id: UUID, delivery_center_id: UUID, currency: str) -> RoleRate:
+        """Get or create a role rate for the given role, delivery center, and currency."""
+        result = await self.session.execute(
+            select(RoleRate).where(
+                and_(
+                    RoleRate.role_id == role_id,
+                    RoleRate.delivery_center_id == delivery_center_id,
+                    RoleRate.default_currency == currency
+                )
+            )
+        )
+        role_rate = result.scalar_one_or_none()
+        if role_rate:
+            return role_rate
+        
+        # Create a new role rate with default values
+        # Get employee rates as defaults if available, otherwise use 0
+        role_rate = RoleRate(
+            role_id=role_id,
+            delivery_center_id=delivery_center_id,
+            default_currency=currency,
+            internal_cost_rate=0.0,
+            external_rate=0.0
+        )
+        self.session.add(role_rate)
+        await self.session.flush()
+        return role_rate
+    
+    async def _get_or_create_active_estimate(self, release_id: UUID, currency: str = "USD") -> Estimate:
+        """Get or create an active estimate for a release."""
+        # Check if active estimate exists
+        result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
+            )
+        )
+        active_estimate = result.scalar_one_or_none()
+        
+        if active_estimate:
+            return active_estimate
+        
+        # Create a new active estimate
+        release = await self.release_repo.get(release_id)
+        if not release:
+            raise ValueError(f"Release {release_id} not found")
+        
+        # Deactivate any other estimates for this release (shouldn't be any, but safety check)
+        await self.session.execute(
+            update(Estimate)
+            .where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
+            )
+            .values(active_version=False)
+        )
+        
+        estimate = Estimate(
+            release_id=release_id,
+            name=f"Estimate for {release.name}",
+            currency=currency,
+            status="draft",
+            active_version=True
+        )
+        self.session.add(estimate)
+        await self.session.flush()
+        return estimate
     
     async def link_employees_to_engagement(
         self,
         engagement_id: UUID,
         request: LinkEmployeesToEngagementRequest,
     ) -> bool:
-        """Link employees to an engagement and releases. Fields are only on releases, not engagements."""
+        """Link employees to an engagement and releases by creating estimate line items."""
         import logging
-        from sqlalchemy import select
-        from app.models.association_models import EmployeeEngagement, EmployeeRelease
+        from sqlalchemy import select, update
         from app.db.repositories.role_repository import RoleRepository
         from app.db.repositories.release_repository import ReleaseRepository
         from app.models.delivery_center import DeliveryCenter as DeliveryCenterModel
+        from app.models.estimate import Estimate
+        from app.models.estimate import EstimateLineItem
         from datetime import date
+        from decimal import Decimal
         
         logger = logging.getLogger(__name__)
         
@@ -229,61 +434,11 @@ class EmployeeService(BaseService):
                 logger.warning(f"Engagement {engagement_id} not found")
                 return False
             
-            # Get existing employee IDs from the engagement associations
-            existing_associations = await self.session.execute(
-                select(EmployeeEngagement).where(
-                    EmployeeEngagement.engagement_id == engagement_id,
-                    EmployeeEngagement.employee_id.in_(request.employee_ids)
-                )
-            )
-            existing_employee_ids = {assoc.employee_id for assoc in existing_associations.scalars()}
-            logger.info(f"Found {len(existing_employee_ids)} existing engagement associations")
-            
-            # Create engagement associations (without fields - fields are only on releases)
-            # Note: EmployeeEngagement model still requires these fields, so we'll use placeholder values
-            # TODO: Consider making these nullable or removing them in a future migration
-            associations_created = 0
             role_repo = RoleRepository(self.session)
-            # Get a default role (first role) for placeholder - or make these nullable
-            default_role = await role_repo.list(limit=1)
-            default_role_id = default_role[0].id if default_role else None
-            if not default_role_id:
-                raise ValueError("No roles exist in the system. Please create at least one role.")
-            
-            # Get default delivery center
-            delivery_center_result = await self.session.execute(
-                select(DeliveryCenterModel).limit(1)
-            )
-            default_dc = delivery_center_result.scalar_one_or_none()
-            if not default_dc:
-                raise ValueError("No delivery centers exist in the system.")
-            
-            for emp_id in request.employee_ids:
-                if emp_id not in existing_employee_ids:
-                    employee = await self.employee_repo.get(emp_id)
-                    if not employee:
-                        logger.warning(f"Employee {emp_id} not found")
-                        continue
-                    
-                    # Create engagement association with placeholder values (fields are on releases only)
-                    association = EmployeeEngagement(
-                        employee_id=emp_id,
-                        engagement_id=engagement_id,
-                        role_id=default_role_id,  # Placeholder
-                        start_date=date.today(),  # Placeholder
-                        end_date=date.today(),  # Placeholder
-                        project_rate=0.0,  # Placeholder
-                        delivery_center_id=default_dc.id,  # Placeholder
-                    )
-                    logger.info(f"Creating EmployeeEngagement (placeholder fields): employee_id={emp_id}, engagement_id={engagement_id}")
-                    self.session.add(association)
-                    associations_created += 1
-            
-            # Now link employees to releases with actual fields
             release_repo = ReleaseRepository(self.session)
-            releases_created = 0
+            line_items_created = 0
             
-            # Verify all releases belong to the engagement and link with fields
+            # Process each release in the request
             for release_data in request.releases:
                 release = await release_repo.get(release_data.release_id)
                 if not release:
@@ -304,56 +459,73 @@ class EmployeeService(BaseService):
                 if not delivery_center:
                     raise ValueError(f"Delivery center with code '{release_data.delivery_center}' not found")
                 
-                # Link employees to this release with fields
+                # Get or create active estimate for this release
+                estimate = await self._get_or_create_active_estimate(release_data.release_id, release.default_currency or "USD")
+                
+                # Get or create role rate
+                currency = release.default_currency or "USD"
+                role_rate = await self._get_or_create_role_rate(
+                    release_data.role_id,
+                    delivery_center.id,
+                    currency
+                )
+                
+                # Get existing line items for this employee/release combination
+                existing_line_items_result = await self.session.execute(
+                    select(EstimateLineItem).where(
+                        and_(
+                            EstimateLineItem.estimate_id == estimate.id,
+                            EstimateLineItem.employee_id.in_(request.employee_ids)
+                        )
+                    )
+                )
+                existing_employee_ids = {li.employee_id for li in existing_line_items_result.scalars()}
+                
+                # Create line items for employees not already linked
                 for emp_id in request.employee_ids:
-                    if emp_id not in existing_employee_ids:
-                        # Check if release association already exists
-                        existing_release_assoc = await self.session.execute(
-                            select(EmployeeRelease).where(
-                                EmployeeRelease.employee_id == emp_id,
-                                EmployeeRelease.release_id == release_data.release_id
-                            )
-                        )
-                        if existing_release_assoc.scalar_one_or_none():
-                            logger.info(f"Employee {emp_id} already linked to release {release_data.release_id}, skipping")
-                            continue
-                        
-                        # Create release association with actual fields
-                        release_association = EmployeeRelease(
-                            employee_id=emp_id,
-                            release_id=release_data.release_id,
-                            role_id=release_data.role_id,
-                            start_date=release_data.start_date,
-                            end_date=release_data.end_date,
-                            project_rate=release_data.project_rate,
-                            delivery_center_id=delivery_center.id,
-                        )
-                        logger.info(f"Creating EmployeeRelease: employee_id={emp_id}, release_id={release_data.release_id}, role_id={release_data.role_id}")
-                        self.session.add(release_association)
-                        releases_created += 1
-                        
-                        # Track release IDs that need syncing
-                        if not hasattr(self, '_releases_to_sync'):
-                            self._releases_to_sync = {}
-                        if release_data.release_id not in self._releases_to_sync:
-                            self._releases_to_sync[release_data.release_id] = []
-                        self._releases_to_sync[release_data.release_id].append(emp_id)
+                    if emp_id in existing_employee_ids:
+                        logger.info(f"Employee {emp_id} already has line item in estimate {estimate.id}, skipping")
+                        continue
+                    
+                    employee = await self.employee_repo.get(emp_id)
+                    if not employee:
+                        logger.warning(f"Employee {emp_id} not found")
+                        continue
+                    
+                    # Get rates - use project_rate from request, or employee rates, or role_rate rates
+                    rate = Decimal(str(release_data.project_rate)) if release_data.project_rate else Decimal(str(employee.external_bill_rate))
+                    cost = Decimal(str(employee.internal_cost_rate))
+                    
+                    # Get max row_order
+                    max_order_result = await self.session.execute(
+                        select(func.max(EstimateLineItem.row_order))
+                        .where(EstimateLineItem.estimate_id == estimate.id)
+                    )
+                    max_order = max_order_result.scalar_one_or_none() or -1
+                    
+                    # Create line item
+                    line_item = EstimateLineItem(
+                        estimate_id=estimate.id,
+                        role_rates_id=role_rate.id,
+                        employee_id=emp_id,
+                        rate=rate,
+                        cost=cost,
+                        currency=currency,
+                        start_date=release_data.start_date,
+                        end_date=release_data.end_date,
+                        row_order=max_order + 1,
+                    )
+                    self.session.add(line_item)
+                    line_items_created += 1
+                    logger.info(f"Creating estimate line item: employee_id={emp_id}, release_id={release_data.release_id}, role_rates_id={role_rate.id}")
             
-            if associations_created == 0 and releases_created == 0:
-                logger.warning(f"No new associations created - all employees already linked")
+            if line_items_created == 0:
+                logger.warning(f"No new line items created - all employees already linked")
                 return True
             
-            # Sync to estimate line items for all releases that were updated
-            await self.session.flush()  # Flush to get associations saved
-            if hasattr(self, '_releases_to_sync'):
-                for release_id, employee_ids in self._releases_to_sync.items():
-                    await self._sync_employee_release_to_quotes(release_id, employee_ids)
-                delattr(self, '_releases_to_sync')
-            
-            logger.info(f"About to flush and commit {associations_created} engagement associations and {releases_created} release associations")
             await self.session.flush()
             await self.session.commit()
-            logger.info(f"Successfully committed {associations_created} engagement associations and {releases_created} release associations")
+            logger.info(f"Successfully committed {line_items_created} estimate line items")
             
             return True
         except ValueError as e:
@@ -372,20 +544,43 @@ class EmployeeService(BaseService):
         engagement_id: UUID,
         employee_ids: List[UUID],
     ) -> bool:
-        """Unlink employees from an engagement."""
+        """Unlink employees from an engagement by removing estimate line items."""
         from sqlalchemy import select
-        from app.models.association_models import EmployeeEngagement
+        from app.models.estimate import Estimate
+        from app.models.release import Release
         
-        # Delete association objects
-        result = await self.session.execute(
-            select(EmployeeEngagement).where(
-                EmployeeEngagement.engagement_id == engagement_id,
-                EmployeeEngagement.employee_id.in_(employee_ids)
-            )
+        # Get all releases for this engagement
+        releases_result = await self.session.execute(
+            select(Release).where(Release.engagement_id == engagement_id)
         )
-        associations = result.scalars().all()
-        for assoc in associations:
-            await self.session.delete(assoc)
+        releases = releases_result.scalars().all()
+        
+        # Delete line items from active estimates for these releases
+        for release in releases:
+            # Get active estimate
+            estimate_result = await self.session.execute(
+                select(Estimate).where(
+                    and_(
+                        Estimate.release_id == release.id,
+                        Estimate.active_version == True
+                    )
+                )
+            )
+            active_estimate = estimate_result.scalar_one_or_none()
+            
+            if active_estimate:
+                # Delete line items for these employees
+                line_items_result = await self.session.execute(
+                    select(EstimateLineItem).where(
+                        and_(
+                            EstimateLineItem.estimate_id == active_estimate.id,
+                            EstimateLineItem.employee_id.in_(employee_ids)
+                        )
+                    )
+                )
+                line_items = line_items_result.scalars().all()
+                for li in line_items:
+                    await self.session.delete(li)
         
         await self.session.commit()
         return True
@@ -419,22 +614,20 @@ class EmployeeService(BaseService):
         release_id: UUID,
         request: LinkEmployeesToReleaseRequest,
     ) -> bool:
-        """Link employees to a release with association fields."""
-        from sqlalchemy import select
-        from app.models.association_models import EmployeeRelease
+        """Link employees to a release by creating estimate line items."""
+        import logging
+        from sqlalchemy import select, func
+        from app.models.delivery_center import DeliveryCenter as DeliveryCenterModel
+        from app.db.repositories.role_repository import RoleRepository
+        from decimal import Decimal
+        
+        logger = logging.getLogger(__name__)
         
         release = await self.release_repo.get(release_id)
         if not release:
             return False
         
-        # Get existing employee IDs from the release associations
-        existing_associations = await self.session.execute(
-            select(EmployeeRelease).where(EmployeeRelease.release_id == release_id)
-        )
-        existing_employee_ids = {assoc.employee_id for assoc in existing_associations.scalars()}
-        
         # Look up delivery center by code
-        from app.models.delivery_center import DeliveryCenter as DeliveryCenterModel
         delivery_center_result = await self.session.execute(
             select(DeliveryCenterModel).where(DeliveryCenterModel.code == request.delivery_center)
         )
@@ -446,99 +639,112 @@ class EmployeeService(BaseService):
             raise ValueError(f"Delivery center with code '{request.delivery_center}' not found. Available codes: {available_codes}")
         
         # Verify role exists
-        from app.db.repositories.role_repository import RoleRepository
         role_repo = RoleRepository(self.session)
         role = await role_repo.get(request.role_id)
         if not role:
             raise ValueError(f"Role {request.role_id} not found")
         
-        # Create new associations for employees not already linked
-        for emp_id in request.employee_ids:
-            if emp_id not in existing_employee_ids:
-                employee = await self.employee_repo.get(emp_id)
-                if not employee:
-                    continue
-                
-                # Create association with delivery_center_id foreign key
-                association = EmployeeRelease(
-                    employee_id=emp_id,
-                    release_id=release_id,
-                    role_id=request.role_id,
-                    start_date=request.start_date,
-                    end_date=request.end_date,
-                    project_rate=request.project_rate,
-                    delivery_center_id=delivery_center.id,
+        # Get or create active estimate for this release
+        currency = release.default_currency or "USD"
+        estimate = await self._get_or_create_active_estimate(release_id, currency)
+        
+        # Get or create role rate
+        role_rate = await self._get_or_create_role_rate(
+            request.role_id,
+            delivery_center.id,
+            currency
+        )
+        
+        # Get existing line items for this employee/release combination
+        existing_line_items_result = await self.session.execute(
+            select(EstimateLineItem).where(
+                and_(
+                    EstimateLineItem.estimate_id == estimate.id,
+                    EstimateLineItem.employee_id.in_(request.employee_ids)
                 )
-                self.session.add(association)
-        
-        await self.session.flush()  # Flush to get associations saved
-        
-        # Sync to estimate line items for all employees in this request
-        await self._sync_employee_release_to_quotes(release_id, request.employee_ids)
-        
-        await self.session.commit()
-        return True
-    
-    async def _sync_employee_release_to_quotes(self, release_id: UUID, employee_ids: List[UUID]) -> None:
-        """Sync EmployeeRelease associations to estimate line items."""
-        from sqlalchemy import select
-        from app.models.association_models import EmployeeRelease
-        from app.models.estimate import Estimate, EstimateLineItem
-        
-        # Get all EmployeeRelease associations for these employees and release
-        result = await self.session.execute(
-            select(EmployeeRelease).where(
-                EmployeeRelease.release_id == release_id,
-                EmployeeRelease.employee_id.in_(employee_ids)
             )
         )
-        associations = result.scalars().all()
+        existing_employee_ids = {li.employee_id for li in existing_line_items_result.scalars()}
         
-        # Get all estimates for this release
-        estimates_result = await self.session.execute(
-            select(Estimate).where(Estimate.release_id == release_id)
-        )
-        estimates = estimates_result.scalars().all()
+        # Create line items for employees not already linked
+        line_items_created = 0
+        for emp_id in request.employee_ids:
+            if emp_id in existing_employee_ids:
+                logger.info(f"Employee {emp_id} already has line item in estimate {estimate.id}, skipping")
+                continue
+            
+            employee = await self.employee_repo.get(emp_id)
+            if not employee:
+                logger.warning(f"Employee {emp_id} not found")
+                continue
+            
+            # Get rates - use project_rate from request, or employee rates, or role_rate rates
+            rate = Decimal(str(request.project_rate)) if request.project_rate else Decimal(str(employee.external_bill_rate))
+            cost = Decimal(str(employee.internal_cost_rate))
+            
+            # Get max row_order
+            max_order_result = await self.session.execute(
+                select(func.max(EstimateLineItem.row_order))
+                .where(EstimateLineItem.estimate_id == estimate.id)
+            )
+            max_order = max_order_result.scalar_one_or_none() or -1
+            
+            # Create line item
+            line_item = EstimateLineItem(
+                estimate_id=estimate.id,
+                role_rates_id=role_rate.id,
+                employee_id=emp_id,
+                rate=rate,
+                cost=cost,
+                currency=currency,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                row_order=max_order + 1,
+            )
+            self.session.add(line_item)
+            line_items_created += 1
+            logger.info(f"Creating estimate line item: employee_id={emp_id}, release_id={release_id}, role_rates_id={role_rate.id}")
         
-        # Update estimate line items for each association
-        for assoc in associations:
-            for estimate in estimates:
-                # Find line items for this employee in this estimate
-                line_items_result = await self.session.execute(
-                    select(EstimateLineItem).where(
-                        EstimateLineItem.quote_id == estimate.id,  # Keep column name for DB compatibility
-                        EstimateLineItem.employee_id == assoc.employee_id
-                    )
-                )
-                line_items = line_items_result.scalars().all()
-                
-                # Update each line item with values from EmployeeRelease
-                for line_item in line_items:
-                    line_item.role_id = assoc.role_id
-                    line_item.start_date = assoc.start_date
-                    line_item.end_date = assoc.end_date
-                    line_item.rate = assoc.project_rate  # Use project_rate as rate
-                    line_item.delivery_center_id = assoc.delivery_center_id
+        if line_items_created > 0:
+            await self.session.flush()
+            await self.session.commit()
+            logger.info(f"Successfully committed {line_items_created} estimate line items")
+        
+        return True
     
     async def unlink_employees_from_release(
         self,
         release_id: UUID,
         employee_ids: List[UUID],
     ) -> bool:
-        """Unlink employees from a release."""
+        """Unlink employees from a release by removing estimate line items."""
         from sqlalchemy import select
-        from app.models.association_models import EmployeeRelease
+        from app.models.estimate import Estimate
         
-        # Delete association objects
-        result = await self.session.execute(
-            select(EmployeeRelease).where(
-                EmployeeRelease.release_id == release_id,
-                EmployeeRelease.employee_id.in_(employee_ids)
+        # Get active estimate for this release
+        estimate_result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.release_id == release_id,
+                    Estimate.active_version == True
+                )
             )
         )
-        associations = result.scalars().all()
-        for assoc in associations:
-            await self.session.delete(assoc)
+        active_estimate = estimate_result.scalar_one_or_none()
+        
+        if active_estimate:
+            # Delete line items for these employees
+            line_items_result = await self.session.execute(
+                select(EstimateLineItem).where(
+                    and_(
+                        EstimateLineItem.estimate_id == active_estimate.id,
+                        EstimateLineItem.employee_id.in_(employee_ids)
+                    )
+                )
+            )
+            line_items = line_items_result.scalars().all()
+            for li in line_items:
+                await self.session.delete(li)
         
         await self.session.commit()
         return True

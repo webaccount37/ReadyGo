@@ -47,6 +47,7 @@ export function EstimateLineItemRow({
   );
   const [roleValue, setRoleValue] = useState(lineItem.role_id);
   const [employeeValue, setEmployeeValue] = useState(lineItem.employee_id || "");
+  const [billableValue, setBillableValue] = useState(lineItem.billable ?? true);
   
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -93,7 +94,11 @@ export function EstimateLineItemRow({
       const newValue = lineItem.employee_id || "";
       return prev !== newValue ? newValue : prev;
     });
-  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id]);
+    setBillableValue((prev) => {
+      const newValue = lineItem.billable ?? true;
+      return prev !== newValue ? newValue : prev;
+    });
+  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable]);
 
   // Weekly hours editing state
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
@@ -159,6 +164,8 @@ export function EstimateLineItemRow({
   }, 0);
   const totalCost: number = totalHours * parseFloat(costValue || "0");
   const totalRevenue: number = totalHours * parseFloat(rateValue || "0");
+  const marginAmount: number = totalRevenue - totalCost;
+  const marginPercentage: number = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
 
   // Note: formatDate reserved for future use
   // const formatDate = (dateStr: string) => {
@@ -191,8 +198,13 @@ export function EstimateLineItemRow({
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         // Only send the specific field being changed, not all fields
-        const updateData: Record<string, string | undefined> = {};
-        updateData[field] = value;
+        const updateData: Record<string, string | boolean | undefined> = {};
+        if (field === "billable") {
+          // Handle billable as boolean - value is string "true"/"false"
+          updateData[field] = value === "true" || value === "True";
+        } else {
+          updateData[field] = value;
+        }
 
         await updateLineItem.mutateAsync({
           estimateId,
@@ -217,6 +229,7 @@ export function EstimateLineItemRow({
         else if (field === "delivery_center_id") setDeliveryCenterValue(originalValue);
         else if (field === "role_id") setRoleValue(originalValue);
         else if (field === "employee_id") setEmployeeValue(originalValue || "");
+        else if (field === "billable") setBillableValue(originalValue === "true" || originalValue === "True");
       }
     }, 500); // 500ms debounce
   }, [estimateId, lineItem.id, updateLineItem]);
@@ -347,7 +360,7 @@ export function EstimateLineItemRow({
         </td>
 
         {/* Cost */}
-        <td className="border border-gray-300 px-2 py-1 text-xs">
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
           <Input
             type="number"
             step="0.01"
@@ -362,7 +375,7 @@ export function EstimateLineItemRow({
         </td>
 
         {/* Rate */}
-        <td className="border border-gray-300 px-2 py-1 text-xs">
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
           <Input
             type="number"
             step="0.01"
@@ -406,53 +419,21 @@ export function EstimateLineItemRow({
           />
         </td>
 
-        {/* Weekly Hours */}
-        {weeks.map((week) => {
-          const weekKey = getWeekKey(week);
-          const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey) || "0";
-                      const weekDate = week; // week is already a Date object
-                      const startDate = parseLocalDate(startDateValue);
-                      const endDate = parseLocalDate(endDateValue);
-                      const isInRange = weekDate >= startDate && weekDate <= endDate;
+        {/* Billable */}
+        <td className="border border-gray-300 px-2 py-1 text-xs text-center">
+          <input
+            type="checkbox"
+            checked={billableValue}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              const newValue = e.target.checked;
+              setBillableValue(newValue);
+              handleFieldUpdate("billable", newValue ? "true" : "false", String(lineItem.billable ?? true));
+            }}
+            className="h-4 w-4"
+          />
+        </td>
 
-          return (
-            <td
-              key={weekKey}
-              className={`border border-gray-300 px-1 py-1 ${
-                isInRange ? "bg-blue-50" : "bg-gray-50"
-              }`}
-            >
-              <Input
-                type="number"
-                step="0.1"
-                value={hours}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const newHours = e.target.value;
-                  setWeeklyHoursValues((prev: Map<string, string>) => {
-                    const next = new Map(prev);
-                    next.set(weekKey, newHours);
-                    return next;
-                  });
-                  handleWeeklyHoursUpdate(weekKey, newHours);
-                }}
-                placeholder="0"
-                disabled={!isInRange}
-                className="text-xs h-7 w-full text-center"
-              />
-            </td>
-          );
-        })}
-
-        {/* Totals */}
-        <td className="sticky right-[200px] z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold">
-          {totalHours.toFixed(1)}
-        </td>
-        <td className="sticky right-[100px] z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold">
-          {currency} {totalCost.toFixed(2)}
-        </td>
-        <td className="sticky right-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold">
-          {currency} {totalRevenue.toFixed(2)}
-        </td>
+        {/* Actions */}
         <td className="border border-gray-300 px-2 py-1">
           <div className="flex gap-2">
             <button
@@ -494,6 +475,70 @@ export function EstimateLineItemRow({
               {deleteLineItemMutation.isPending ? "Deleting..." : "Delete"}
             </button>
           </div>
+        </td>
+
+        {/* Weekly Hours */}
+        {weeks.map((week) => {
+          const weekKey = getWeekKey(week);
+          const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey) || "0";
+                      const weekDate = new Date(week); // week is already a Date object
+                      const startDate = parseLocalDate(startDateValue);
+                      const endDate = parseLocalDate(endDateValue);
+                      // Check if week overlaps with date range (week starts Sunday, ends Saturday)
+                      // A week overlaps if the Start or End Date is ON or BETWEEN Sunday through Saturday
+                      const weekEnd = new Date(weekDate);
+                      weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
+                      // Normalize dates to midnight for accurate comparison
+                      const weekStartNormalized = new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate());
+                      const weekEndNormalized = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+                      const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+                      const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+                      const isInRange = weekStartNormalized <= endDateNormalized && weekEndNormalized >= startDateNormalized;
+
+          return (
+            <td
+              key={weekKey}
+              className={`border border-gray-300 px-1 py-1 ${
+                isInRange ? "bg-blue-50" : "bg-gray-50"
+              }`}
+              style={{ width: '120px', minWidth: '120px' }}
+            >
+              <Input
+                type="number"
+                step="0.1"
+                value={hours}
+                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                  const newHours = e.target.value;
+                  setWeeklyHoursValues((prev: Map<string, string>) => {
+                    const next = new Map(prev);
+                    next.set(weekKey, newHours);
+                    return next;
+                  });
+                  handleWeeklyHoursUpdate(weekKey, newHours);
+                }}
+                placeholder="0"
+                disabled={!isInRange}
+                className="text-xs h-7 w-full text-center"
+              />
+            </td>
+          );
+        })}
+
+        {/* Totals */}
+        <td className="sticky right-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs font-semibold">
+          {totalHours.toFixed(1)}
+        </td>
+        <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
+          {currency} {totalCost.toFixed(2)}
+        </td>
+        <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
+          {currency} {totalRevenue.toFixed(2)}
+        </td>
+        <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
+          {currency} {marginAmount.toFixed(2)}
+        </td>
+        <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
+          {marginPercentage.toFixed(1)}%
         </td>
       </tr>
       {isAutoFillOpen && (

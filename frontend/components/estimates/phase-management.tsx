@@ -176,8 +176,17 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                     <div className="min-w-0 flex-1">
                       <div className="font-semibold truncate">{phase.name}</div>
                       <div className="text-sm text-gray-500">
-                        {new Date(phase.start_date).toLocaleDateString()} -{" "}
-                        {new Date(phase.end_date).toLocaleDateString()}
+                        {(() => {
+                          // Parse dates as local dates to avoid timezone offset
+                          const parseLocalDate = (dateStr: string): Date => {
+                            const datePart = dateStr.split("T")[0];
+                            const [year, month, day] = datePart.split("-").map(Number);
+                            return new Date(year, month - 1, day);
+                          };
+                          const startDate = parseLocalDate(phase.start_date);
+                          const endDate = parseLocalDate(phase.end_date);
+                          return `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
+                        })()}
                       </div>
                     </div>
                   </div>

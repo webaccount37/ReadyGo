@@ -9,9 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface EstimateSpreadsheetProps {
   estimate: EstimateDetailResponse;
+  startDate?: string;
+  endDate?: string;
 }
 
-export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
+export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSpreadsheetProps) {
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
   const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count
   const [emptyRowIds] = useState<Set<string>>(() => {
@@ -44,28 +46,76 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
   
   // Note: handleAddRowAbove and handleAddRowBelow are reserved for future context menu functionality
 
-  // Generate weeks - default to 1 year view
-  const weeks = useMemo(() => {
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setMonth(startDate.getMonth() - 1); // Start 1 month ago
-    const endDate = new Date(startDate);
-    endDate.setMonth(endDate.getMonth() + 12); // 1 year forward
+  // Helper function to parse date string as local date (avoid timezone conversion)
+  const parseLocalDate = (dateStr: string): Date => {
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    return new Date(year, month - 1, day); // month is 0-indexed in JS
+  };
 
+  // Generate weeks based on startDate and endDate from Estimate Details (Release dates)
+  // Only show weeks where Start or End Date is ON or BETWEEN Sunday through Saturday
+  const weeks = useMemo(() => {
+    let estimateStartDate: Date | null = null;
+    let estimateEndDate: Date | null = null;
+    
+    if (startDate) {
+      estimateStartDate = parseLocalDate(startDate);
+    }
+    if (endDate) {
+      estimateEndDate = parseLocalDate(endDate);
+    }
+
+    // If no dates provided, show default range
+    if (!estimateStartDate && !estimateEndDate) {
+      const today = new Date();
+      estimateStartDate = new Date(today);
+      estimateStartDate.setMonth(estimateStartDate.getMonth() - 1);
+      estimateEndDate = new Date(estimateStartDate);
+      estimateEndDate.setMonth(estimateEndDate.getMonth() + 12);
+    } else if (estimateStartDate && !estimateEndDate) {
+      // Only start date - show 1 year forward
+      estimateEndDate = new Date(estimateStartDate);
+      estimateEndDate.setFullYear(estimateEndDate.getFullYear() + 1);
+    } else if (!estimateStartDate && estimateEndDate) {
+      // Only end date - show 1 year backward
+      estimateStartDate = new Date(estimateEndDate);
+      estimateStartDate.setFullYear(estimateStartDate.getFullYear() - 1);
+    }
+
+    // Generate all potential weeks in a wide range
     const weekStarts: Date[] = [];
-    const current = new Date(startDate);
-    // Get Monday of the week
+    const rangeStart = estimateStartDate ? new Date(estimateStartDate) : new Date();
+    const rangeEnd = estimateEndDate ? new Date(estimateEndDate) : new Date();
+    
+    // Expand range to ensure we capture all relevant weeks
+    rangeStart.setDate(rangeStart.getDate() - 7); // Go back one week
+    rangeEnd.setDate(rangeEnd.getDate() + 7); // Go forward one week
+    
+    const current = new Date(rangeStart);
+    // Get Sunday of the week (0 = Sunday)
     const dayOfWeek = current.getDay();
-    const diff = current.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    const diff = current.getDate() - dayOfWeek; // Subtract days to get to Sunday
     current.setDate(diff);
 
-    while (current <= endDate) {
-      weekStarts.push(new Date(current));
+    // Generate weeks and filter to only those that overlap with the date range
+    while (current <= rangeEnd) {
+      const weekStart = new Date(current);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
+      
+      // Include week if it overlaps with the estimate date range
+      // A week overlaps if: weekStart <= estimateEndDate AND weekEnd >= estimateStartDate
+      if (!estimateStartDate || !estimateEndDate || 
+          (weekStart <= estimateEndDate && weekEnd >= estimateStartDate)) {
+        weekStarts.push(new Date(weekStart));
+      }
+      
       current.setDate(current.getDate() + 7);
     }
 
     return weekStarts;
-  }, []);
+  }, [startDate, endDate]);
 
   // Calculate which phases overlap each week
   const weekPhaseOverlaps = useMemo(() => {
@@ -78,13 +128,14 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
     weeks.forEach((week: Date, weekIndex: number) => {
       const weekDate = new Date(week);
       const weekEnd = new Date(weekDate);
-      weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Sunday)
+      weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
 
       const overlappingPhases: Array<{ phase: typeof estimate.phases[0]; color: string }> = [];
       
       (estimate.phases || []).forEach((phase) => {
-        const phaseStart = new Date(phase.start_date);
-        const phaseEnd = new Date(phase.end_date);
+        // Parse phase dates as local dates to avoid timezone offset issues
+        const phaseStart = parseLocalDate(phase.start_date);
+        const phaseEnd = parseLocalDate(phase.end_date);
         
         // Check if week overlaps with phase
         if (weekDate <= phaseEnd && weekEnd >= phaseStart) {
@@ -172,44 +223,53 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
                 {/* Phase header row */}
                 {estimate.phases && estimate.phases.length > 0 && (
                   <tr>
-                    <th colSpan={7} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50 sticky left-0 z-30">
+                    <th colSpan={9} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
                       Phases
                     </th>
                     {weeks.map((week: Date, weekIndex: number) => {
                       const overlaps = weekPhaseOverlaps.get(weekIndex);
                       const style = getWeekBackgroundStyle(weekIndex);
                       const phaseNames = overlaps?.map((o: { phase: EstimatePhase; color: string }) => o.phase.name).join(", ") || "";
+                      // Show year when it changes or at the start of each year
+                      const showYear = weekIndex === 0 || week.getFullYear() !== weeks[weekIndex - 1].getFullYear();
                       
                       return (
                         <th
                           key={week.toISOString()}
-                          className="border border-gray-300 px-1 py-1 text-xs font-semibold text-center min-w-[60px]"
-                          style={style}
+                          className="border border-gray-300 px-1 py-1 text-xs font-semibold text-center"
+                          style={{ ...style, width: '120px', minWidth: '120px' }}
                           title={phaseNames || week.toLocaleDateString()}
                         >
-                          {overlaps && overlaps.length > 0 && (
-                            <div className="flex flex-col gap-0.5">
-                              {overlaps.map((overlap: { phase: EstimatePhase; color: string }, idx: number) => (
-                                <div
-                                  key={idx}
-                                  className="text-[10px] font-medium truncate"
-                                  style={{ color: overlap.color }}
-                                >
-                                  {overlap.phase.name}
-                                </div>
-                              ))}
-                            </div>
-                          )}
+                          <div className="flex flex-col gap-0.5">
+                            {showYear && (
+                              <div className="text-[10px] font-bold text-gray-600">
+                                {week.getFullYear()}
+                              </div>
+                            )}
+                            {overlaps && overlaps.length > 0 && (
+                              <>
+                                {overlaps.map((overlap: { phase: EstimatePhase; color: string }, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="text-[10px] font-medium truncate"
+                                    style={{ color: overlap.color }}
+                                  >
+                                    {overlap.phase.name}
+                                  </div>
+                                ))}
+                              </>
+                            )}
+                          </div>
                         </th>
                       );
                     })}
-                    <th colSpan={4} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50"></th>
+                    <th colSpan={5} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50"></th>
                   </tr>
                 )}
                 {/* Main header row */}
                 <tr>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[120px]">
-                    Delivery Center
+                    Payable Center
                   </th>
                   <th className="sticky left-0 z-20 bg-white border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[120px]">
                     Role
@@ -217,10 +277,10 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[120px]">
                     Employee
                   </th>
-                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[80px]">
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
                     Cost
                   </th>
-                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[80px]">
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
                     Rate
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[100px]">
@@ -229,33 +289,53 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[100px]">
                     End Date
                   </th>
-                  {weeks.map((week: Date, weekIndex: number) => {
-                    const style = getWeekBackgroundStyle(weekIndex);
-                    return (
-                      <th
-                        key={week.toISOString()}
-                        className="border border-gray-300 px-1 py-2 text-xs font-semibold min-w-[60px] text-center"
-                        style={style}
-                        title={week.toLocaleDateString()}
-                      >
-                        {week.toLocaleDateString("en-US", {
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </th>
-                    );
-                  })}
-                  <th className="sticky right-[200px] z-20 bg-white border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
-                    Total Hours
-                  </th>
-                  <th className="sticky right-[100px] z-20 bg-white border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
-                    Total Cost
-                  </th>
-                  <th className="sticky right-0 z-20 bg-white border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
-                    Total Revenue
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[80px]">
+                    Billable
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[70px]">
                     Actions
+                  </th>
+                  {weeks.map((week: Date, weekIndex: number) => {
+                    const style = getWeekBackgroundStyle(weekIndex);
+                    // Show year when it changes or at the start of each year
+                    const showYear = weekIndex === 0 || week.getFullYear() !== weeks[weekIndex - 1].getFullYear();
+                    return (
+                      <th
+                        key={week.toISOString()}
+                        className="border border-gray-300 px-1 py-2 text-xs font-semibold text-center"
+                        style={{ ...style, width: '120px', minWidth: '120px' }}
+                        title={week.toLocaleDateString()}
+                      >
+                        <div className="flex flex-col">
+                          {showYear && (
+                            <div className="text-[10px] font-bold text-gray-600">
+                              {week.getFullYear()}
+                            </div>
+                          )}
+                          <div>
+                            {week.toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </div>
+                        </div>
+                      </th>
+                    );
+                  })}
+                  <th className="sticky right-0 z-20 bg-white border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Total Hours
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Total Cost
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Total Revenue
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Margin Amount
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Margin %
                   </th>
                 </tr>
               </thead>
@@ -265,7 +345,7 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
                     key={lineItem.id}
                     lineItem={lineItem}
                     weeks={weeks}
-                    currency={estimate.currency}
+                    currency={estimate.currency || "USD"}
                     estimateId={estimate.id}
                     onContextMenu={(e) => handleContextMenu(e, index)}
                   />
@@ -279,7 +359,7 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
                       key={stableId}
                       estimateId={estimate.id}
                       weeks={weeks}
-                      currency={estimate.currency}
+                      currency={estimate.currency || "USD"}
                       rowIndex={existingLineItems.length + index}
                       stableId={stableId}
                       onContextMenu={(e) =>
@@ -292,12 +372,12 @@ export function EstimateSpreadsheet({ estimate }: EstimateSpreadsheetProps) {
                   <EstimateTotalsRow
                     lineItems={existingLineItems}
                     weeks={weeks}
-                    currency={estimate.currency}
+                    currency={estimate.currency || "USD"}
                   />
                 )}
                 {/* Add Row button */}
                 <tr>
-                  <td colSpan={7 + weeks.length + 4} className="border border-gray-300 px-2 py-2 text-center">
+                  <td colSpan={9 + weeks.length + 5} className="border border-gray-300 px-2 py-2 text-center">
                     <button
                       onClick={() => setEmptyRowsCount(emptyRowsCount + 1)}
                       className="text-sm text-blue-600 hover:underline"
