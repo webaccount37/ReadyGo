@@ -276,14 +276,18 @@ export function EstimateLineItemRow({
     weeklyHoursMap.set(weekKey, wh.hours);
   });
 
-  // Calculate totals - only for weeks within date range
+  // Calculate totals - only for weeks that overlap with date range
   const startDate = parseLocalDate(startDateValue);
   const endDate = parseLocalDate(endDateValue);
   const totalHours: number = weeks.reduce((sum: number, week: Date) => {
     const weekKey = getWeekKey(week);
     const weekDate = week; // week is already a Date object
-    // Only include hours for weeks within the date range
-    if (weekDate >= startDate && weekDate <= endDate) {
+    // Check if week overlaps with item date range (week starts Sunday, ends Saturday)
+    const weekEnd = new Date(weekDate);
+    weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
+    
+    // Only include hours for weeks that overlap with the date range
+    if (weekDate <= endDate && weekEnd >= startDate) {
       const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey) || "0";
       return sum + parseFloat(hours || "0");
     }
