@@ -22,6 +22,7 @@ import type {
   AutoFillRequest,
   EstimateTotalsResponse,
   EstimatePhase,
+  EstimateExcelImportResponse,
 } from "@/types/estimate";
 
 const QUERY_KEYS = {
@@ -621,6 +622,50 @@ export function useDeletePhase(
       });
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.detail(variables.estimateId, true),
+      });
+    },
+    ...options,
+  });
+}
+
+/**
+ * Export estimate to Excel.
+ */
+export function useExportEstimateExcel(
+  options?: UseMutationOptions<Blob, Error, string>
+) {
+  return useMutation<Blob, Error, string>({
+    mutationFn: (estimateId) => estimatesApi.exportEstimateToExcel(estimateId),
+    ...options,
+  });
+}
+
+/**
+ * Import estimate from Excel.
+ */
+export function useImportEstimateExcel(
+  options?: UseMutationOptions<
+    EstimateExcelImportResponse,
+    Error,
+    { estimateId: string; file: File }
+  >
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    EstimateExcelImportResponse,
+    Error,
+    { estimateId: string; file: File }
+  >({
+    mutationFn: ({ estimateId, file }) =>
+      estimatesApi.importEstimateFromExcel(estimateId, file),
+    onSuccess: (_, variables) => {
+      // Invalidate estimate detail to refresh data
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.detail(variables.estimateId, true),
+      });
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.totals(variables.estimateId),
       });
     },
     ...options,

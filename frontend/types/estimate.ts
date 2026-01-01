@@ -153,5 +153,11 @@ export interface EstimateTotalsResponse {
   overall_total_revenue: string;
 }
 
+export interface EstimateExcelImportResponse {
+  created: number;
+  updated: number;
+  errors: string[];
+}
+
 
 

@@ -1237,4 +1237,14 @@ class EstimateService(BaseService):
             "color": phase.color,
             "row_order": phase.row_order,
         })
+    
+    async def get_roles_for_delivery_center(self, delivery_center_id: UUID) -> List[Role]:
+        """Get roles that have role_rates for a given delivery center."""
+        result = await self.session.execute(
+            select(Role)
+            .join(RoleRate, Role.id == RoleRate.role_id)
+            .where(RoleRate.delivery_center_id == delivery_center_id)
+            .distinct()
+        )
+        return list(result.scalars().all())
 

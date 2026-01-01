@@ -3,13 +3,18 @@ Estimate API endpoints.
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, status, Body
+from fastapi import APIRouter, Depends, Query, HTTPException, status, Body, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+import tempfile
+import os
 
 from app.db.session import get_db
 from app.controllers.estimate_controller import EstimateController
 from app.controllers.estimate_phase_controller import EstimatePhaseController
+from app.services.excel_export_service import ExcelExportService
+from app.services.excel_import_service import ExcelImportService
 from app.schemas.estimate import (
     EstimateCreate,
     EstimateUpdate,
@@ -24,6 +29,7 @@ from app.schemas.estimate import (
     EstimatePhaseCreate,
     EstimatePhaseUpdate,
     EstimatePhaseResponse,
+    EstimateExcelImportResponse,
 )
 
 router = APIRouter()
@@ -315,5 +321,87 @@ async def delete_phase(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Phase not found",
         )
+
+
+@router.get("/{estimate_id}/export-excel")
+async def export_estimate_to_excel(
+    estimate_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Export estimate to Excel file."""
+    try:
+        export_service = ExcelExportService(db)
+        excel_file = await export_service.export_estimate_to_excel(estimate_id)
+        
+        # Get estimate name for filename
+        controller = EstimateController(db)
+        estimate = await controller.get_estimate(estimate_id)
+        if not estimate:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Estimate not found",
+            )
+        
+        filename = f"estimate_{estimate.name.replace(' ', '_')}_{estimate_id}.xlsx"
+        
+        return StreamingResponse(
+            excel_file,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+            },
+        )
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to export estimate: {str(e)}",
+        )
+
+
+@router.post("/{estimate_id}/import-excel", response_model=EstimateExcelImportResponse)
+async def import_estimate_from_excel(
+    estimate_id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+) -> EstimateExcelImportResponse:
+    """Import estimate from Excel file."""
+    # Validate file type
+    if not file.filename.endswith(('.xlsx', '.xls')):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Only .xlsx and .xls files are supported.",
+        )
+    
+    # Save uploaded file to temporary location
+    with tempfile.NamedTemporaryFile(delete=False, suffix='.xlsx') as tmp_file:
+        try:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_file_path = tmp_file.name
+            
+            # Import from Excel
+            import_service = ExcelImportService(db)
+            result = await import_service.import_estimate_from_excel(estimate_id, tmp_file_path)
+            
+            return EstimateExcelImportResponse(**result)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=str(e),
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to import estimate: {str(e)}",
+            )
+        finally:
+            # Clean up temporary file
+            if os.path.exists(tmp_file_path):
+                os.unlink(tmp_file_path)
 
 

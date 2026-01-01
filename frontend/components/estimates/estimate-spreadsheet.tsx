@@ -1,11 +1,13 @@
 "use client";
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef } from "react";
 import type { EstimateDetailResponse, EstimatePhase } from "@/types/estimate";
 import { EstimateLineItemRow } from "./estimate-line-item-row";
 import { EstimateTotalsRow } from "./estimate-totals-row";
 import { EstimateEmptyRow } from "./estimate-empty-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { useExportEstimateExcel, useImportEstimateExcel, useEstimateDetail } from "@/hooks/useEstimates";
 
 interface EstimateSpreadsheetProps {
   estimate: EstimateDetailResponse;
@@ -24,6 +26,41 @@ export function EstimateSpreadsheet({
 }: EstimateSpreadsheetProps) {
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
   const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const exportExcel = useExportEstimateExcel({
+    onSuccess: (blob) => {
+      // Create download link
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `estimate_${estimate.name.replace(/\s+/g, "_")}_${estimate.id}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    },
+    onError: (error) => {
+      alert(`Failed to export estimate: ${error.message}`);
+    },
+  });
+  const importExcel = useImportEstimateExcel({
+    onSuccess: async (result) => {
+      const message = `Import completed: ${result.created} created, ${result.updated} updated${
+        result.errors.length > 0 ? `, ${result.errors.length} errors` : ""
+      }`;
+      if (result.errors.length > 0) {
+        alert(`${message}\n\nErrors:\n${result.errors.join("\n")}`);
+      } else {
+        alert(message);
+      }
+      // Refetch estimate data to show updated values
+      await refetch();
+    },
+    onError: (error) => {
+      alert(`Failed to import estimate: ${error.message}`);
+    },
+  });
+  const { refetch } = useEstimateDetail(estimate.id);
   const [emptyRowIds] = useState<Set<string>>(() => {
     // Generate stable IDs for empty rows that persist across refetches
     const ids = new Set<string>();
@@ -128,6 +165,25 @@ export function EstimateSpreadsheet({
     return weekStarts;
   }, [startDate, endDate]);
 
+  const handleExportClick = () => {
+    exportExcel.mutate(estimate.id);
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      importExcel.mutate({ estimateId: estimate.id, file });
+      // Reset input so same file can be selected again
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
   // Calculate which phases overlap each week
   const weekPhaseOverlaps = useMemo(() => {
     const overlaps: Map<number, Array<{ phase: EstimatePhase; color: string }>> = new Map();
@@ -199,6 +255,29 @@ export function EstimateSpreadsheet({
           <div className="flex justify-between items-center">
           <CardTitle>Estimate Spreadsheet</CardTitle>
           <div className="flex gap-2 items-center">
+            <Button
+              onClick={handleExportClick}
+              disabled={exportExcel.isPending}
+              variant="outline"
+              size="sm"
+            >
+              {exportExcel.isPending ? "Exporting..." : "Export to Excel"}
+            </Button>
+            <Button
+              onClick={handleImportClick}
+              disabled={importExcel.isPending}
+              variant="outline"
+              size="sm"
+            >
+              {importExcel.isPending ? "Importing..." : "Import from Excel"}
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleFileChange}
+              style={{ display: "none" }}
+            />
             <div className="flex items-center gap-2 border border-gray-300 rounded-md px-2">
               <button
                 onClick={() => setZoomLevel(Math.max(25, zoomLevel - 25))}

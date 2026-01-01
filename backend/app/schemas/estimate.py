@@ -257,3 +257,10 @@ class EstimateTotalsResponse(BaseModel):
     overall_total_revenue: Decimal
 
 
+class EstimateExcelImportResponse(BaseModel):
+    """Response schema for Excel import."""
+    created: int
+    updated: int
+    errors: List[str]
+
+
