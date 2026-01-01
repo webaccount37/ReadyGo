@@ -87,6 +87,7 @@ export function EstimateEmptyRow({
         .toISOString()
         .split("T")[0],
       billable: true,
+      billable_expense_percentage: "0",
     };
   };
 
@@ -820,6 +821,17 @@ export function EstimateEmptyRow({
   );
   const totalCost: number = totalHours * parseFloat(formData.cost || "0");
   const totalRevenue: number = totalHours * parseFloat(formData.rate || "0");
+  const billableExpensePercentage: number = parseFloat(formData.billable_expense_percentage || "0");
+  const billableExpenseAmount: number = (billableExpensePercentage / 100) * totalRevenue;
+  const marginAmount: number = totalRevenue - totalCost;
+  // Margin % with expenses: (revenue - cost) / (revenue + expenses)
+  const marginPercentageWithExpenses: number = (totalRevenue + billableExpenseAmount) > 0 
+    ? (marginAmount / (totalRevenue + billableExpenseAmount)) * 100 
+    : 0;
+  // Margin % without expenses: (revenue - cost) / revenue
+  const marginPercentageWithoutExpenses: number = totalRevenue > 0 
+    ? (marginAmount / totalRevenue) * 100 
+    : 0;
 
   return (
     <tr
@@ -942,6 +954,23 @@ export function EstimateEmptyRow({
         />
       </td>
 
+      {/* Billable Expense Percentage */}
+      <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="100"
+            value={formData.billable_expense_percentage || "0"}
+            onChange={(e) => setFormData({ ...formData, billable_expense_percentage: e.target.value })}
+            placeholder="0"
+            className="text-xs h-7 flex-1"
+          />
+          <span className="text-[10px] text-gray-500">%</span>
+        </div>
+      </td>
+
       {/* Actions */}
       <td className="border border-gray-300 px-2 py-1">
         <div className="flex gap-2 items-center">
@@ -995,6 +1024,7 @@ export function EstimateEmptyRow({
                         start_date: formData.start_date,
                         end_date: formData.end_date,
                         billable: formData.billable ?? true,
+                        billable_expense_percentage: formData.billable_expense_percentage || "0",
                       };
                       // Remove undefined/empty employee_id - backend expects valid UUID or omitted
                       if (!createData.employee_id) {
@@ -1153,14 +1183,24 @@ export function EstimateEmptyRow({
         {totalRevenue > 0 ? totalRevenue.toFixed(2) : "-"}
       </td>
 
-      {/* Margin Amount */}
-      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
-        {(totalRevenue - totalCost) > 0 ? (totalRevenue - totalCost).toFixed(2) : "-"}
+      {/* Billable Expense Amount */}
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right bg-gray-50">
+        {billableExpenseAmount > 0 ? billableExpenseAmount.toFixed(2) : "-"}
       </td>
 
-      {/* Margin Percentage */}
+      {/* Margin Amount */}
       <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
-        {totalRevenue > 0 ? (((totalRevenue - totalCost) / totalRevenue) * 100).toFixed(1) : "-"}%
+        {marginAmount > 0 ? marginAmount.toFixed(2) : "-"}
+      </td>
+
+      {/* Margin % (Without Expenses) */}
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+        {totalRevenue > 0 ? marginPercentageWithoutExpenses.toFixed(1) : "-"}%
+      </td>
+
+      {/* Margin % (With Expenses) */}
+      <td className="border border-gray-300 px-2 py-1 text-xs font-semibold text-right">
+        {(totalRevenue + billableExpenseAmount) > 0 ? marginPercentageWithExpenses.toFixed(1) : "-"}%
       </td>
     </tr>
   );

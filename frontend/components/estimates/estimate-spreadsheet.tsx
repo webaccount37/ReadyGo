@@ -274,7 +274,7 @@ export function EstimateSpreadsheet({
                         </th>
                       );
                     })}
-                    <th colSpan={5} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50"></th>
+                    <th colSpan={6} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50"></th>
                   </tr>
                 )}
                 {/* Main header row */}
@@ -302,6 +302,9 @@ export function EstimateSpreadsheet({
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[80px]">
                     Billable
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[120px]">
+                    Billable Expense %
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[70px]">
                     Actions
@@ -343,10 +346,16 @@ export function EstimateSpreadsheet({
                     Total Revenue
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Billable Expense Amount
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
                     Margin Amount
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
-                    Margin %
+                    Margin % (Without Expenses)
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[90px]">
+                    Margin % (With Expenses)
                   </th>
                 </tr>
               </thead>
@@ -390,7 +399,7 @@ export function EstimateSpreadsheet({
                 )}
                 {/* Add Row button */}
                 <tr>
-                  <td colSpan={9 + weeks.length + 5} className="border border-gray-300 px-2 py-2 text-center">
+                  <td colSpan={10 + weeks.length + 5} className="border border-gray-300 px-2 py-2 text-center">
                     <button
                       onClick={() => setEmptyRowsCount(emptyRowsCount + 1)}
                       className="text-sm text-blue-600 hover:underline"

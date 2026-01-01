@@ -59,6 +59,9 @@ export function EstimateLineItemRow({
   const [roleValue, setRoleValue] = useState(lineItem.role_id);
   const [employeeValue, setEmployeeValue] = useState(lineItem.employee_id || "");
   const [billableValue, setBillableValue] = useState(lineItem.billable ?? true);
+  const [billableExpensePercentageValue, setBillableExpensePercentageValue] = useState(
+    lineItem.billable_expense_percentage || "0"
+  );
   
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   
@@ -109,7 +112,11 @@ export function EstimateLineItemRow({
       const newValue = lineItem.billable ?? true;
       return prev !== newValue ? newValue : prev;
     });
-  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable]);
+    setBillableExpensePercentageValue((prev) => {
+      const newValue = lineItem.billable_expense_percentage || "0";
+      return prev !== newValue ? newValue : prev;
+    });
+  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable, lineItem.billable_expense_percentage]);
 
   // Weekly hours editing state
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
@@ -284,8 +291,17 @@ export function EstimateLineItemRow({
   }, 0);
   const totalCost: number = totalHours * parseFloat(costValue || "0");
   const totalRevenue: number = totalHours * parseFloat(rateValue || "0");
+  const billableExpensePercentage: number = parseFloat(billableExpensePercentageValue || "0");
+  const billableExpenseAmount: number = (billableExpensePercentage / 100) * totalRevenue;
   const marginAmount: number = totalRevenue - totalCost;
-  const marginPercentage: number = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
+  // Margin % with expenses: (revenue - cost) / (revenue + expenses)
+  const marginPercentageWithExpenses: number = (totalRevenue + billableExpenseAmount) > 0 
+    ? (marginAmount / (totalRevenue + billableExpenseAmount)) * 100 
+    : 0;
+  // Margin % without expenses: (revenue - cost) / revenue
+  const marginPercentageWithoutExpenses: number = totalRevenue > 0 
+    ? (marginAmount / totalRevenue) * 100 
+    : 0;
 
   // Note: formatDate reserved for future use
   // const formatDate = (dateStr: string) => {
@@ -322,6 +338,8 @@ export function EstimateLineItemRow({
         if (field === "billable") {
           // Handle billable as boolean - value is string "true"/"false"
           updateData.billable = value === "true" || value === "True";
+        } else if (field === "billable_expense_percentage") {
+          updateData.billable_expense_percentage = value;
         } else if (field === "employee_id") {
           // For employee_id, send null when clearing (empty string becomes null)
           // This allows the backend to properly clear the association
@@ -368,6 +386,7 @@ export function EstimateLineItemRow({
         else if (field === "role_id") setRoleValue(originalValue);
         else if (field === "employee_id") setEmployeeValue(originalValue || "");
         else if (field === "billable") setBillableValue(originalValue === "true" || originalValue === "True");
+        else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");
       }
     }, 500); // 500ms debounce
   }, [estimateId, lineItem.id, updateLineItem]);
@@ -781,6 +800,26 @@ export function EstimateLineItemRow({
           />
         </td>
 
+        {/* Billable Expense Percentage */}
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={billableExpensePercentageValue}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setBillableExpensePercentageValue(e.target.value);
+                handleFieldUpdate("billable_expense_percentage", e.target.value, lineItem.billable_expense_percentage || "0");
+              }}
+              placeholder="0"
+              className="text-xs h-7 flex-1"
+            />
+            <span className="text-[10px] text-gray-500">%</span>
+          </div>
+        </td>
+
         {/* Actions */}
         <td className="border border-gray-300 px-2 py-1" style={{ minWidth: '100px' }}>
           <div className="flex gap-2 items-center">
@@ -889,11 +928,17 @@ export function EstimateLineItemRow({
         <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
           {currency} {totalRevenue.toFixed(2)}
         </td>
+        <td className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
+          {currency} {billableExpenseAmount.toFixed(2)}
+        </td>
         <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
           {currency} {marginAmount.toFixed(2)}
         </td>
         <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
-          {marginPercentage.toFixed(1)}%
+          {marginPercentageWithoutExpenses.toFixed(1)}%
+        </td>
+        <td className="border border-gray-300 px-2 py-1 text-xs font-semibold">
+          {marginPercentageWithExpenses.toFixed(1)}%
         </td>
       </tr>
       {isAutoFillOpen && (

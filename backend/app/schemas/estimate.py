@@ -95,6 +95,7 @@ class EstimateLineItemBase(BaseModel):
     end_date: date
     row_order: int = Field(default=0, ge=0)
     billable: bool = Field(default=True)
+    billable_expense_percentage: Decimal = Field(default=0, ge=0, le=100)  # Billable expense percentage (0-100)
     
     @model_validator(mode="after")
     def validate_role_reference(self) -> "EstimateLineItemBase":
@@ -124,6 +125,7 @@ class EstimateLineItemUpdate(BaseModel):
     end_date: Optional[date] = None
     row_order: Optional[int] = Field(None, ge=0)
     billable: Optional[bool] = None
+    billable_expense_percentage: Optional[Decimal] = Field(None, ge=0, le=100)  # Billable expense percentage (0-100)
 
 
 class EstimateLineItemResponse(BaseModel):
@@ -143,6 +145,7 @@ class EstimateLineItemResponse(BaseModel):
     end_date: str  # ISO date string "YYYY-MM-DD" (already serialized, no parsing)
     row_order: int = Field(default=0, ge=0)
     billable: bool = Field(default=True)
+    billable_expense_percentage: Decimal = Field(default=0, ge=0, le=100)  # Billable expense percentage (0-100)
     role_name: Optional[str] = None
     delivery_center_name: Optional[str] = None
     employee_name: Optional[str] = None

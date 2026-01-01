@@ -123,6 +123,7 @@ class EstimateService(BaseService):
                     "start_date": active_li.start_date,
                     "end_date": active_li.end_date,
                     "row_order": row_order,
+                    "billable_expense_percentage": active_li.billable_expense_percentage,
                 }
                 
                 line_item = await self.line_item_repo.create(**line_item_dict)
@@ -311,6 +312,7 @@ class EstimateService(BaseService):
                     "end_date": line_item.end_date,
                     "row_order": line_item.row_order,
                     "billable": line_item.billable,
+                    "billable_expense_percentage": line_item.billable_expense_percentage,
                 }
                 new_line_item = await self.line_item_repo.create(**new_line_item_dict)
                 
@@ -477,6 +479,7 @@ class EstimateService(BaseService):
             "end_date": line_item_data.end_date,
             "row_order": row_order,
             "billable": getattr(line_item_data, 'billable', True),
+            "billable_expense_percentage": getattr(line_item_data, 'billable_expense_percentage', 0),
         }
         
         line_item = await self.line_item_repo.create(**line_item_dict)
@@ -1166,6 +1169,7 @@ class EstimateService(BaseService):
             "end_date": end_date_iso,  # ISO string (same as Engagement service)
             "row_order": line_item.row_order,
             "billable": line_item.billable,
+            "billable_expense_percentage": line_item.billable_expense_percentage,
             "role_name": role_name,
             "delivery_center_name": delivery_center_name,
             "employee_name": employee_name,

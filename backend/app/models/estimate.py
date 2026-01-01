@@ -64,6 +64,7 @@ class EstimateLineItem(Base):
     end_date = Column(Date, nullable=False)
     row_order = Column(Integer, nullable=False, default=0)
     billable = Column(Boolean, nullable=False, default=True)
+    billable_expense_percentage = Column(Numeric(5, 2), nullable=False, default=0)  # Billable expense percentage (0-100)
     
     # Relationships
     estimate = relationship("Estimate", back_populates="line_items", foreign_keys=[estimate_id], primaryjoin="EstimateLineItem.estimate_id == Estimate.id")

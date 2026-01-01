@@ -38,6 +38,7 @@ export interface EstimateLineItem {
   end_date: string;
   row_order: number;
   billable: boolean;
+  billable_expense_percentage?: string;
   weekly_hours?: EstimateWeeklyHours[];
 }
 
@@ -93,6 +94,7 @@ export interface EstimateLineItemCreate {
   end_date: string;
   row_order?: number;
   billable?: boolean;
+  billable_expense_percentage?: string;
 }
 
 export interface EstimateLineItemUpdate {
@@ -106,6 +108,7 @@ export interface EstimateLineItemUpdate {
   end_date?: string;
   row_order?: number;
   billable?: boolean;
+  billable_expense_percentage?: string;
 }
 
 export interface AutoFillRequest {

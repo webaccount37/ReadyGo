@@ -61,6 +61,33 @@ export function EstimateTotalsRow({
 
     return { totalHours, totalCost, totalRevenue };
   });
+  
+  // Calculate billable expense totals
+  let overallBillableExpenseAmount = 0;
+  lineItems.forEach((item) => {
+    const billableExpensePercentage = parseFloat(item.billable_expense_percentage || "0");
+    // Calculate total revenue for this item
+    let itemTotalRevenue = 0;
+    weeklyTotals.forEach((week, weekIndex) => {
+      const weekKey = formatDateKey(weeks[weekIndex]);
+      const weekDate = weeks[weekIndex];
+      const startDate = parseLocalDate(item.start_date);
+      const endDate = parseLocalDate(item.end_date);
+      const weekEnd = new Date(weekDate);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      
+      if (weekDate <= endDate && weekEnd >= startDate) {
+        const weeklyHour = item.weekly_hours?.find((wh) => {
+          const whDate = parseLocalDate(wh.week_start_date);
+          return formatDateKey(whDate) === weekKey;
+        });
+        const hours = parseFloat(weeklyHour?.hours || "0");
+        const rate = parseFloat(item.rate || "0");
+        itemTotalRevenue += hours * rate;
+      }
+    });
+    overallBillableExpenseAmount += (billableExpensePercentage / 100) * itemTotalRevenue;
+  });
 
   // Calculate overall totals
   const overallTotalHours = weeklyTotals.reduce(
@@ -76,14 +103,19 @@ export function EstimateTotalsRow({
     0
   );
   const overallMarginAmount = overallTotalRevenue - overallTotalCost;
-  const overallMarginPercentage = overallTotalRevenue > 0 
+  // Margin % with expenses: (revenue - cost) / (revenue + expenses)
+  const overallMarginPercentageWithExpenses = (overallTotalRevenue + overallBillableExpenseAmount) > 0 
+    ? (overallMarginAmount / (overallTotalRevenue + overallBillableExpenseAmount)) * 100 
+    : 0;
+  // Margin % without expenses: (revenue - cost) / revenue
+  const overallMarginPercentageWithoutExpenses = overallTotalRevenue > 0 
     ? (overallMarginAmount / overallTotalRevenue) * 100 
     : 0;
 
   return (
     <tr className="bg-gray-100 font-semibold">
       <td
-        colSpan={9}
+        colSpan={10}
         className="bg-gray-100 border border-gray-300 px-2 py-2 text-xs"
       >
         TOTALS
@@ -106,11 +138,17 @@ export function EstimateTotalsRow({
       <td className="border border-gray-300 px-2 py-2 text-xs">
         {currency} {overallTotalRevenue.toFixed(2)}
       </td>
+      <td className="border border-gray-300 px-2 py-2 text-xs bg-gray-50">
+        {currency} {overallBillableExpenseAmount.toFixed(2)}
+      </td>
       <td className="border border-gray-300 px-2 py-2 text-xs">
         {currency} {overallMarginAmount.toFixed(2)}
       </td>
       <td className="border border-gray-300 px-2 py-2 text-xs">
-        {overallMarginPercentage.toFixed(1)}%
+        {overallMarginPercentageWithoutExpenses.toFixed(1)}%
+      </td>
+      <td className="border border-gray-300 px-2 py-2 text-xs">
+        {overallMarginPercentageWithExpenses.toFixed(1)}%
       </td>
       <td className="border border-gray-300 px-2 py-2"></td>
     </tr>
