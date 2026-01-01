@@ -139,6 +139,7 @@ class OpportunityResponse(OpportunityBase):
     """Schema for opportunity response."""
     id: UUID
     account_name: Optional[str] = None  # Company name from account relationship
+    engagements: Optional[List[dict]] = None  # Engagements with employee associations from active estimates
     releases: Optional[List[dict]] = None  # Releases with employee associations
     employees: Optional[List[dict]] = None  # Employees directly linked to opportunity
     

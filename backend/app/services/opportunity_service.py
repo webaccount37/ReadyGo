@@ -506,6 +506,32 @@ class OpportunityService(BaseService):
         }
         
         if include_relationships:
+            # Include engagements with their employee associations from active estimates
+            engagements = []
+            if hasattr(opportunity, 'engagements') and opportunity.engagements:
+                for engagement in opportunity.engagements:
+                    # Safety check: ensure engagement belongs to this opportunity
+                    if engagement.opportunity_id != opportunity.id:
+                        continue
+                    
+                    engagement_dict = {
+                        "id": str(engagement.id),
+                        "name": engagement.name,
+                        "opportunity_id": str(engagement.opportunity_id),
+                        "start_date": engagement.start_date.isoformat() if engagement.start_date else None,
+                        "end_date": engagement.end_date.isoformat() if engagement.end_date else None,
+                        "status": engagement.status.value if hasattr(engagement.status, 'value') else str(engagement.status),
+                        "budget": float(engagement.budget) if engagement.budget else None,
+                        "billing_term_id": str(engagement.billing_term_id) if engagement.billing_term_id else None,
+                        "description": engagement.description,
+                        "default_currency": engagement.default_currency,
+                        "delivery_center_id": str(engagement.delivery_center_id) if engagement.delivery_center_id else None,
+                        "attributes": engagement.attributes,
+                        "employees": await self._get_employees_from_active_estimates_for_engagement(engagement.id)
+                    }
+                    engagements.append(engagement_dict)
+            opportunity_dict["engagements"] = engagements
+            
             # Include releases with their employee associations from active estimates
             releases = []
             if hasattr(opportunity, 'releases') and opportunity.releases:
