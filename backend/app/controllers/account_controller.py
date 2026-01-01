@@ -24,7 +24,7 @@ class AccountController(BaseController):
     async def get_account(self, account_id: UUID, include_projects: bool = False) -> Optional[AccountResponse]:
         """Get account by ID."""
         if include_projects:
-            return await self.account_service.get_account_with_engagements(account_id)
+            return await self.account_service.get_account_with_opportunities(account_id)
         return await self.account_service.get_account(account_id)
     
     async def list_accounts(

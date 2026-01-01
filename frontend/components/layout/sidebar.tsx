@@ -38,7 +38,7 @@ const navGroups: NavGroup[] = [
   {
     title: "Client Management",
     items: [
-      { title: "Engagements", href: "/engagements", icon: Briefcase },
+      { title: "Opportunities", href: "/opportunities", icon: Briefcase },
       { title: "Accounts", href: "/accounts", icon: Building2 },
       { title: "Contacts", href: "/contacts", icon: ContactRound },
     ],

@@ -78,11 +78,11 @@ export default function ReleasesPage() {
     const query = searchQuery.toLowerCase();
     return data.items.filter((release) => {
       const name = (release.name || "").toLowerCase();
-      const engagement = (release.engagement_name || release.engagement_id || "").toLowerCase();
+      const opportunity = (release.opportunity_name || release.opportunity_id || "").toLowerCase();
       const status = (release.status || "").toLowerCase();
       return (
         name.includes(query) ||
-        engagement.includes(query) ||
+        opportunity.includes(query) ||
         status.includes(query)
       );
     });
@@ -165,7 +165,7 @@ export default function ReleasesPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Releases</h1>
           <p className="text-gray-600 mt-1 text-sm sm:text-base">
-            Manage engagement releases and iterations
+            Manage opportunity releases and iterations
           </p>
         </div>
         <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto">+ Add Release</Button>
@@ -208,7 +208,7 @@ export default function ReleasesPage() {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Engagement</th>
+                            <th className="text-left p-3 font-semibold">Opportunity</th>
                             <th className="text-left p-3 font-semibold">Name</th>
                             <th className="text-left p-3 font-semibold">Status</th>
                             <th className="text-left p-3 font-semibold">Start Date</th>
@@ -223,7 +223,7 @@ export default function ReleasesPage() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingRelease(release.id)}
                           >
-                            <td className="p-3">{highlightText(release.engagement_name || release.engagement_id, searchQuery)}</td>
+                            <td className="p-3">{highlightText(release.opportunity_name || release.opportunity_id, searchQuery)}</td>
                             <td className="p-3 font-medium">{highlightText(release.name, searchQuery)}</td>
                             <td className="p-3">
                               <span
@@ -297,9 +297,9 @@ export default function ReleasesPage() {
                             <div className="space-y-3">
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Engagement
+                                  Opportunity
                                 </div>
-                                <div className="text-sm">{highlightText(release.engagement_name || release.engagement_id, searchQuery)}</div>
+                                <div className="text-sm">{highlightText(release.opportunity_name || release.opportunity_id, searchQuery)}</div>
                               </div>
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
@@ -458,8 +458,8 @@ export default function ReleasesPage() {
               <p className="text-sm text-gray-700">{releaseToView.name}</p>
             </div>
             <div>
-              <p className="text-sm font-semibold text-gray-800">Engagement</p>
-              <p className="text-sm text-gray-700">{releaseToView.engagement_name || releaseToView.engagement_id}</p>
+              <p className="text-sm font-semibold text-gray-800">Opportunity</p>
+              <p className="text-sm text-gray-700">{releaseToView.opportunity_name || releaseToView.opportunity_id}</p>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>

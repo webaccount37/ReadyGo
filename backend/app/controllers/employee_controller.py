@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.controllers.base_controller import BaseController
 from app.services.employee_service import EmployeeService
 from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeListResponse
-from app.schemas.relationships import LinkEmployeesToEngagementRequest, LinkEmployeesToReleaseRequest, UnlinkRequest
+from app.schemas.relationships import LinkEmployeesToOpportunityRequest, LinkEmployeesToReleaseRequest, UnlinkRequest
 
 
 class EmployeeController(BaseController):
@@ -58,25 +58,25 @@ class EmployeeController(BaseController):
         """Delete an employee."""
         return await self.employee_service.delete_employee(employee_id)
     
-    async def link_employees_to_engagement(
+    async def link_employees_to_opportunity(
         self,
-        engagement_id: UUID,
-        request: LinkEmployeesToEngagementRequest,
+        opportunity_id: UUID,
+        request: LinkEmployeesToOpportunityRequest,
     ) -> bool:
-        """Link employees to an engagement."""
-        return await self.employee_service.link_employees_to_engagement(
-            engagement_id,
+        """Link employees to an opportunity."""
+        return await self.employee_service.link_employees_to_opportunity(
+            opportunity_id,
             request,
         )
     
-    async def unlink_employees_from_engagement(
+    async def unlink_employees_from_opportunity(
         self,
-        engagement_id: UUID,
+        opportunity_id: UUID,
         request: UnlinkRequest,
     ) -> bool:
-        """Unlink employees from an engagement."""
-        return await self.employee_service.unlink_employees_from_engagement(
-            engagement_id,
+        """Unlink employees from an opportunity."""
+        return await self.employee_service.unlink_employees_from_opportunity(
+            opportunity_id,
             request.ids,
         )
     

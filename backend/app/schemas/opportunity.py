@@ -1,5 +1,5 @@
 """
-Engagement Pydantic schemas for request/response validation.
+Opportunity Pydantic schemas for request/response validation.
 """
 
 from pydantic import BaseModel, Field, model_validator
@@ -7,9 +7,9 @@ from typing import Optional, List
 from datetime import date
 from uuid import UUID
 
-from app.models.engagement import (
-    EngagementStatus, 
-    EngagementType, 
+from app.models.opportunity import (
+    OpportunityStatus, 
+    OpportunityType, 
     WinProbability, 
     Accountability, 
     StrategicImportance
@@ -17,22 +17,22 @@ from app.models.engagement import (
 from decimal import Decimal
 
 
-class EngagementBase(BaseModel):
-    """Base engagement schema with common fields."""
+class OpportunityBase(BaseModel):
+    """Base opportunity schema with common fields."""
     name: str = Field(..., min_length=1, max_length=255)
-    parent_engagement_id: Optional[UUID] = None
+    parent_opportunity_id: Optional[UUID] = None
     account_id: UUID
     start_date: date
     end_date: Optional[date] = None
-    status: EngagementStatus = EngagementStatus.DISCOVERY
+    status: OpportunityStatus = OpportunityStatus.DISCOVERY
     billing_term_id: UUID
-    engagement_type: EngagementType = EngagementType.IMPLEMENTATION
+    opportunity_type: OpportunityType = OpportunityType.IMPLEMENTATION
     description: Optional[str] = Field(None, max_length=2000)
     utilization: Optional[float] = Field(None, ge=0, le=100)
     margin: Optional[float] = Field(None, ge=-100, le=100)
     default_currency: str = "USD"
     delivery_center_id: UUID
-    engagement_owner_id: Optional[UUID] = None
+    opportunity_owner_id: Optional[UUID] = None
     invoice_customer: bool = True
     billable_expenses: bool = True
     attributes: Optional[dict] = None
@@ -54,8 +54,8 @@ class EngagementBase(BaseModel):
     project_duration_months: Optional[int] = Field(None, ge=1, le=12)  # 1-12
 
 
-class EngagementCreate(EngagementBase):
-    """Schema for creating an engagement."""
+class OpportunityCreate(OpportunityBase):
+    """Schema for creating an opportunity."""
     
     @model_validator(mode='before')
     def normalize_enum_values(cls, data):
@@ -80,22 +80,22 @@ class EngagementCreate(EngagementBase):
         return self
 
 
-class EngagementUpdate(BaseModel):
-    """Schema for updating an engagement (all fields optional)."""
+class OpportunityUpdate(BaseModel):
+    """Schema for updating an opportunity (all fields optional)."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    parent_engagement_id: Optional[UUID] = None
+    parent_opportunity_id: Optional[UUID] = None
     account_id: Optional[UUID] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    status: Optional[EngagementStatus] = None
+    status: Optional[OpportunityStatus] = None
     billing_term_id: Optional[UUID] = None
-    engagement_type: Optional[EngagementType] = None
+    opportunity_type: Optional[OpportunityType] = None
     description: Optional[str] = Field(None, max_length=2000)
     utilization: Optional[float] = Field(None, ge=0, le=100)
     margin: Optional[float] = Field(None, ge=-100, le=100)
     default_currency: Optional[str] = None
     delivery_center_id: Optional[UUID] = None
-    engagement_owner_id: Optional[UUID] = None
+    opportunity_owner_id: Optional[UUID] = None
     invoice_customer: Optional[bool] = None
     billable_expenses: Optional[bool] = None
     attributes: Optional[dict] = None
@@ -135,19 +135,19 @@ class EngagementUpdate(BaseModel):
         return self
 
 
-class EngagementResponse(EngagementBase):
-    """Schema for engagement response."""
+class OpportunityResponse(OpportunityBase):
+    """Schema for opportunity response."""
     id: UUID
     account_name: Optional[str] = None  # Company name from account relationship
     releases: Optional[List[dict]] = None  # Releases with employee associations
-    employees: Optional[List[dict]] = None  # Employees directly linked to engagement
+    employees: Optional[List[dict]] = None  # Employees directly linked to opportunity
     
     class Config:
         from_attributes = True
 
 
-class EngagementListResponse(BaseModel):
-    """Schema for engagement list response."""
-    items: List[EngagementResponse]
+class OpportunityListResponse(BaseModel):
+    """Schema for opportunity list response."""
+    items: List[OpportunityResponse]
     total: int
 

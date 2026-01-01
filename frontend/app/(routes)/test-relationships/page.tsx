@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { useEmployees } from "@/hooks/useEmployees";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import { useReleases } from "@/hooks/useReleases";
 import {
-  useLinkEmployeeToEngagement,
-  useUnlinkEmployeeFromEngagement,
+  useLinkEmployeeToOpportunity,
+  useUnlinkEmployeeFromOpportunity,
   useLinkEmployeeToRelease,
   useUnlinkEmployeeFromRelease,
 } from "@/hooks/useEmployees";
@@ -17,40 +17,40 @@ import { Label } from "@/components/ui/label";
 
 export default function RelationshipsPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<string>("");
-  const [selectedEngagement, setSelectedEngagement] = useState<string>("");
+  const [selectedOpportunity, setSelectedOpportunity] = useState<string>("");
   const [selectedRelease, setSelectedRelease] = useState<string>("");
 
   const { data: employeesData } = useEmployees({ limit: 100 });
-  const { data: engagementsData } = useEngagements({ limit: 100 });
+  const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const { data: releasesData } = useReleases({ limit: 100 });
 
-  const linkEmployeeToEngagement = useLinkEmployeeToEngagement();
-  const unlinkEmployeeFromEngagement = useUnlinkEmployeeFromEngagement();
+  const linkEmployeeToOpportunity = useLinkEmployeeToOpportunity();
+  const unlinkEmployeeFromOpportunity = useUnlinkEmployeeFromOpportunity();
   const linkEmployeeToRelease = useLinkEmployeeToRelease();
   const unlinkEmployeeFromRelease = useUnlinkEmployeeFromRelease();
 
-  const handleLinkEngagement = async () => {
-    if (!selectedEmployee || !selectedEngagement) {
-      alert("Please select both an employee and an engagement");
+  const handleLinkOpportunity = async () => {
+    if (!selectedEmployee || !selectedOpportunity) {
+      alert("Please select both an employee and an opportunity");
       return;
     }
     // Note: This test page requires manual entry of link data
     // In production, use the employee edit page which has the full form
-    alert("Please use the employee edit page to link engagements with required fields (Role, Start Date, End Date, Project Rate, Delivery Center)");
+    alert("Please use the employee edit page to link opportunities with required fields (Role, Start Date, End Date, Project Rate, Delivery Center)");
   };
 
-  const handleUnlinkEngagement = async () => {
-    if (!selectedEmployee || !selectedEngagement) {
-      alert("Please select both an employee and an engagement");
+  const handleUnlinkOpportunity = async () => {
+    if (!selectedEmployee || !selectedOpportunity) {
+      alert("Please select both an employee and an opportunity");
       return;
     }
     try {
-      await unlinkEmployeeFromEngagement.mutateAsync({
+      await unlinkEmployeeFromOpportunity.mutateAsync({
         employeeId: selectedEmployee,
-        engagementId: selectedEngagement,
+        opportunityId: selectedOpportunity,
       });
-      alert("Employee unlinked from engagement successfully!");
-      setSelectedEngagement("");
+      alert("Employee unlinked from opportunity successfully!");
+      setSelectedOpportunity("");
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -88,21 +88,21 @@ export default function RelationshipsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Manage Relationships</h1>
         <p className="text-gray-600 mt-1">
-          Link employees to engagements and releases
+          Link employees to opportunities and releases
         </p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Employee-Engagement Relationships */}
+        {/* Employee-Opportunity Relationships */}
         <Card>
           <CardHeader>
-            <CardTitle>Employee ↔ Engagement</CardTitle>
+            <CardTitle>Employee ↔ Opportunity</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="employee-engagement">Employee</Label>
+              <Label htmlFor="employee-opportunity">Employee</Label>
               <Select
-                id="employee-engagement"
+                id="employee-opportunity"
                 value={selectedEmployee}
                 onChange={(e) => setSelectedEmployee(e.target.value)}
               >
@@ -116,16 +116,16 @@ export default function RelationshipsPage() {
             </div>
 
             <div>
-              <Label htmlFor="engagement-select">Engagement</Label>
+              <Label htmlFor="opportunity-select">Opportunity</Label>
               <Select
-                id="engagement-select"
-                value={selectedEngagement}
-                onChange={(e) => setSelectedEngagement(e.target.value)}
+                id="opportunity-select"
+                value={selectedOpportunity}
+                onChange={(e) => setSelectedOpportunity(e.target.value)}
               >
-                <option value="">Select an engagement</option>
-                {engagementsData?.items.map((engagement) => (
-                  <option key={engagement.id} value={engagement.id}>
-                    {engagement.name}
+                <option value="">Select an opportunity</option>
+                {opportunitiesData?.items.map((opportunity) => (
+                  <option key={opportunity.id} value={opportunity.id}>
+                    {opportunity.name}
                   </option>
                 ))}
               </Select>
@@ -133,25 +133,25 @@ export default function RelationshipsPage() {
 
             <div className="flex gap-2 pt-2">
               <Button
-                onClick={handleLinkEngagement}
+                onClick={handleLinkOpportunity}
                 disabled={
                   !selectedEmployee ||
-                  !selectedEngagement ||
-                  linkEmployeeToEngagement.isPending
+                  !selectedOpportunity ||
+                  linkEmployeeToOpportunity.isPending
                 }
               >
-                {linkEmployeeToEngagement.isPending ? "Linking..." : "Link"}
+                {linkEmployeeToOpportunity.isPending ? "Linking..." : "Link"}
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleUnlinkEngagement}
+                onClick={handleUnlinkOpportunity}
                 disabled={
                   !selectedEmployee ||
-                  !selectedEngagement ||
-                  unlinkEmployeeFromEngagement.isPending
+                  !selectedOpportunity ||
+                  unlinkEmployeeFromOpportunity.isPending
                 }
               >
-                {unlinkEmployeeFromEngagement.isPending ? "Unlinking..." : "Unlink"}
+                {unlinkEmployeeFromOpportunity.isPending ? "Unlinking..." : "Unlink"}
               </Button>
             </div>
           </CardContent>

@@ -20,8 +20,8 @@ export interface ReleaseEmployee {
 export interface Release {
   id: string;
   name: string;
-  engagement_id: string;
-  engagement_name?: string;
+  opportunity_id: string;
+  opportunity_name?: string;
   start_date?: string;
   end_date?: string;
   budget?: string;
@@ -38,7 +38,7 @@ export interface Release {
 
 export interface ReleaseCreate {
   name: string;
-  engagement_id: string;
+  opportunity_id: string;
   start_date?: string;
   end_date?: string;
   budget?: string;
@@ -52,7 +52,7 @@ export interface ReleaseCreate {
 
 export interface ReleaseUpdate {
   name?: string;
-  engagement_id?: string;
+  opportunity_id?: string;
   start_date?: string;
   end_date?: string;
   budget?: string;

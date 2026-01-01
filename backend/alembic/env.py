@@ -16,7 +16,7 @@ from app.core.config import settings
 # Import all models to ensure they're registered with Base
 from app.models import (
     Employee,
-    Engagement,
+    Opportunity,
     Release,
     Calendar,
     Account,

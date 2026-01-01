@@ -178,7 +178,7 @@ class ProjectService(BaseService):
             "margin": project.margin,
             "default_currency": project.default_currency,
             "delivery_center_id": project.delivery_center_id,
-            "engagement_owner_id": project.engagement_owner_id,
+            "opportunity_owner_id": project.opportunity_owner_id,
             "invoice_customer": project.invoice_customer,
             "billable_expenses": project.billable_expenses,
             "attributes": project.attributes,

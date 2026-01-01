@@ -15,10 +15,10 @@ import { useEmployees } from "@/hooks/useEmployees";
 import { useRoles } from "@/hooks/useRoles";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { normalizeDateForInput } from "@/lib/utils";
-import type { Engagement } from "@/types/engagement";
+import type { Opportunity } from "@/types/opportunity";
 
-interface EngagementRelationshipsProps {
-  engagement: Engagement;
+interface OpportunityRelationshipsProps {
+  opportunity: Opportunity;
   onUpdate: () => void;
   readOnly?: boolean;
 }
@@ -40,11 +40,11 @@ interface LinkEmployeeFormData {
   delivery_center: string;
 }
 
-export function EngagementRelationships({
-  engagement,
+export function OpportunityRelationships({
+  opportunity,
   onUpdate,
   readOnly = false,
-}: EngagementRelationshipsProps) {
+}: OpportunityRelationshipsProps) {
   const [showReleaseForm, setShowReleaseForm] = useState(false);
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   const [selectedReleaseForEmployee, setSelectedReleaseForEmployee] = useState<string | null>(null);
@@ -53,8 +53,8 @@ export function EngagementRelationships({
   const [releaseFormData, setReleaseFormData] = useState<ReleaseFormData>({
     release_id: undefined,
     name: "",
-    start_date: normalizeDateForInput(engagement.start_date),
-    end_date: normalizeDateForInput(engagement.end_date),
+    start_date: normalizeDateForInput(opportunity.start_date),
+    end_date: normalizeDateForInput(opportunity.end_date),
   });
   
   const [employeeFormData, setEmployeeFormData] = useState<LinkEmployeeFormData>({
@@ -67,47 +67,47 @@ export function EngagementRelationships({
     delivery_center: "",
   });
 
-  // Use releases from engagement relationships if available, otherwise fetch separately
+  // Use releases from opportunity relationships if available, otherwise fetch separately
   const { data: releasesData, refetch: refetchReleases } = useReleases({ 
-    engagement_id: engagement.id,
+    opportunity_id: opportunity.id,
     limit: 1000 
   });
-  // Fetch all releases for selection (not filtered by engagement)
+  // Fetch all releases for selection (not filtered by opportunity)
   const { data: allReleasesData } = useReleases({ limit: 1000 });
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: rolesData } = useRoles({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
   
-  // Debug: Log engagement data to see what we're receiving
+  // Debug: Log opportunity data to see what we're receiving
   useEffect(() => {
-    console.log("Engagement Relationships - Engagement data:", {
-      id: engagement.id,
-      name: engagement.name,
-      hasReleases: !!engagement.releases,
-      releasesCount: engagement.releases?.length || 0,
-      releases: engagement.releases?.map(r => ({
+    console.log("Opportunity Relationships - Opportunity data:", {
+      id: opportunity.id,
+      name: opportunity.name,
+      hasReleases: !!opportunity.releases,
+      releasesCount: opportunity.releases?.length || 0,
+      releases: opportunity.releases?.map(r => ({
         id: r.id,
         name: r.name,
-        engagement_id: r.engagement_id,
-        engagement_id_matches: r.engagement_id === engagement.id,
+        opportunity_id: r.opportunity_id,
+        opportunity_id_matches: r.opportunity_id === opportunity.id,
         employees_count: (r as any).employees?.length || 0,
       })),
     });
     
     // Also log releasesData for comparison
     if (releasesData?.items) {
-      console.log("Engagement Relationships - ReleasesData:", {
+      console.log("Opportunity Relationships - ReleasesData:", {
         total: releasesData.items.length,
-        filtered_by_engagement: releasesData.items.filter(r => r.engagement_id === engagement.id).length,
+        filtered_by_opportunity: releasesData.items.filter(r => r.opportunity_id === opportunity.id).length,
         releases: releasesData.items.map(r => ({
           id: r.id,
           name: r.name,
-          engagement_id: r.engagement_id,
-          engagement_id_matches: r.engagement_id === engagement.id,
+          opportunity_id: r.opportunity_id,
+          opportunity_id_matches: r.opportunity_id === opportunity.id,
         })),
       });
     }
-  }, [engagement, releasesData]);
+  }, [opportunity, releasesData]);
   
   const createRelease = useCreateRelease({
     onSuccess: async (newRelease) => {
@@ -115,8 +115,8 @@ export function EngagementRelationships({
       setReleaseFormData({
         release_id: undefined,
         name: "",
-        start_date: normalizeDateForInput(engagement.start_date),
-        end_date: normalizeDateForInput(engagement.end_date),
+        start_date: normalizeDateForInput(opportunity.start_date),
+        end_date: normalizeDateForInput(opportunity.end_date),
       });
       await refetchReleases();
       setShowReleaseForm(false);
@@ -131,8 +131,8 @@ export function EngagementRelationships({
       setReleaseFormData({
         release_id: undefined,
         name: "",
-        start_date: normalizeDateForInput(engagement.start_date),
-        end_date: normalizeDateForInput(engagement.end_date),
+        start_date: normalizeDateForInput(opportunity.start_date),
+        end_date: normalizeDateForInput(opportunity.end_date),
       });
       await refetchReleases();
       setShowReleaseForm(false);
@@ -185,8 +185,8 @@ export function EngagementRelationships({
       role.role_rates?.some((r) => r.delivery_center_code === dc)
     ) || [];
 
-  // Get employees linked to this engagement (through engagement associations)
-  // Note: This would come from the engagement data if include_relationships is true
+  // Get employees linked to this opportunity (through opportunity associations)
+  // Note: This would come from the opportunity data if include_relationships is true
   // For now, we'll display employees as they're linked through releases
 
   const handleCreateOrSelectRelease = async () => {
@@ -200,9 +200,9 @@ export function EngagementRelationships({
       try {
         await createRelease.mutateAsync({
           name: releaseFormData.name,
-          engagement_id: engagement.id,
-          start_date: releaseFormData.start_date || engagement.start_date,
-          end_date: releaseFormData.end_date || engagement.end_date,
+          opportunity_id: opportunity.id,
+          start_date: releaseFormData.start_date || opportunity.start_date,
+          end_date: releaseFormData.end_date || opportunity.end_date,
           status: "planning",
         });
         // Form will be reset and closed in onSuccess callback
@@ -211,7 +211,7 @@ export function EngagementRelationships({
         alert(`Error creating release: ${err instanceof Error ? err.message : String(err)}`);
       }
     } else if (releaseFormData.release_id) {
-      // If selecting existing release, check if it's already linked to this engagement
+      // If selecting existing release, check if it's already linked to this opportunity
       const selectedRelease = allReleasesData?.items.find(r => r.id === releaseFormData.release_id);
       
       if (!selectedRelease) {
@@ -219,13 +219,13 @@ export function EngagementRelationships({
         return;
       }
 
-      // If release already belongs to this engagement, we're done
-      if (selectedRelease.engagement_id === engagement.id) {
+      // If release already belongs to this opportunity, we're done
+      if (selectedRelease.opportunity_id === opportunity.id) {
         setReleaseFormData({
           release_id: undefined,
           name: "",
-          start_date: engagement.start_date || "",
-          end_date: engagement.end_date || "",
+          start_date: opportunity.start_date || "",
+          end_date: opportunity.end_date || "",
         });
         setShowReleaseForm(false);
         await refetchReleases();
@@ -234,12 +234,12 @@ export function EngagementRelationships({
         return;
       }
 
-      // Otherwise, update the release to link it to this engagement
+      // Otherwise, update the release to link it to this opportunity
       try {
         await updateRelease.mutateAsync({
           id: releaseFormData.release_id,
           data: {
-            engagement_id: engagement.id,
+            opportunity_id: opportunity.id,
           },
         });
         // Form will be reset and closed in onSuccess callback
@@ -251,16 +251,16 @@ export function EngagementRelationships({
   };
 
   const handleLinkEmployeeToRelease = (releaseId: string) => {
-    const selectedRelease = engagement.releases?.find(r => r.id === releaseId) 
-      || releasesData?.items.find(r => r.id === releaseId && r.engagement_id === engagement.id);
+    const selectedRelease = opportunity.releases?.find(r => r.id === releaseId) 
+      || releasesData?.items.find(r => r.id === releaseId && r.opportunity_id === opportunity.id);
     
     setSelectedReleaseForEmployee(releaseId);
     setEmployeeFormData({
       employee_id: "",
       release_id: releaseId,
       role_id: "",
-      start_date: normalizeDateForInput(selectedRelease?.start_date || engagement.start_date),
-      end_date: normalizeDateForInput(selectedRelease?.end_date || engagement.end_date),
+      start_date: normalizeDateForInput(selectedRelease?.start_date || opportunity.start_date),
+      end_date: normalizeDateForInput(selectedRelease?.end_date || opportunity.end_date),
       project_rate: "",
       delivery_center: "",
     });
@@ -314,53 +314,53 @@ export function EngagementRelationships({
           <CardTitle className="text-lg">Associated Releases</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Only use releases from engagement.releases (which includes employees) */}
-          {/* Only fallback to releasesData if engagement.releases is not available */}
-          {((engagement.releases && engagement.releases.length > 0) || (releasesData?.items && releasesData.items.length > 0)) ? (
+          {/* Only use releases from opportunity.releases (which includes employees) */}
+          {/* Only fallback to releasesData if opportunity.releases is not available */}
+          {((opportunity.releases && opportunity.releases.length > 0) || (releasesData?.items && releasesData.items.length > 0)) ? (
             <div className="space-y-4">
-              {/* Prioritize engagement.releases if available, otherwise use releasesData but filter by engagement_id */}
-              {/* IMPORTANT: Always filter by engagement_id to ensure data integrity */}
-              {((engagement.releases && engagement.releases.length > 0) 
-                ? engagement.releases.filter(r => {
-                    // Strict filtering: only include releases that belong to this engagement
-                    const matches = r.engagement_id === engagement.id;
+              {/* Prioritize opportunity.releases if available, otherwise use releasesData but filter by opportunity_id */}
+              {/* IMPORTANT: Always filter by opportunity_id to ensure data integrity */}
+              {((opportunity.releases && opportunity.releases.length > 0) 
+                ? opportunity.releases.filter(r => {
+                    // Strict filtering: only include releases that belong to this opportunity
+                    const matches = r.opportunity_id === opportunity.id;
                     if (!matches) {
-                      console.warn(`[FILTER] Excluding release ${r.id} (${r.name}) - engagement_id ${r.engagement_id} != ${engagement.id}`);
+                      console.warn(`[FILTER] Excluding release ${r.id} (${r.name}) - opportunity_id ${r.opportunity_id} != ${opportunity.id}`);
                     }
                     return matches;
                   })
                 : (releasesData?.items || []).filter(r => {
-                    const matches = r.engagement_id === engagement.id;
+                    const matches = r.opportunity_id === opportunity.id;
                     if (!matches) {
-                      console.warn(`[FILTER] Excluding release ${r.id} (${r.name}) from releasesData - engagement_id ${r.engagement_id} != ${engagement.id}`);
+                      console.warn(`[FILTER] Excluding release ${r.id} (${r.name}) from releasesData - opportunity_id ${r.opportunity_id} != ${opportunity.id}`);
                     }
                     return matches;
                   })
               ).map((release) => {
-                // Double-check that this release belongs to this engagement
-                if (release.engagement_id !== engagement.id) {
-                  console.error(`[ERROR] Release ${release.id} (${release.name}) does not belong to engagement ${engagement.id} (${engagement.name})`);
+                // Double-check that this release belongs to this opportunity
+                if (release.opportunity_id !== opportunity.id) {
+                  console.error(`[ERROR] Release ${release.id} (${release.name}) does not belong to opportunity ${opportunity.id} (${opportunity.name})`);
                   return null;
                 }
                 
-                // If release comes from engagement.releases, it has employees embedded
+                // If release comes from opportunity.releases, it has employees embedded
                 // IMPORTANT: Filter employees to ensure they're actually linked to THIS release
-                const releaseFromEngagement = engagement.releases?.find(r => r.id === release.id && r.engagement_id === engagement.id);
+                const releaseFromOpportunity = opportunity.releases?.find(r => r.id === release.id && r.opportunity_id === opportunity.id);
                 let releaseEmployees: any[] = [];
-                if (releaseFromEngagement && 'employees' in releaseFromEngagement) {
-                  releaseEmployees = (releaseFromEngagement.employees || []).filter((emp: any) => {
+                if (releaseFromOpportunity && 'employees' in releaseFromOpportunity) {
+                  releaseEmployees = (releaseFromOpportunity.employees || []).filter((emp: any) => {
                     // Additional safety: verify employee is actually linked to this release
                     // We can't verify this directly from the frontend, but we trust the backend
                     // The backend safety checks should have filtered this already
                     return true;
                   });
-                  console.log(`[DEBUG] Release ${release.id} (${release.name}) has ${releaseEmployees.length} employees from engagement.releases`);
+                  console.log(`[DEBUG] Release ${release.id} (${release.name}) has ${releaseEmployees.length} employees from opportunity.releases`);
                 } else {
-                  console.log(`[DEBUG] Release ${release.id} (${release.name}) not found in engagement.releases, using empty employee list`);
+                  console.log(`[DEBUG] Release ${release.id} (${release.name}) not found in opportunity.releases, using empty employee list`);
                 }
                 
-                // Skip if release doesn't belong to this engagement (shouldn't happen after filtering, but safety check)
-                if (!release || release.engagement_id !== engagement.id) {
+                // Skip if release doesn't belong to this opportunity (shouldn't happen after filtering, but safety check)
+                if (!release || release.opportunity_id !== opportunity.id) {
                   return null;
                 }
                 
@@ -417,7 +417,7 @@ export function EngagementRelationships({
                           if (employee.start_date && employee.end_date) {
                             const startDateStr = normalizeDateForInput(employee.start_date);
                             const endDateStr = normalizeDateForInput(employee.end_date);
-                            console.log(`[EngagementRelationships ${release.id}-${employee.id}] Received dates:`, {
+                            console.log(`[OpportunityRelationships ${release.id}-${employee.id}] Received dates:`, {
                               raw_start_date: employee.start_date,
                               raw_end_date: employee.end_date,
                               parsed_start_date: startDateStr,
@@ -683,8 +683,8 @@ export function EngagementRelationships({
                           ...releaseFormData, 
                           release_id: value || undefined,
                           name: value ? (selectedRelease?.name || "") : "",
-                          start_date: normalizeDateForInput(selectedRelease?.start_date || engagement.start_date),
-                          end_date: normalizeDateForInput(selectedRelease?.end_date || engagement.end_date),
+                          start_date: normalizeDateForInput(selectedRelease?.start_date || opportunity.start_date),
+                          end_date: normalizeDateForInput(selectedRelease?.end_date || opportunity.end_date),
                         });
                       }}
                       className="w-full mt-1"
@@ -692,7 +692,7 @@ export function EngagementRelationships({
                       <option value="">Select an existing release</option>
                       {/* Show all releases, but indicate which ones are already linked */}
                       {(allReleasesData?.items || []).map((release) => {
-                        const isAlreadyLinked = release.engagement_id === engagement.id;
+                        const isAlreadyLinked = release.opportunity_id === opportunity.id;
                         return (
                           <option key={release.id} value={release.id}>
                             {release.name}{isAlreadyLinked ? " (already linked)" : ""}
@@ -748,8 +748,8 @@ export function EngagementRelationships({
                         setReleaseFormData({
                           release_id: undefined,
                           name: "",
-                          start_date: engagement.start_date || "",
-                          end_date: engagement.end_date || "",
+                          start_date: opportunity.start_date || "",
+                          end_date: opportunity.end_date || "",
                         });
                       }}
                       variant="outline"
@@ -771,11 +771,11 @@ export function EngagementRelationships({
           <CardTitle className="text-lg">Associated Employees</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Employees are linked through releases, not directly to engagements */}
+          {/* Employees are linked through releases, not directly to opportunities */}
           {/* Summary: Show count of employees linked through releases */}
-          {engagement.releases && engagement.releases.some(r => r.employees && r.employees.length > 0) ? (
+          {opportunity.releases && opportunity.releases.some(r => r.employees && r.employees.length > 0) ? (
             <div className="text-sm text-gray-600">
-              {engagement.releases.reduce((total, r) => total + (r.employees?.length || 0), 0)} employee(s) linked through releases (shown above under each release)
+              {opportunity.releases.reduce((total, r) => total + (r.employees?.length || 0), 0)} employee(s) linked through releases (shown above under each release)
             </div>
           ) : (
             <p className="text-sm text-gray-500">No employees associated. Employees must be linked through releases.</p>

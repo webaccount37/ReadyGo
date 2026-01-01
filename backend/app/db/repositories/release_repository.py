@@ -20,9 +20,9 @@ class ReleaseRepository(BaseRepository[Release]):
         super().__init__(Release, session)
     
     def _base_query(self):
-        """Base query with eager loading of engagement, billing_term, and delivery_center relationships."""
+        """Base query with eager loading of opportunity, billing_term, and delivery_center relationships."""
         return select(Release).options(
-            selectinload(Release.engagement),
+            selectinload(Release.opportunity),
             selectinload(Release.billing_term),
             selectinload(Release.delivery_center)
         )
@@ -33,7 +33,7 @@ class ReleaseRepository(BaseRepository[Release]):
         limit: int = 100,
         **filters,
     ) -> List[Release]:
-        """List releases with pagination and filters, eagerly loading engagement."""
+        """List releases with pagination and filters, eagerly loading opportunity."""
         query = self._base_query()
         
         # Apply filters
@@ -46,19 +46,19 @@ class ReleaseRepository(BaseRepository[Release]):
         return list(result.scalars().all())
     
     async def get(self, id: UUID) -> Optional[Release]:
-        """Get release by ID with engagement relationship loaded."""
+        """Get release by ID with opportunity relationship loaded."""
         query = self._base_query().where(Release.id == id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
-    async def list_by_engagement(
+    async def list_by_opportunity(
         self,
-        engagement_id: UUID,
+        opportunity_id: UUID,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Release]:
-        """List releases by engagement."""
-        query = self._base_query().where(Release.engagement_id == engagement_id)
+        """List releases by opportunity."""
+        query = self._base_query().where(Release.opportunity_id == opportunity_id)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -99,7 +99,7 @@ class ReleaseRepository(BaseRepository[Release]):
         result = await self.session.execute(
             select(Release)
             .options(
-                selectinload(Release.engagement),
+                selectinload(Release.opportunity),
                 selectinload(Release.billing_term),
                 selectinload(Release.delivery_center),
             )

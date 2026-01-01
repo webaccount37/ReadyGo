@@ -1,5 +1,5 @@
 """
-Engagement model for quoting and staff planning system.
+Opportunity model for quoting and staff planning system.
 """
 
 from sqlalchemy import Column, String, Float, Date, JSON, ForeignKey, Enum as SQLEnum, Boolean, Integer, Numeric
@@ -11,8 +11,8 @@ import enum
 from app.db.base import Base
 
 
-class EngagementStatus(str, enum.Enum):
-    """Engagement status enumeration."""
+class OpportunityStatus(str, enum.Enum):
+    """Opportunity status enumeration."""
     DISCOVERY = "discovery"
     QUALIFIED = "qualified"
     PROPOSAL = "proposal"
@@ -45,37 +45,37 @@ class StrategicImportance(str, enum.Enum):
     LOW = "low"
 
 
-class EngagementType(str, enum.Enum):
-    """Engagement type enumeration."""
+class OpportunityType(str, enum.Enum):
+    """Opportunity type enumeration."""
     IMPLEMENTATION = "implementation"
     CONSULTING = "consulting"
     SUPPORT = "support"
 
 
-class Engagement(Base):
-    """Engagement model for quoting and staff planning."""
+class Opportunity(Base):
+    """Opportunity model for quoting and staff planning."""
     
-    __tablename__ = "engagements"
+    __tablename__ = "opportunities"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String(255), nullable=False, index=True)
-    parent_engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id"), nullable=True)
+    parent_opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id"), nullable=True)
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=True)
     status = Column(
-        SQLEnum(EngagementStatus, values_callable=lambda x: [e.value for e in EngagementStatus]),
+        SQLEnum(OpportunityStatus, values_callable=lambda x: [e.value for e in OpportunityStatus]),
         nullable=False,
-        default=EngagementStatus.DISCOVERY
+        default=OpportunityStatus.DISCOVERY
     )
     billing_term_id = Column(UUID(as_uuid=True), ForeignKey("billing_terms.id"), nullable=False, index=True)
-    engagement_type = Column(SQLEnum(EngagementType), nullable=False, default=EngagementType.IMPLEMENTATION)
+    opportunity_type = Column(SQLEnum(OpportunityType), nullable=False, default=OpportunityType.IMPLEMENTATION)
     description = Column(String(2000), nullable=True)
     utilization = Column(Float, nullable=True)
     margin = Column(Float, nullable=True)
     default_currency = Column(String(3), default="USD", nullable=False)
     delivery_center_id = Column(UUID(as_uuid=True), ForeignKey("delivery_centers.id"), nullable=False, index=True)
-    engagement_owner_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True, index=True)
+    opportunity_owner_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True, index=True)
     invoice_customer = Column(Boolean, default=True, nullable=False)
     billable_expenses = Column(Boolean, default=True, nullable=False)
     attributes = Column(JSON, nullable=True, default=dict)
@@ -97,9 +97,10 @@ class Engagement(Base):
     project_duration_months = Column(Integer, nullable=True)  # 1-12
     
     # Relationships
-    parent_engagement = relationship("Engagement", remote_side=[id], backref="child_engagements")
-    account = relationship("Account", back_populates="engagements")
-    billing_term = relationship("BillingTerm", back_populates="engagements")
-    delivery_center = relationship("DeliveryCenter", back_populates="engagements")
-    engagement_owner = relationship("Employee", foreign_keys=[engagement_owner_id], back_populates="owned_engagements")
-    releases = relationship("Release", back_populates="engagement", cascade="all, delete-orphan")
+    parent_opportunity = relationship("Opportunity", remote_side=[id], backref="child_opportunities")
+    account = relationship("Account", back_populates="opportunities")
+    billing_term = relationship("BillingTerm", back_populates="opportunities")
+    delivery_center = relationship("DeliveryCenter", back_populates="opportunities")
+    opportunity_owner = relationship("Employee", foreign_keys=[opportunity_owner_id], back_populates="owned_opportunities")
+    releases = relationship("Release", back_populates="opportunity", cascade="all, delete-orphan")
+

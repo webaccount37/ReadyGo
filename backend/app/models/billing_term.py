@@ -25,6 +25,6 @@ class BillingTerm(Base):
     
     # Relationships
     accounts = relationship("Account", back_populates="billing_term")
-    engagements = relationship("Engagement", back_populates="billing_term")
+    opportunities = relationship("Opportunity", back_populates="billing_term")
     releases = relationship("Release", back_populates="billing_term")
 

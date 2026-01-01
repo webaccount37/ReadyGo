@@ -6,16 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { useAccounts } from "@/hooks/useAccounts";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEmployees } from "@/hooks/useEmployees";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { CURRENCIES } from "@/types/currency";
-import type { EngagementCreate, EngagementUpdate, Engagement } from "@/types/engagement";
+import type { OpportunityCreate, OpportunityUpdate, Opportunity } from "@/types/opportunity";
 
-interface EngagementFormProps {
-  initialData?: Partial<EngagementCreate> | Engagement;
-  onSubmit: (data: EngagementCreate | EngagementUpdate) => Promise<void>;
+interface OpportunityFormProps {
+  initialData?: Partial<OpportunityCreate> | Opportunity;
+  onSubmit: (data: OpportunityCreate | OpportunityUpdate) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
 }
@@ -29,33 +29,33 @@ interface FormErrors {
   billing_term_id?: string;
 }
 
-export function EngagementForm({
+export function OpportunityForm({
   initialData,
   onSubmit,
   onCancel,
   isLoading = false,
-}: EngagementFormProps) {
+}: OpportunityFormProps) {
   const { data: accountsData } = useAccounts({ limit: 100 });
-  const { data: engagementsData } = useEngagements({ limit: 100 });
+  const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
 
-  const [formData, setFormData] = useState<EngagementCreate>({
+  const [formData, setFormData] = useState<OpportunityCreate>({
     name: initialData?.name || "",
-    parent_engagement_id: initialData?.parent_engagement_id,
+    parent_opportunity_id: initialData?.parent_opportunity_id,
     account_id: initialData?.account_id || "",
     start_date: initialData?.start_date || "",
     end_date: initialData?.end_date || "",
     status: initialData?.status || "discovery",
     billing_term_id: initialData?.billing_term_id || "",
-    engagement_type: initialData?.engagement_type || "implementation",
+    opportunity_type: initialData?.opportunity_type || "implementation",
     description: initialData?.description || "",
     utilization: initialData?.utilization,
     margin: initialData?.margin,
     default_currency: initialData?.default_currency || "USD",
     delivery_center_id: initialData?.delivery_center_id || "",
-    engagement_owner_id: initialData?.engagement_owner_id,
+    opportunity_owner_id: initialData?.opportunity_owner_id,
     invoice_customer: initialData?.invoice_customer !== undefined ? initialData.invoice_customer : true,
     billable_expenses: initialData?.billable_expenses !== undefined ? initialData.billable_expenses : true,
     // New deal/forecast fields
@@ -108,7 +108,7 @@ export function EngagementForm({
     const newErrors: FormErrors = {};
 
     if (!formData.name?.trim()) {
-      newErrors.name = "Engagement name is required";
+      newErrors.name = "Opportunity name is required";
     }
     if (!formData.account_id) {
       newErrors.account_id = "Account is required";
@@ -141,8 +141,8 @@ export function EngagementForm({
       ...formData,
       end_date: formData.end_date && formData.end_date.trim() !== "" ? formData.end_date : null,
       description: formData.description && formData.description.trim() !== "" ? formData.description : undefined,
-      parent_engagement_id: formData.parent_engagement_id || undefined,
-      engagement_owner_id: formData.engagement_owner_id || undefined,
+      parent_opportunity_id: formData.parent_opportunity_id || undefined,
+      opportunity_owner_id: formData.opportunity_owner_id || undefined,
     };
     await onSubmit(submitData);
   };
@@ -150,7 +150,7 @@ export function EngagementForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label htmlFor="name">Engagement Name *</Label>
+        <Label htmlFor="name">Opportunity Name *</Label>
         <Input
           id="name"
           value={formData.name}
@@ -191,26 +191,26 @@ export function EngagementForm({
           )}
         </div>
         <div>
-          <Label htmlFor="parent_engagement_id">Parent Engagement</Label>
+          <Label htmlFor="parent_opportunity_id">Parent Opportunity</Label>
           <Select
-            id="parent_engagement_id"
-            value={formData.parent_engagement_id || ""}
+            id="parent_opportunity_id"
+            value={formData.parent_opportunity_id || ""}
             onChange={(e) =>
               setFormData({
                 ...formData,
-                parent_engagement_id: e.target.value || undefined,
+                parent_opportunity_id: e.target.value || undefined,
               })
             }
           >
             <option value="">None</option>
-            {engagementsData?.items
+            {opportunitiesData?.items
               .filter((e) => {
-                const currentId = 'id' in (initialData || {}) ? (initialData as Engagement).id : undefined;
+                const currentId = 'id' in (initialData || {}) ? (initialData as Opportunity).id : undefined;
                 return !currentId || e.id !== currentId;
               })
-              .map((engagement) => (
-                <option key={engagement.id} value={engagement.id}>
-                  {engagement.name}
+              .map((opportunity) => (
+                <option key={opportunity.id} value={opportunity.id}>
+                  {opportunity.name}
                 </option>
               ))}
           </Select>
@@ -226,7 +226,7 @@ export function EngagementForm({
             onChange={(e) =>
               setFormData({
                 ...formData,
-                status: e.target.value as EngagementCreate["status"],
+                status: e.target.value as OpportunityCreate["status"],
               })
             }
           >
@@ -240,14 +240,14 @@ export function EngagementForm({
           </Select>
         </div>
         <div>
-          <Label htmlFor="engagement_type">Engagement Type</Label>
+          <Label htmlFor="opportunity_type">Opportunity Type</Label>
           <Select
-            id="engagement_type"
-            value={formData.engagement_type}
+            id="opportunity_type"
+            value={formData.opportunity_type}
             onChange={(e) =>
               setFormData({
                 ...formData,
-                engagement_type: e.target.value as EngagementCreate["engagement_type"],
+                opportunity_type: e.target.value as OpportunityCreate["opportunity_type"],
               })
             }
           >
@@ -316,7 +316,7 @@ export function EngagementForm({
               setFormData({ 
                 ...formData, 
                 delivery_center_id: e.target.value,
-                engagement_owner_id: undefined, // Reset engagement owner when delivery center changes
+                opportunity_owner_id: undefined, // Reset opportunity owner when delivery center changes
               });
               if (errors.delivery_center_id) setErrors({ ...errors, delivery_center_id: undefined });
             }}
@@ -338,14 +338,14 @@ export function EngagementForm({
           )}
         </div>
         <div>
-          <Label htmlFor="engagement_owner_id">Engagement Owner</Label>
+          <Label htmlFor="opportunity_owner_id">Opportunity Owner</Label>
           <Select
-            id="engagement_owner_id"
-            value={formData.engagement_owner_id || ""}
+            id="opportunity_owner_id"
+            value={formData.opportunity_owner_id || ""}
             onChange={(e) =>
               setFormData({
                 ...formData,
-                engagement_owner_id: e.target.value || undefined,
+                opportunity_owner_id: e.target.value || undefined,
               })
             }
             disabled={!formData.delivery_center_id}
@@ -355,7 +355,7 @@ export function EngagementForm({
                 ? "Select delivery center first" 
                 : filteredEmployees.length === 0
                 ? "No employees available"
-                : "Select engagement owner"}
+                : "Select opportunity owner"}
             </option>
             {filteredEmployees.map((emp) => (
               <option key={emp.id} value={emp.id}>
@@ -465,7 +465,7 @@ export function EngagementForm({
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  win_probability: e.target.value as EngagementCreate["win_probability"] || undefined,
+                  win_probability: e.target.value as OpportunityCreate["win_probability"] || undefined,
                 })
               }
             >
@@ -486,7 +486,7 @@ export function EngagementForm({
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  accountability: e.target.value as EngagementCreate["accountability"] || undefined,
+                  accountability: e.target.value as OpportunityCreate["accountability"] || undefined,
                 })
               }
             >
@@ -505,7 +505,7 @@ export function EngagementForm({
               onChange={(e) =>
                 setFormData({
                   ...formData,
-                  strategic_importance: e.target.value as EngagementCreate["strategic_importance"] || undefined,
+                  strategic_importance: e.target.value as OpportunityCreate["strategic_importance"] || undefined,
                 })
               }
             >
@@ -524,7 +524,7 @@ export function EngagementForm({
             <Input
               id="deal_creation_date"
               type="date"
-              value={initialData && 'deal_creation_date' in initialData ? (initialData as Engagement).deal_creation_date || "" : ""}
+              value={initialData && 'deal_creation_date' in initialData ? (initialData as Opportunity).deal_creation_date || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
@@ -553,7 +553,7 @@ export function EngagementForm({
             <Input
               id="deal_value_usd"
               type="text"
-              value={initialData && 'deal_value_usd' in initialData ? (initialData as Engagement).deal_value_usd || "" : ""}
+              value={initialData && 'deal_value_usd' in initialData ? (initialData as Opportunity).deal_value_usd || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
@@ -563,7 +563,7 @@ export function EngagementForm({
             <Input
               id="close_date"
               type="date"
-              value={initialData && 'close_date' in initialData ? (initialData as Engagement).close_date || "" : ""}
+              value={initialData && 'close_date' in initialData ? (initialData as Opportunity).close_date || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
@@ -576,7 +576,7 @@ export function EngagementForm({
             <Input
               id="deal_length"
               type="text"
-              value={initialData && 'deal_length' in initialData ? (initialData as Engagement).deal_length?.toString() || "" : ""}
+              value={initialData && 'deal_length' in initialData ? (initialData as Opportunity).deal_length?.toString() || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
@@ -586,7 +586,7 @@ export function EngagementForm({
             <Input
               id="forecast_value"
               type="text"
-              value={initialData && 'forecast_value' in initialData ? (initialData as Engagement).forecast_value || "" : ""}
+              value={initialData && 'forecast_value' in initialData ? (initialData as Opportunity).forecast_value || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
@@ -599,7 +599,7 @@ export function EngagementForm({
             <Input
               id="forecast_value_usd"
               type="text"
-              value={initialData && 'forecast_value_usd' in initialData ? (initialData as Engagement).forecast_value_usd || "" : ""}
+              value={initialData && 'forecast_value_usd' in initialData ? (initialData as Opportunity).forecast_value_usd || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />

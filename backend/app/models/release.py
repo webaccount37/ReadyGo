@@ -26,7 +26,7 @@ class Release(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     name = Column(String(255), nullable=False, index=True)
-    engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id"), nullable=False, index=True)
+    opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id"), nullable=False, index=True)
     start_date = Column(Date, nullable=True)
     end_date = Column(Date, nullable=True)
     budget = Column(Numeric(15, 2), nullable=True)
@@ -38,7 +38,7 @@ class Release(Base):
     attributes = Column(JSON, nullable=True, default=dict)
     
     # Relationships
-    engagement = relationship("Engagement", back_populates="releases")
+    opportunity = relationship("Opportunity", back_populates="releases")
     billing_term = relationship("BillingTerm", back_populates="releases")
     delivery_center = relationship("DeliveryCenter", back_populates="releases")
     estimates = relationship("Estimate", back_populates="release", cascade="all, delete-orphan")

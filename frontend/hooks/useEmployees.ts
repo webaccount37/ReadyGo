@@ -109,10 +109,10 @@ export function useDeleteEmployee(
 }
 
 /**
- * Link employee to an engagement.
+ * Link employee to an opportunity.
  */
-export function useLinkEmployeeToEngagement(
-  options?: UseMutationOptions<void, Error, { employeeId: string; engagementId: string; linkData: {
+export function useLinkEmployeeToOpportunity(
+  options?: UseMutationOptions<void, Error, { employeeId: string; opportunityId: string; linkData: {
     releases: Array<{
       release_id: string;
       role_id: string;
@@ -125,7 +125,7 @@ export function useLinkEmployeeToEngagement(
 ) {
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, { employeeId: string; engagementId: string; linkData: {
+  return useMutation<void, Error, { employeeId: string; opportunityId: string; linkData: {
     releases: Array<{
       release_id: string;
       role_id: string;
@@ -135,13 +135,13 @@ export function useLinkEmployeeToEngagement(
       delivery_center: string;
     }>;
   } }>({
-    mutationFn: ({ employeeId, engagementId, linkData }) =>
-      employeesApi.linkEmployeeToEngagement(employeeId, engagementId, linkData),
+    mutationFn: ({ employeeId, opportunityId, linkData }) =>
+      employeesApi.linkEmployeeToOpportunity(employeeId, opportunityId, linkData),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
-      // Invalidate release queries since linking to engagement also creates release associations
+      // Invalidate release queries since linking to opportunity also creates release associations
       queryClient.invalidateQueries({ queryKey: ["releases"] });
       // Invalidate each release detail query that was linked
       variables.linkData.releases.forEach(release => {
@@ -153,21 +153,21 @@ export function useLinkEmployeeToEngagement(
 }
 
 /**
- * Unlink employee from an engagement.
+ * Unlink employee from an opportunity.
  */
-export function useUnlinkEmployeeFromEngagement(
-  options?: UseMutationOptions<void, Error, { employeeId: string; engagementId: string }>
+export function useUnlinkEmployeeFromOpportunity(
+  options?: UseMutationOptions<void, Error, { employeeId: string; opportunityId: string }>
 ) {
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, { employeeId: string; engagementId: string }>({
-    mutationFn: ({ employeeId, engagementId }) =>
-      employeesApi.unlinkEmployeeFromEngagement(employeeId, engagementId),
+  return useMutation<void, Error, { employeeId: string; opportunityId: string }>({
+    mutationFn: ({ employeeId, opportunityId }) =>
+      employeesApi.unlinkEmployeeFromOpportunity(employeeId, opportunityId),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
-      // Invalidate release queries since unlinking from engagement may affect release associations
+      // Invalidate release queries since unlinking from opportunity may affect release associations
       queryClient.invalidateQueries({ queryKey: ["releases"] });
     },
     ...options,

@@ -1,14 +1,14 @@
 /**
- * Engagement types matching backend schemas.
+ * Opportunity types matching backend schemas.
  */
 
-export type EngagementStatus = "discovery" | "qualified" | "proposal" | "negotiation" | "won" | "lost" | "cancelled";
-export type EngagementType = "implementation" | "consulting" | "support";
+export type OpportunityStatus = "discovery" | "qualified" | "proposal" | "negotiation" | "won" | "lost" | "cancelled";
+export type OpportunityType = "implementation" | "consulting" | "support";
 export type WinProbability = "low" | "medium" | "high";
 export type Accountability = "full_ownership" | "mgmt_accountable" | "mgmt_advisory" | "staff_aug_limited";
 export type StrategicImportance = "critical" | "high" | "medium" | "low";
 
-export interface EngagementEmployee {
+export interface OpportunityEmployee {
   id: string;
   first_name: string;
   last_name: string;
@@ -21,38 +21,38 @@ export interface EngagementEmployee {
   delivery_center?: string;
 }
 
-export interface EngagementRelease {
+export interface OpportunityRelease {
   id: string;
   name: string;
-  engagement_id: string;
+  opportunity_id: string;
   start_date?: string;
   end_date?: string;
   status: string;
-  employees?: EngagementEmployee[];
+  employees?: OpportunityEmployee[];
 }
 
-export interface Engagement {
+export interface Opportunity {
   id: string;
   name: string;
-  parent_engagement_id?: string;
+  parent_opportunity_id?: string;
   account_id: string;
   account_name?: string;
   start_date: string;
   end_date?: string;
-  status: EngagementStatus;
+  status: OpportunityStatus;
   billing_term_id: string;
-  engagement_type: EngagementType;
+  opportunity_type: OpportunityType;
   description?: string;
   utilization?: number;
   margin?: number;
   default_currency: string;
   delivery_center_id: string;
-  engagement_owner_id?: string;
+  opportunity_owner_id?: string;
   invoice_customer: boolean;
   billable_expenses: boolean;
   attributes?: Record<string, unknown>;
-  releases?: EngagementRelease[];
-  employees?: EngagementEmployee[];
+  releases?: OpportunityRelease[];
+  employees?: OpportunityEmployee[];
   // New deal/forecast fields
   probability?: number;
   win_probability?: WinProbability;
@@ -70,21 +70,21 @@ export interface Engagement {
   project_duration_months?: number;
 }
 
-export interface EngagementCreate {
+export interface OpportunityCreate {
   name: string;
-  parent_engagement_id?: string;
+  parent_opportunity_id?: string;
   account_id: string;
   start_date: string;
   end_date?: string;
-  status?: EngagementStatus;
+  status?: OpportunityStatus;
   billing_term_id: string;
-  engagement_type?: EngagementType;
+  opportunity_type?: OpportunityType;
   description?: string;
   utilization?: number;
   margin?: number;
   default_currency?: string;
   delivery_center_id: string;
-  engagement_owner_id?: string;
+  opportunity_owner_id?: string;
   invoice_customer?: boolean;
   billable_expenses?: boolean;
   attributes?: Record<string, unknown>;
@@ -98,21 +98,21 @@ export interface EngagementCreate {
   project_duration_months?: number;
 }
 
-export interface EngagementUpdate {
+export interface OpportunityUpdate {
   name?: string;
-  parent_engagement_id?: string;
+  parent_opportunity_id?: string;
   account_id?: string;
   start_date?: string;
   end_date?: string | null;
-  status?: EngagementStatus;
+  status?: OpportunityStatus;
   billing_term_id?: string;
-  engagement_type?: EngagementType;
+  opportunity_type?: OpportunityType;
   description?: string;
   utilization?: number;
   margin?: number;
   default_currency?: string;
   delivery_center_id?: string;
-  engagement_owner_id?: string;
+  opportunity_owner_id?: string;
   invoice_customer?: boolean;
   billable_expenses?: boolean;
   attributes?: Record<string, unknown>;
@@ -126,10 +126,10 @@ export interface EngagementUpdate {
   project_duration_months?: number;
 }
 
-export type EngagementResponse = Engagement;
+export type OpportunityResponse = Opportunity;
 
-export interface EngagementListResponse {
-  items: EngagementResponse[];
+export interface OpportunityListResponse {
+  items: OpportunityResponse[];
   total: number;
 }
 

@@ -33,7 +33,7 @@ class ReleaseController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
-        engagement_id: Optional[UUID] = None,
+        opportunity_id: Optional[UUID] = None,
         status: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -42,7 +42,7 @@ class ReleaseController(BaseController):
         releases, total = await self.release_service.list_releases(
             skip=skip,
             limit=limit,
-            engagement_id=engagement_id,
+            opportunity_id=opportunity_id,
             status=status,
             start_date=start_date,
             end_date=end_date,

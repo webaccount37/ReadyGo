@@ -1,5 +1,5 @@
 """
-Engagement repository for database operations.
+Opportunity repository for database operations.
 """
 
 from typing import Optional, List
@@ -10,40 +10,40 @@ from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
-from app.models.engagement import Engagement, EngagementStatus
+from app.models.opportunity import Opportunity, OpportunityStatus
 
 
-class EngagementRepository(BaseRepository[Engagement]):
-    """Repository for engagement operations."""
+class OpportunityRepository(BaseRepository[Opportunity]):
+    """Repository for opportunity operations."""
     
     def __init__(self, session: AsyncSession):
-        super().__init__(Engagement, session)
+        super().__init__(Opportunity, session)
     
     def _base_query(self):
         """Base query with eager loading of account relationship."""
-        return select(Engagement).options(selectinload(Engagement.account))
+        return select(Opportunity).options(selectinload(Opportunity.account))
     
     async def list(
         self,
         skip: int = 0,
         limit: int = 100,
         **filters,
-    ) -> List[Engagement]:
-        """List engagements with pagination and filters, eagerly loading account."""
+    ) -> List[Opportunity]:
+        """List opportunities with pagination and filters, eagerly loading account."""
         query = self._base_query()
         
         # Apply filters
         for key, value in filters.items():
-            if hasattr(Engagement, key):
-                query = query.where(getattr(Engagement, key) == value)
+            if hasattr(Opportunity, key):
+                query = query.where(getattr(Opportunity, key) == value)
         
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def get(self, id: UUID) -> Optional[Engagement]:
-        """Get engagement by ID with account relationship loaded."""
-        query = self._base_query().where(Engagement.id == id)
+    async def get(self, id: UUID) -> Optional[Opportunity]:
+        """Get opportunity by ID with account relationship loaded."""
+        query = self._base_query().where(Opportunity.id == id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
@@ -52,21 +52,21 @@ class EngagementRepository(BaseRepository[Engagement]):
         account_id: UUID,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Engagement]:
-        """List engagements by account."""
-        query = self._base_query().where(Engagement.account_id == account_id)
+    ) -> List[Opportunity]:
+        """List opportunities by account."""
+        query = self._base_query().where(Opportunity.account_id == account_id)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
     async def list_by_status(
         self,
-        status: EngagementStatus,
+        status: OpportunityStatus,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Engagement]:
-        """List engagements by status."""
-        query = self._base_query().where(Engagement.status == status)
+    ) -> List[Opportunity]:
+        """List opportunities by status."""
+        query = self._base_query().where(Opportunity.status == status)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -77,44 +77,44 @@ class EngagementRepository(BaseRepository[Engagement]):
         end_date: Optional[date] = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Engagement]:
-        """List engagements within date range."""
+    ) -> List[Opportunity]:
+        """List opportunities within date range."""
         query = self._base_query()
         if start_date:
-            query = query.where(Engagement.start_date >= start_date)
+            query = query.where(Opportunity.start_date >= start_date)
         if end_date:
-            query = query.where(Engagement.end_date <= end_date)
+            query = query.where(Opportunity.end_date <= end_date)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def list_child_engagements(
+    async def list_child_opportunities(
         self,
         parent_id: UUID,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Engagement]:
-        """List child engagements of a parent."""
-        query = self._base_query().where(Engagement.parent_engagement_id == parent_id)
+    ) -> List[Opportunity]:
+        """List child opportunities of a parent."""
+        query = self._base_query().where(Opportunity.parent_opportunity_id == parent_id)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def get_with_relationships(self, engagement_id: UUID) -> Optional[Engagement]:
-        """Get engagement with related entities."""
+    async def get_with_relationships(self, opportunity_id: UUID) -> Optional[Opportunity]:
+        """Get opportunity with related entities."""
         # TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models
         from app.models.release import Release
         
         result = await self.session.execute(
-            select(Engagement)
+            select(Opportunity)
             .options(
-                selectinload(Engagement.account),
+                selectinload(Opportunity.account),
                 # TODO: Load employees from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
-                selectinload(Engagement.releases),
-                selectinload(Engagement.parent_engagement),
+                selectinload(Opportunity.releases),
+                selectinload(Opportunity.parent_opportunity),
             )
-            .where(Engagement.id == engagement_id)
+            .where(Opportunity.id == opportunity_id)
         )
-        engagement = result.scalar_one_or_none()
-        return engagement
+        opportunity = result.scalar_one_or_none()
+        return opportunity
 

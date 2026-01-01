@@ -58,7 +58,7 @@ class ReleaseService(BaseService):
             await self.session.flush()
         
         await self.session.commit()
-        # Reload with engagement relationship
+        # Reload with opportunity relationship
         release = await self.release_repo.get(release.id)
         if not release:
             raise ValueError("Failed to retrieve created release")
@@ -82,7 +82,7 @@ class ReleaseService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
-        engagement_id: Optional[UUID] = None,
+        opportunity_id: Optional[UUID] = None,
         status: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
@@ -90,8 +90,8 @@ class ReleaseService(BaseService):
         """List releases with optional filters."""
         from app.models.release import ReleaseStatus
         
-        if engagement_id:
-            releases = await self.release_repo.list_by_engagement(engagement_id, skip, limit)
+        if opportunity_id:
+            releases = await self.release_repo.list_by_opportunity(opportunity_id, skip, limit)
         elif status:
             try:
                 status_enum = ReleaseStatus(status)
@@ -198,9 +198,9 @@ class ReleaseService(BaseService):
         """Convert release model to response schema."""
         import logging
         logger = logging.getLogger(__name__)
-        engagement_name = None
-        if hasattr(release, 'engagement') and release.engagement:
-            engagement_name = release.engagement.name
+        opportunity_name = None
+        if hasattr(release, 'opportunity') and release.opportunity:
+            opportunity_name = release.opportunity.name
         
         billing_term_name = None
         if hasattr(release, 'billing_term') and release.billing_term:
@@ -213,7 +213,7 @@ class ReleaseService(BaseService):
         release_dict = {
             "id": release.id,
             "name": release.name,
-            "engagement_id": release.engagement_id,
+            "opportunity_id": release.opportunity_id,
             "start_date": release.start_date,
             "end_date": release.end_date,
             "budget": release.budget,
@@ -223,7 +223,7 @@ class ReleaseService(BaseService):
             "default_currency": release.default_currency,
             "delivery_center_id": release.delivery_center_id,
             "attributes": release.attributes,
-            "engagement_name": engagement_name,
+            "opportunity_name": opportunity_name,
             "billing_term_name": billing_term_name,
             "delivery_center_name": delivery_center_name,
         }

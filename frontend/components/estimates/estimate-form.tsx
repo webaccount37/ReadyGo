@@ -49,7 +49,7 @@ export function EstimateForm({
           <option value="">Select a release</option>
           {releasesData?.items?.map((release) => (
             <option key={release.id} value={release.id}>
-              {release.name} ({release.engagement_name || release.engagement_id})
+              {release.name} ({release.opportunity_name || release.opportunity_id})
             </option>
           ))}
         </Select>

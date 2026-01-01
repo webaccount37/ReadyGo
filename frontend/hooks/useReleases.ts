@@ -26,7 +26,7 @@ export function useReleases(
   params?: {
     skip?: number;
     limit?: number;
-    engagement_id?: string;
+    opportunity_id?: string;
     status?: string;
     start_date?: string;
     end_date?: string;

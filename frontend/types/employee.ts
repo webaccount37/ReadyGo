@@ -25,7 +25,7 @@ export interface Employee {
   default_currency?: string;
   timezone: string;
   delivery_center?: string;
-  engagements?: Array<{
+  opportunities?: Array<{
     id: string;
     name: string;
     role_id?: string;
@@ -38,8 +38,8 @@ export interface Employee {
   releases?: Array<{
     id: string;
     name: string;
-    engagement_id: string;
-    engagement_name?: string;
+    opportunity_id: string;
+    opportunity_name?: string;
     role_id?: string;
     role_name?: string;
     start_date?: string;

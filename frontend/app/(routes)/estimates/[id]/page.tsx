@@ -170,7 +170,7 @@ export default function EstimateDetailPage() {
           <h1 className="text-3xl font-bold">{estimate.name}</h1>
           <p className="text-sm text-gray-500 mt-1">
             Release: {estimate.release_name || estimate.release_id}
-            {estimate.engagement_name && <> • Engagement: {estimate.engagement_name}</>}
+            {estimate.opportunity_name && <> • Opportunity: {estimate.opportunity_name}</>}
           </p>
         </div>
         <div className="flex gap-2">

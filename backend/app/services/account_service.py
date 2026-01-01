@@ -36,8 +36,8 @@ class AccountService(BaseService):
             return None
         return AccountResponse.model_validate(account)
     
-    async def get_account_with_engagements(self, account_id: UUID) -> Optional[AccountResponse]:
-        """Get account with related engagements."""
+    async def get_account_with_opportunities(self, account_id: UUID) -> Optional[AccountResponse]:
+        """Get account with related opportunities."""
         # Note: This would need a method in repository if needed
         account = await self.account_repo.get(account_id)
         if not account:

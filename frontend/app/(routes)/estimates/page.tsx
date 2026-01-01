@@ -42,7 +42,7 @@ export default function EstimatesPage() {
     }
   };
 
-  // Fetch releases to get engagement and delivery center info
+  // Fetch releases to get opportunity and delivery center info
   const { data: releasesData } = useReleases({ limit: 1000 });
 
   // Group estimates by release
@@ -55,8 +55,8 @@ export default function EstimatesPage() {
         release: {
           id: string;
           name: string;
-          engagement_id?: string;
-          engagement_name?: string;
+          opportunity_id?: string;
+          opportunity_name?: string;
           delivery_center_id?: string;
           delivery_center_name?: string;
         };
@@ -79,8 +79,8 @@ export default function EstimatesPage() {
             release: {
               id: release.id,
               name: release.name,
-              engagement_id: release.engagement_id,
-              engagement_name: release.engagement_name,
+              opportunity_id: release.opportunity_id,
+              opportunity_name: release.opportunity_name,
               delivery_center_id: release.delivery_center_id,
               delivery_center_name: release.delivery_center_name,
             },
@@ -113,7 +113,7 @@ export default function EstimatesPage() {
     Object.entries(groupedByRelease).forEach(([releaseId, group]) => {
       const releaseMatches =
         group.release.name.toLowerCase().includes(query) ||
-        group.release.engagement_name?.toLowerCase().includes(query) ||
+        group.release.opportunity_name?.toLowerCase().includes(query) ||
         group.release.delivery_center_name?.toLowerCase().includes(query);
 
       const matchingEstimates = group.estimates.filter(
@@ -169,7 +169,7 @@ export default function EstimatesPage() {
           <div className="flex gap-4">
             <div className="flex-1">
               <Input
-                placeholder="Search by release, engagement, delivery center, or estimate name..."
+                placeholder="Search by release, opportunity, delivery center, or estimate name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -199,10 +199,10 @@ export default function EstimatesPage() {
                   {highlightText(group.release.name, searchQuery)}
                 </CardTitle>
                 <div className="flex gap-4 text-sm text-gray-600 mt-2">
-                  {group.release.engagement_name && (
+                  {group.release.opportunity_name && (
                     <span>
-                      <span className="font-semibold">Engagement:</span>{" "}
-                      {group.release.engagement_name}
+                      <span className="font-semibold">Opportunity:</span>{" "}
+                      {group.release.opportunity_name}
                     </span>
                   )}
                   {group.release.delivery_center_name && (

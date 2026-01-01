@@ -34,7 +34,7 @@ async def create_release(
 async def list_releases(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    engagement_id: UUID = Query(None),
+    opportunity_id: UUID = Query(None),
     status: str = Query(None),
     start_date: date = Query(None),
     end_date: date = Query(None),
@@ -45,7 +45,7 @@ async def list_releases(
     return await controller.list_releases(
         skip=skip,
         limit=limit,
-        engagement_id=engagement_id,
+        opportunity_id=opportunity_id,
         status=status,
         start_date=start_date,
         end_date=end_date,

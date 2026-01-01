@@ -15,9 +15,9 @@ from app.schemas.employee import (
     EmployeeListResponse,
 )
 from app.schemas.relationships import (
-    LinkEmployeesToEngagementRequest,
+    LinkEmployeesToOpportunityRequest,
     LinkEmployeesToReleaseRequest,
-    LinkEmployeeToEngagementRequest,
+    LinkEmployeeToOpportunityRequest,
     LinkEmployeeToReleaseRequest,
     UnlinkRequest,
 )
@@ -116,25 +116,25 @@ async def delete_employee(
         )
 
 
-@router.post("/{employee_id}/engagements/{engagement_id}/link", status_code=status.HTTP_204_NO_CONTENT)
-async def link_employee_to_engagement(
+@router.post("/{employee_id}/opportunities/{opportunity_id}/link", status_code=status.HTTP_204_NO_CONTENT)
+async def link_employee_to_opportunity(
     employee_id: UUID,
-    engagement_id: UUID,
-    link_data: LinkEmployeeToEngagementRequest,
+    opportunity_id: UUID,
+    link_data: LinkEmployeeToOpportunityRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Link an employee to an engagement with required association fields."""
+    """Link an employee to an opportunity with required association fields."""
     try:
         controller = EmployeeController(db)
-        request = LinkEmployeesToEngagementRequest(
+        request = LinkEmployeesToOpportunityRequest(
             employee_ids=[employee_id],
             releases=link_data.releases,
         )
-        success = await controller.link_employees_to_engagement(engagement_id, request)
+        success = await controller.link_employees_to_opportunity(opportunity_id, request)
         if not success:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Employee, engagement, or role not found",
+                detail="Employee, opportunity, or role not found",
             )
     except ValueError as e:
         raise HTTPException(
@@ -151,7 +151,7 @@ async def link_employee_to_engagement(
         import traceback
         logger = logging.getLogger(__name__)
         error_traceback = traceback.format_exc()
-        logger.error(f"Error linking employee to engagement: {e}")
+        logger.error(f"Error linking employee to opportunity: {e}")
         logger.error(f"Traceback: {error_traceback}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -159,20 +159,20 @@ async def link_employee_to_engagement(
         )
 
 
-@router.delete("/{employee_id}/engagements/{engagement_id}/unlink", status_code=status.HTTP_204_NO_CONTENT)
-async def unlink_employee_from_engagement(
+@router.delete("/{employee_id}/opportunities/{opportunity_id}/unlink", status_code=status.HTTP_204_NO_CONTENT)
+async def unlink_employee_from_opportunity(
     employee_id: UUID,
-    engagement_id: UUID,
+    opportunity_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlink an employee from an engagement."""
+    """Unlink an employee from an opportunity."""
     controller = EmployeeController(db)
     request = UnlinkRequest(ids=[employee_id])
-    success = await controller.unlink_employees_from_engagement(engagement_id, request)
+    success = await controller.unlink_employees_from_opportunity(opportunity_id, request)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Employee or engagement not found",
+            detail="Employee or opportunity not found",
         )
 
 

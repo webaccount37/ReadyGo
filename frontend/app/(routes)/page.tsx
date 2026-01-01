@@ -33,14 +33,14 @@ export default function HomePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Engagements</CardTitle>
+            <CardTitle>Opportunities</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-gray-600 mb-4">
-              Track engagements, budgets, and resource allocation.
+              Track opportunities, budgets, and resource allocation.
             </p>
-            <Link href="/engagements">
-              <Button>View Engagements</Button>
+            <Link href="/opportunities">
+              <Button>View Opportunities</Button>
             </Link>
           </CardContent>
         </Card>

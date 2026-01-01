@@ -23,7 +23,7 @@ class EstimateRepository(BaseRepository[Estimate]):
         from app.models.release import Release
         
         return select(Estimate).options(
-            selectinload(Estimate.release).selectinload(Release.engagement),
+            selectinload(Estimate.release).selectinload(Release.opportunity),
             selectinload(Estimate.created_by_employee),
             selectinload(Estimate.phases),
         )
@@ -86,7 +86,7 @@ class EstimateRepository(BaseRepository[Estimate]):
         result = await self.session.execute(
             select(Estimate)
             .options(
-                selectinload(Estimate.release).selectinload(Release.engagement),
+                selectinload(Estimate.release).selectinload(Release.opportunity),
                 selectinload(Estimate.created_by_employee),
                 selectinload(Estimate.phases),
                 selectinload(Estimate.line_items)

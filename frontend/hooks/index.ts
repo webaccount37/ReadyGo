@@ -3,7 +3,7 @@
  */
 
 export * from "./useEmployees";
-export * from "./useEngagements";
+export * from "./useOpportunities";
 export * from "./useReleases";
 export * from "./useCalendars";
 export * from "./useAccounts";

@@ -45,8 +45,8 @@ export interface Estimate {
   id: string;
   release_id: string;
   release_name?: string;
-  engagement_id?: string;
-  engagement_name?: string;
+  opportunity_id?: string;
+  opportunity_name?: string;
   name: string;
   currency?: string; // Derived from release, optional in response
   active_version?: boolean;

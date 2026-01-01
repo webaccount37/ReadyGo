@@ -847,20 +847,20 @@ class QuoteService(BaseService):
         
         # Safely get release name if loaded
         release_name = None
-        engagement_id = None
-        engagement_name = None
+        opportunity_id = None
+        opportunity_name = None
         try:
             if inspector.attrs.release.loaded_value is not None:
                 release = inspector.attrs.release.loaded_value
                 if release:
                     release_name = release.name
-                    # Check if engagement is loaded on release
+                    # Check if opportunity is loaded on release
                     release_inspector = inspect(release)
-                    if release_inspector.attrs.engagement.loaded_value is not None:
-                        engagement = release_inspector.attrs.engagement.loaded_value
-                        if engagement:
-                            engagement_id = engagement.id
-                            engagement_name = engagement.name
+                    if release_inspector.attrs.opportunity.loaded_value is not None:
+                        opportunity = release_inspector.attrs.opportunity.loaded_value
+                        if opportunity:
+                            opportunity_id = opportunity.id
+                            opportunity_name = opportunity.name
         except (AttributeError, KeyError):
             pass
         
@@ -893,8 +893,8 @@ class QuoteService(BaseService):
             "phases": phases_list,
             "attributes": quote.attributes or {},
             "release_name": release_name,
-            "engagement_id": engagement_id,
-            "engagement_name": engagement_name,
+            "opportunity_id": opportunity_id,
+            "opportunity_name": opportunity_name,
             "created_by": quote.created_by,
             "created_by_name": created_by_name,
         }
@@ -963,10 +963,10 @@ class QuoteService(BaseService):
         except (AttributeError, KeyError):
             pass
         
-        # CRITICAL FIX: Use exact same approach as Release/Engagement services
+        # CRITICAL FIX: Use exact same approach as Release/Opportunity services
         # Release service does: assoc.start_date.isoformat() directly on the date object
         # We must do the same - call .isoformat() directly on line_item.start_date
-        # This ensures dates match exactly between Release/Engagement and Quote pages
+        # This ensures dates match exactly between Release/Opportunity and Quote pages
         
         logger.info(f"  === RETRIEVING FROM DB (FOR RESPONSE) ===")
         logger.info(f"  line_item.start_date = {line_item.start_date} (type: {type(line_item.start_date)})")
@@ -999,7 +999,7 @@ class QuoteService(BaseService):
         logger.info(f"  === SERIALIZATION ===")
         logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
         
-        # Serialize dates directly as ISO strings (EXACTLY like Release/Engagement services)
+        # Serialize dates directly as ISO strings (EXACTLY like Release/Opportunity services)
         # Release service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
         line_item_dict = {
             "id": line_item.id,

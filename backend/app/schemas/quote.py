@@ -164,8 +164,8 @@ class QuoteResponse(QuoteBase):
     id: UUID
     release_id: UUID
     release_name: Optional[str] = None
-    engagement_id: Optional[UUID] = None
-    engagement_name: Optional[str] = None
+    opportunity_id: Optional[UUID] = None
+    opportunity_name: Optional[str] = None
     created_by: Optional[UUID] = None
     created_by_name: Optional[str] = None
     line_items: Optional[List[QuoteLineItemResponse]] = None

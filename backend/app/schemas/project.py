@@ -25,7 +25,7 @@ class ProjectBase(BaseModel):
     margin: Optional[float] = Field(None, ge=-100, le=100)
     default_currency: str = "USD"
     delivery_center_id: UUID
-    engagement_owner_id: Optional[UUID] = None
+    opportunity_owner_id: Optional[UUID] = None
     invoice_customer: bool = True
     billable_expenses: bool = True
     attributes: Optional[dict] = None
@@ -57,7 +57,7 @@ class ProjectUpdate(BaseModel):
     margin: Optional[float] = Field(None, ge=-100, le=100)
     default_currency: Optional[str] = None
     delivery_center_id: Optional[UUID] = None
-    engagement_owner_id: Optional[UUID] = None
+    opportunity_owner_id: Optional[UUID] = None
     invoice_customer: Optional[bool] = None
     billable_expenses: Optional[bool] = None
     attributes: Optional[dict] = None

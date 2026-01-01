@@ -12,7 +12,7 @@ from app.db.repositories.base_repository import BaseRepository
 from app.models.employee import Employee, EmployeeStatus, EmployeeType
 # TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models
 from app.models.delivery_center import DeliveryCenter
-from app.models.engagement import Engagement
+from app.models.opportunity import Opportunity
 from app.models.release import Release
 from app.models.role import Role
 
@@ -101,7 +101,7 @@ class EmployeeRepository(BaseRepository[Employee]):
         return list(result.scalars().all())
     
     async def get_with_relationships(self, employee_id: UUID) -> Optional[Employee]:
-        """Get employee with related engagements and releases."""
+        """Get employee with related opportunities and releases."""
         # TODO: Refactor to load relationships from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
         result = await self.session.execute(
             select(Employee)

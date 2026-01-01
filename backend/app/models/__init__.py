@@ -4,7 +4,7 @@ Import all models here to ensure they're registered with Base.
 """
 
 from app.models.employee import Employee
-from app.models.engagement import Engagement
+from app.models.opportunity import Opportunity
 from app.models.release import Release
 from app.models.calendar import Calendar
 from app.models.billing_term import BillingTerm
@@ -17,7 +17,7 @@ from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours,
 
 __all__ = [
     "Employee",
-    "Engagement",
+    "Opportunity",
     "Release",
     "Calendar",
     "BillingTerm",

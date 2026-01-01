@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { CURRENCIES } from "@/types/currency";
@@ -24,13 +24,13 @@ export function ReleaseForm({
   onCancel,
   isLoading = false,
 }: ReleaseFormProps) {
-  const { data: engagementsData } = useEngagements({ limit: 100 });
+  const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
   const { data: deliveryCentersData } = useDeliveryCenters();
 
   const [formData, setFormData] = useState<ReleaseCreate>({
     name: initialData?.name || "",
-    engagement_id: initialData?.engagement_id || "",
+    opportunity_id: initialData?.opportunity_id || "",
     start_date: initialData?.start_date || undefined,
     end_date: initialData?.end_date || undefined,
     budget: initialData?.budget || "",
@@ -41,22 +41,22 @@ export function ReleaseForm({
     delivery_center_id: initialData?.delivery_center_id || "",
   });
 
-  // Auto-populate default_currency, delivery_center_id, and billing_term_id when engagement is selected
+  // Auto-populate default_currency, delivery_center_id, and billing_term_id when opportunity is selected
   useEffect(() => {
-    if (formData.engagement_id && engagementsData?.items) {
-      const selectedEngagement = engagementsData.items.find(
-        (e) => e.id === formData.engagement_id
+    if (formData.opportunity_id && opportunitiesData?.items) {
+      const selectedOpportunity = opportunitiesData.items.find(
+        (e) => e.id === formData.opportunity_id
       );
-      if (selectedEngagement) {
+      if (selectedOpportunity) {
         setFormData((prev) => ({
           ...prev,
-          default_currency: selectedEngagement.default_currency || prev.default_currency || "USD",
-          delivery_center_id: selectedEngagement.delivery_center_id || prev.delivery_center_id || "",
-          billing_term_id: selectedEngagement.billing_term_id || prev.billing_term_id || "",
+          default_currency: selectedOpportunity.default_currency || prev.default_currency || "USD",
+          delivery_center_id: selectedOpportunity.delivery_center_id || prev.delivery_center_id || "",
+          billing_term_id: selectedOpportunity.billing_term_id || prev.billing_term_id || "",
         }));
       }
     }
-  }, [formData.engagement_id, engagementsData]);
+  }, [formData.opportunity_id, opportunitiesData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,19 +84,19 @@ export function ReleaseForm({
       </div>
 
       <div>
-        <Label htmlFor="engagement_id">Engagement *</Label>
+        <Label htmlFor="opportunity_id">Opportunity *</Label>
         <Select
-          id="engagement_id"
-          value={formData.engagement_id}
+          id="opportunity_id"
+          value={formData.opportunity_id}
           onChange={(e) =>
-            setFormData({ ...formData, engagement_id: e.target.value })
+            setFormData({ ...formData, opportunity_id: e.target.value })
           }
           required
         >
-          <option value="">Select an engagement</option>
-          {engagementsData?.items.map((engagement) => (
-            <option key={engagement.id} value={engagement.id}>
-              {engagement.name}
+          <option value="">Select an opportunity</option>
+          {opportunitiesData?.items.map((opportunity) => (
+            <option key={opportunity.id} value={opportunity.id}>
+              {opportunity.name}
             </option>
           ))}
         </Select>

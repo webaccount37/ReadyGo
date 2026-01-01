@@ -8,13 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.base_service import BaseService
 from app.db.repositories.employee_repository import EmployeeRepository
-from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.db.repositories.release_repository import ReleaseRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
 from app.db.repositories.role_rate_repository import RoleRateRepository
-from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse, EngagementReference, ReleaseReference
-from app.schemas.relationships import LinkEmployeesToEngagementRequest, LinkEmployeesToReleaseRequest
+from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse, OpportunityReference, ReleaseReference
+from app.schemas.relationships import LinkEmployeesToOpportunityRequest, LinkEmployeesToReleaseRequest
 from app.models.employee import Employee
 from app.models.estimate import Estimate, EstimateLineItem
 from app.models.release import Release
@@ -30,7 +30,7 @@ class EmployeeService(BaseService):
     def __init__(self, session: AsyncSession):
         self.session = session
         self.employee_repo = EmployeeRepository(session)
-        self.engagement_repo = EngagementRepository(session)
+        self.opportunity_repo = OpportunityRepository(session)
         self.release_repo = ReleaseRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.line_item_repo = EstimateLineItemRepository(session)
@@ -56,7 +56,7 @@ class EmployeeService(BaseService):
         return await self._employee_to_response(employee, include_relationships=False)
     
     async def get_employee_with_relationships(self, employee_id: UUID) -> Optional[EmployeeResponse]:
-        """Get employee with related engagements and releases."""
+        """Get employee with related opportunities and releases."""
         import logging
         logger = logging.getLogger(__name__)
         
@@ -144,10 +144,10 @@ class EmployeeService(BaseService):
         # Convert to dict first to avoid lazy loading issues, then add empty relationships
         employee_dict = {
             k: v for k, v in updated.__dict__.items() 
-            if not k.startswith('_') and k not in ['engagements', 'releases']
+            if not k.startswith('_') and k not in ['opportunities', 'releases']
         }
         employee_dict['delivery_center'] = getattr(updated.delivery_center, "code", None) if hasattr(updated, "delivery_center") else None
-        employee_dict['engagements'] = []
+        employee_dict['opportunities'] = []
         employee_dict['releases'] = []
         return EmployeeResponse.model_validate(employee_dict)
     
@@ -157,8 +157,8 @@ class EmployeeService(BaseService):
         await self.session.commit()
         return deleted
 
-    async def _get_engagements_from_active_estimates(self, employee_id: UUID) -> List[dict]:
-        """Get engagements from active estimate line items for an employee."""
+    async def _get_opportunities_from_active_estimates(self, employee_id: UUID) -> List[dict]:
+        """Get opportunities from active estimate line items for an employee."""
         # Get all active estimates with line items for this employee
         from sqlalchemy.orm import selectinload
         from app.models.role_rate import RoleRate
@@ -181,22 +181,22 @@ class EmployeeService(BaseService):
         )
         line_items = result.scalars().all()
         
-        engagements_dict = {}  # engagement_id -> engagement data
+        opportunities_dict = {}  # opportunity_id -> opportunity data
         
         for li in line_items:
-            # Get release and engagement from loaded relationships
+            # Get release and opportunity from loaded relationships
             if not li.estimate or not li.estimate.release:
                 continue
             
             release = li.estimate.release
-            if not release.engagement_id:
+            if not release.opportunity_id:
                 continue
             
-            engagement_id = str(release.engagement_id)
+            opportunity_id = str(release.opportunity_id)
             
-            if engagement_id not in engagements_dict:
-                engagement = await self.engagement_repo.get(release.engagement_id)
-                if not engagement:
+            if opportunity_id not in opportunities_dict:
+                opportunity = await self.opportunity_repo.get(release.opportunity_id)
+                if not opportunity:
                     continue
                 
                 # Get role and delivery center from role_rate
@@ -211,9 +211,9 @@ class EmployeeService(BaseService):
                     if li.role_rate.delivery_center:
                         delivery_center_code = li.role_rate.delivery_center.code
                 
-                engagements_dict[engagement_id] = {
-                    "id": engagement_id,
-                    "name": engagement.name,
+                opportunities_dict[opportunity_id] = {
+                    "id": opportunity_id,
+                    "name": opportunity.name,
                     "role_id": role_id,
                     "role_name": role_name,
                     "start_date": li.start_date.isoformat() if li.start_date else None,
@@ -222,7 +222,7 @@ class EmployeeService(BaseService):
                     "delivery_center": delivery_center_code,
                 }
         
-        return list(engagements_dict.values())
+        return list(opportunities_dict.values())
     
     async def _get_releases_from_active_estimates(self, employee_id: UUID) -> List[dict]:
         """Get releases from active estimate line items for an employee."""
@@ -272,14 +272,14 @@ class EmployeeService(BaseService):
             
             # Use the first line item's dates/rates
             if release_id not in releases_dict:
-                # Skip releases without engagement_id (shouldn't happen, but be safe)
-                if not release.engagement_id:
+                # Skip releases without opportunity_id (shouldn't happen, but be safe)
+                if not release.opportunity_id:
                     continue
                     
                 releases_dict[release_id] = {
                     "id": release_id,  # Pydantic will convert string to UUID
                     "name": release.name,
-                    "engagement_id": str(release.engagement_id),  # Pydantic will convert string to UUID
+                    "opportunity_id": str(release.opportunity_id),  # Pydantic will convert string to UUID
                     "role_id": role_id,  # Already a string or None, Pydantic will convert to UUID if not None
                     "role_name": role_name,
                     "start_date": li.start_date.isoformat() if li.start_date else None,
@@ -316,13 +316,13 @@ class EmployeeService(BaseService):
         }
 
         if include_relationships:
-            # Build engagements and releases from active estimate line items
-            engagements = await self._get_engagements_from_active_estimates(employee.id)
+            # Build opportunities and releases from active estimate line items
+            opportunities = await self._get_opportunities_from_active_estimates(employee.id)
             releases = await self._get_releases_from_active_estimates(employee.id)
-            base["engagements"] = engagements
+            base["opportunities"] = opportunities
             base["releases"] = releases
         else:
-            base["engagements"] = []
+            base["opportunities"] = []
             base["releases"] = []
 
         # Validate and return response
@@ -334,7 +334,7 @@ class EmployeeService(BaseService):
             logger = logging.getLogger(__name__)
             logger.error(f"Error validating employee response: {e}")
             logger.error(f"Base dict: {base}")
-            logger.error(f"Engagements: {base.get('engagements', [])}")
+            logger.error(f"Opportunities: {base.get('opportunities', [])}")
             logger.error(f"Releases: {base.get('releases', [])}")
             raise
     
@@ -410,12 +410,12 @@ class EmployeeService(BaseService):
         await self.session.flush()
         return estimate
     
-    async def link_employees_to_engagement(
+    async def link_employees_to_opportunity(
         self,
-        engagement_id: UUID,
-        request: LinkEmployeesToEngagementRequest,
+        opportunity_id: UUID,
+        request: LinkEmployeesToOpportunityRequest,
     ) -> bool:
-        """Link employees to an engagement and releases by creating estimate line items."""
+        """Link employees to an opportunity and releases by creating estimate line items."""
         import logging
         from sqlalchemy import select, update
         from app.db.repositories.role_repository import RoleRepository
@@ -429,9 +429,9 @@ class EmployeeService(BaseService):
         logger = logging.getLogger(__name__)
         
         try:
-            engagement = await self.engagement_repo.get(engagement_id)
-            if not engagement:
-                logger.warning(f"Engagement {engagement_id} not found")
+            opportunity = await self.opportunity_repo.get(opportunity_id)
+            if not opportunity:
+                logger.warning(f"Opportunity {opportunity_id} not found")
                 return False
             
             role_repo = RoleRepository(self.session)
@@ -443,8 +443,8 @@ class EmployeeService(BaseService):
                 release = await release_repo.get(release_data.release_id)
                 if not release:
                     raise ValueError(f"Release {release_data.release_id} not found")
-                if release.engagement_id != engagement_id:
-                    raise ValueError(f"Release {release_data.release_id} does not belong to engagement {engagement_id}")
+                if release.opportunity_id != opportunity_id:
+                    raise ValueError(f"Release {release_data.release_id} does not belong to opportunity {opportunity_id}")
                 
                 # Verify role exists
                 role = await role_repo.get(release_data.role_id)
@@ -529,29 +529,29 @@ class EmployeeService(BaseService):
             
             return True
         except ValueError as e:
-            logger.error(f"Validation error linking employees to engagement: {e}", exc_info=True)
+            logger.error(f"Validation error linking employees to opportunity: {e}", exc_info=True)
             await self.session.rollback()
             raise
         except Exception as e:
-            logger.error(f"Unexpected error linking employees to engagement: {e}", exc_info=True)
+            logger.error(f"Unexpected error linking employees to opportunity: {e}", exc_info=True)
             logger.error(f"Error type: {type(e).__name__}")
             logger.error(f"Error args: {e.args}")
             await self.session.rollback()
             raise
     
-    async def unlink_employees_from_engagement(
+    async def unlink_employees_from_opportunity(
         self,
-        engagement_id: UUID,
+        opportunity_id: UUID,
         employee_ids: List[UUID],
     ) -> bool:
-        """Unlink employees from an engagement by removing estimate line items."""
+        """Unlink employees from an opportunity by removing estimate line items."""
         from sqlalchemy import select
         from app.models.estimate import Estimate
         from app.models.release import Release
         
-        # Get all releases for this engagement
+        # Get all releases for this opportunity
         releases_result = await self.session.execute(
-            select(Release).where(Release.engagement_id == engagement_id)
+            select(Release).where(Release.opportunity_id == opportunity_id)
         )
         releases = releases_result.scalars().all()
         

@@ -14,7 +14,7 @@ from app.models.release import ReleaseStatus
 class ReleaseBase(BaseModel):
     """Base release schema with common fields."""
     name: str = Field(..., min_length=1, max_length=255)
-    engagement_id: UUID
+    opportunity_id: UUID
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     budget: Optional[Decimal] = Field(None, ge=0)
@@ -34,7 +34,7 @@ class ReleaseCreate(ReleaseBase):
 class ReleaseUpdate(BaseModel):
     """Schema for updating a release (all fields optional)."""
     name: Optional[str] = Field(None, min_length=1, max_length=255)
-    engagement_id: Optional[UUID] = None
+    opportunity_id: Optional[UUID] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     budget: Optional[Decimal] = Field(None, ge=0)
@@ -49,7 +49,7 @@ class ReleaseUpdate(BaseModel):
 class ReleaseResponse(ReleaseBase):
     """Schema for release response."""
     id: UUID
-    engagement_name: Optional[str] = None  # Engagement name from engagement relationship
+    opportunity_name: Optional[str] = None  # Opportunity name from opportunity relationship
     billing_term_name: Optional[str] = None  # Billing term name from billing_term relationship
     delivery_center_name: Optional[str] = None  # Delivery center name from delivery_center relationship
     employees: Optional[List[dict]] = None  # Employees linked to this release (when include_relationships=True)

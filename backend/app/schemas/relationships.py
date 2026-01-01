@@ -20,8 +20,8 @@ class ReleaseLinkData(BaseModel):
     delivery_center: str = Field(..., description="Delivery center code (e.g., 'north-america')")
 
 
-class LinkEmployeeToEngagementRequest(BaseModel):
-    """Request schema for linking an employee to an engagement with releases."""
+class LinkEmployeeToOpportunityRequest(BaseModel):
+    """Request schema for linking an employee to an opportunity with releases."""
     releases: List[ReleaseLinkData] = Field(..., min_length=1, description="At least one release with fields is required")
 
 
@@ -34,8 +34,8 @@ class LinkEmployeeToReleaseRequest(BaseModel):
     delivery_center: str = Field(..., description="Delivery center code (e.g., 'north-america')")
 
 
-class LinkEmployeesToEngagementRequest(BaseModel):
-    """Request schema for linking multiple employees to an engagement."""
+class LinkEmployeesToOpportunityRequest(BaseModel):
+    """Request schema for linking multiple employees to an opportunity."""
     employee_ids: List[UUID]
     releases: List[ReleaseLinkData] = Field(..., min_length=1, description="At least one release with fields is required")
 
@@ -50,8 +50,8 @@ class LinkEmployeesToReleaseRequest(BaseModel):
     delivery_center: str = Field(..., description="Delivery center code (e.g., 'north-america')")
 
 
-class LinkRolesToEngagementRequest(BaseModel):
-    """Request schema for linking roles to an engagement."""
+class LinkRolesToOpportunityRequest(BaseModel):
+    """Request schema for linking roles to an opportunity."""
     role_ids: List[UUID]
 
 
@@ -65,10 +65,10 @@ class UnlinkRequest(BaseModel):
     ids: List[UUID]
 
 
-class EngagementAssociationResponse(BaseModel):
-    """Response schema for engagement association with additional fields."""
-    engagement_id: UUID
-    engagement_name: str
+class OpportunityAssociationResponse(BaseModel):
+    """Response schema for opportunity association with additional fields."""
+    opportunity_id: UUID
+    opportunity_name: str
     role_id: UUID
     role_name: str
     start_date: date

@@ -35,6 +35,6 @@ class Account(Base):
     default_currency = Column(String(3), default="USD", nullable=False)
     
     # Relationships
-    engagements = relationship("Engagement", back_populates="account", cascade="all, delete-orphan")
+    opportunities = relationship("Opportunity", back_populates="account", cascade="all, delete-orphan")
     contacts = relationship("Contact", back_populates="account", cascade="all, delete-orphan")
     billing_term = relationship("BillingTerm", back_populates="accounts")

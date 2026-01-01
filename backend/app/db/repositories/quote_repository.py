@@ -23,7 +23,7 @@ class QuoteRepository(BaseRepository[Quote]):
         from app.models.release import Release
         
         return select(Quote).options(
-            selectinload(Quote.release).selectinload(Release.engagement),
+            selectinload(Quote.release).selectinload(Release.opportunity),
             selectinload(Quote.created_by_employee),
             selectinload(Quote.phases),
         )
@@ -91,12 +91,12 @@ class QuoteRepository(BaseRepository[Quote]):
         """Get quote with all line items and weekly hours."""
         from app.models.quote import QuoteLineItem, QuoteWeeklyHours
         from app.models.release import Release
-        from app.models.engagement import Engagement
+        from app.models.opportunity import Opportunity
         
         result = await self.session.execute(
             select(Quote)
             .options(
-                selectinload(Quote.release).selectinload(Release.engagement),
+                selectinload(Quote.release).selectinload(Release.opportunity),
                 selectinload(Quote.created_by_employee),
                 selectinload(Quote.phases),
                 selectinload(Quote.line_items)
