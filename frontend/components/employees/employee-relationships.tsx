@@ -9,11 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   useLinkEmployeeToOpportunity,
   useUnlinkEmployeeFromOpportunity,
-  useLinkEmployeeToRelease,
-  useUnlinkEmployeeFromRelease,
+  useLinkEmployeeToEngagement,
+  useUnlinkEmployeeFromEngagement,
 } from "@/hooks/useEmployees";
 import { useOpportunities } from "@/hooks/useOpportunities";
-import { useReleases } from "@/hooks/useReleases";
+import { useEngagements } from "@/hooks/useEngagements";
 import { useRoles } from "@/hooks/useRoles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { normalizeDateForInput } from "@/lib/utils";
@@ -26,8 +26,8 @@ interface EmployeeRelationshipsProps {
   readOnly?: boolean;
 }
 
-interface ReleaseFormData {
-  release_id: string;
+interface EngagementFormData {
+  engagement_id: string;
   role_id: string;
   start_date: string;
   end_date: string;
@@ -36,10 +36,10 @@ interface ReleaseFormData {
 }
 
 interface LinkOpportunityFormData {
-  releases: ReleaseFormData[]; // Each release has its own fields
+  engagements: EngagementFormData[]; // Each engagement has its own fields
 }
 
-interface LinkReleaseFormData {
+interface LinkEngagementFormData {
   role_id: string;
   start_date: string;
   end_date: string;
@@ -53,14 +53,14 @@ export function EmployeeRelationships({
   readOnly = false,
 }: EmployeeRelationshipsProps) {
   const [selectedOpportunityId, setSelectedOpportunityId] = useState<string>("");
-  const [selectedReleaseId, setSelectedReleaseId] = useState<string>("");
-  const [showReleaseForm, setShowReleaseForm] = useState<Record<string, boolean>>({});
+  const [selectedEngagementId, setSelectedEngagementId] = useState<string>("");
+  const [showEngagementForm, setShowEngagementForm] = useState<Record<string, boolean>>({});
   
   const [opportunityFormData, setOpportunityFormData] = useState<LinkOpportunityFormData>({
-    releases: [],
+    engagements: [],
   });
   
-  const [releaseFormData, setReleaseFormData] = useState<LinkReleaseFormData>({
+  const [engagementFormData, setEngagementFormData] = useState<LinkEngagementFormData>({
     role_id: "",
     start_date: "",
     end_date: "",
@@ -69,7 +69,7 @@ export function EmployeeRelationships({
   });
 
   const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
-  const { data: releasesData } = useReleases({ limit: 1000 });
+  const { data: engagementsData } = useEngagements({ limit: 1000 });
   const { data: rolesData } = useRoles({ limit: 1000 });
   const { data: accountsData } = useAccounts({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
@@ -79,7 +79,7 @@ export function EmployeeRelationships({
     onSuccess: async () => {
       setSelectedOpportunityId("");
       setOpportunityFormData({
-        releases: [],
+        engagements: [],
       });
       await new Promise(resolve => setTimeout(resolve, 100));
       await onUpdate();
@@ -112,11 +112,11 @@ export function EmployeeRelationships({
     },
   });
 
-  const linkToRelease = useLinkEmployeeToRelease({
+  const linkToEngagement = useLinkEmployeeToEngagement({
     onSuccess: async () => {
-      setSelectedReleaseId("");
-      setShowReleaseForm({});
-      setReleaseFormData({
+      setSelectedEngagementId("");
+      setShowEngagementForm({});
+      setEngagementFormData({
         role_id: "",
         start_date: "",
         end_date: "",
@@ -127,20 +127,20 @@ export function EmployeeRelationships({
       await onUpdate();
     },
     onError: (error) => {
-      console.error("Failed to link release:", error);
+      console.error("Failed to link engagement:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`Failed to link release: ${errorMessage}`);
+      alert(`Failed to link engagement: ${errorMessage}`);
     },
   });
 
-  const unlinkFromRelease = useUnlinkEmployeeFromRelease({
+  const unlinkFromEngagement = useUnlinkEmployeeFromEngagement({
     onSuccess: () => {
       onUpdate();
     },
     onError: (error) => {
-      console.error("Failed to unlink release:", error);
+      console.error("Failed to unlink engagement:", error);
       const errorMessage = error instanceof Error ? error.message : String(error);
-      alert(`Failed to unlink release: ${errorMessage}`);
+      alert(`Failed to unlink engagement: ${errorMessage}`);
     },
   });
 
@@ -149,8 +149,8 @@ export function EmployeeRelationships({
       alert("Please select an opportunity to link");
       return;
     }
-    if (!opportunityFormData.releases || opportunityFormData.releases.length === 0) {
-      alert("Please add at least one release with all required fields");
+    if (!opportunityFormData.engagements || opportunityFormData.engagements.length === 0) {
+      alert("Please add at least one engagement with all required fields");
       return;
     }
     if (!employee?.id) {
@@ -158,23 +158,23 @@ export function EmployeeRelationships({
       return;
     }
     
-    // Validate all releases have required fields
-    for (const release of opportunityFormData.releases) {
-      if (!release.role_id || !release.start_date || !release.end_date || !release.project_rate || !release.delivery_center) {
-        alert(`Please fill in all required fields for release: Role, Start Date, End Date, Project Rate, and Delivery Center`);
+    // Validate all engagements have required fields
+    for (const engagement of opportunityFormData.engagements) {
+      if (!engagement.role_id || !engagement.start_date || !engagement.end_date || !engagement.project_rate || !engagement.delivery_center) {
+        alert(`Please fill in all required fields for engagement: Role, Start Date, End Date, Project Rate, and Delivery Center`);
         return;
       }
-      const projectRate = parseFloat(release.project_rate);
+      const projectRate = parseFloat(engagement.project_rate);
       if (isNaN(projectRate) || projectRate < 0) {
-        alert(`Please enter a valid project rate for release (must be a number >= 0)`);
+        alert(`Please enter a valid project rate for engagement (must be a number >= 0)`);
         return;
       }
     }
     
     // Convert to API format
     const linkPayload = {
-      releases: opportunityFormData.releases.map(r => ({
-        release_id: r.release_id,
+      engagements: opportunityFormData.engagements.map(r => ({
+        engagement_id: r.engagement_id,
         role_id: r.role_id,
         start_date: r.start_date,
         end_date: r.end_date,
@@ -237,7 +237,7 @@ export function EmployeeRelationships({
   };
 
   const handleUnlinkOpportunity = async (opportunityId: string) => {
-    if (confirm("Are you sure you want to unlink this opportunity? This will also unlink all associated releases.")) {
+    if (confirm("Are you sure you want to unlink this opportunity? This will also unlink all associated engagements.")) {
       try {
         await unlinkFromOpportunity.mutateAsync({
           employeeId: employee.id,
@@ -256,87 +256,87 @@ export function EmployeeRelationships({
     }
   };
 
-  const handleLinkRelease = async (_projectId: string) => {
-    if (!selectedReleaseId) {
-      alert("Please select a release to link");
+  const handleLinkEngagement = async (_projectId: string) => {
+    if (!selectedEngagementId) {
+      alert("Please select an engagement to link");
       return;
     }
-    if (!releaseFormData.role_id || !releaseFormData.start_date || !releaseFormData.end_date || !releaseFormData.project_rate || !releaseFormData.delivery_center) {
+    if (!engagementFormData.role_id || !engagementFormData.start_date || !engagementFormData.end_date || !engagementFormData.project_rate || !engagementFormData.delivery_center) {
       alert("Please fill in all required fields: Role, Start Date, End Date, Project Rate, and Delivery Center");
       return;
     }
     try {
-      await linkToRelease.mutateAsync({
+      await linkToEngagement.mutateAsync({
         employeeId: employee.id,
-        releaseId: selectedReleaseId,
+        engagementId: selectedEngagementId,
         linkData: {
-          role_id: releaseFormData.role_id,
-          start_date: releaseFormData.start_date,
-          end_date: releaseFormData.end_date,
-          project_rate: parseFloat(releaseFormData.project_rate),
-          delivery_center: releaseFormData.delivery_center,
+          role_id: engagementFormData.role_id,
+          start_date: engagementFormData.start_date,
+          end_date: engagementFormData.end_date,
+          project_rate: parseFloat(engagementFormData.project_rate),
+          delivery_center: engagementFormData.delivery_center,
         },
       });
     } catch (err) {
-      console.error("Failed to link release:", err);
+      console.error("Failed to link engagement:", err);
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const handleUnlinkRelease = async (releaseId: string) => {
-    if (confirm("Are you sure you want to unlink this release?")) {
+  const handleUnlinkEngagement = async (engagementId: string) => {
+    if (confirm("Are you sure you want to unlink this engagement?")) {
       try {
-        await unlinkFromRelease.mutateAsync({
+        await unlinkFromEngagement.mutateAsync({
           employeeId: employee.id,
-          releaseId,
+          engagementId,
         });
       } catch (err) {
-        console.error("Failed to unlink release:", err);
+        console.error("Failed to unlink engagement:", err);
         alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   };
 
-  // Group releases by opportunity
-  const releasesByOpportunity = useMemo(() => {
+  // Group engagements by opportunity
+  const engagementsByOpportunity = useMemo(() => {
     const grouped: Record<string, Array<{ id: string; name: string; opportunity_id: string }>> = {};
-    if (employee.releases && Array.isArray(employee.releases) && employee.releases.length > 0) {
-      employee.releases.forEach((release) => {
-        if (release && release.opportunity_id) {
-          const opportunityId = String(release.opportunity_id); // Ensure it's a string for comparison
+    if (employee.engagements && Array.isArray(employee.engagements) && employee.engagements.length > 0) {
+      employee.engagements.forEach((engagement) => {
+        if (engagement && engagement.opportunity_id) {
+          const opportunityId = String(engagement.opportunity_id); // Ensure it's a string for comparison
           if (!grouped[opportunityId]) {
             grouped[opportunityId] = [];
           }
-          grouped[opportunityId].push(release);
+          grouped[opportunityId].push(engagement);
         }
       });
     }
     return grouped;
-  }, [employee.releases]);
+  }, [employee.engagements]);
 
-  // Get all unique opportunity IDs from releases (since every release belongs to an opportunity)
-  const opportunityIdsFromReleases = useMemo(() => {
+  // Get all unique opportunity IDs from engagements (since every engagement belongs to an opportunity)
+  const opportunityIdsFromEngagements = useMemo(() => {
     const ids = new Set<string>();
-    if (employee.releases && Array.isArray(employee.releases)) {
-      employee.releases.forEach((release) => {
-        if (release && release.opportunity_id) {
-          ids.add(String(release.opportunity_id));
+    if (employee.engagements && Array.isArray(employee.engagements)) {
+      employee.engagements.forEach((engagement) => {
+        if (engagement && engagement.opportunity_id) {
+          ids.add(String(engagement.opportunity_id));
         }
       });
     }
     return Array.from(ids);
-  }, [employee.releases]);
+  }, [employee.engagements]);
 
   const linkedOpportunityIds = new Set(employee.opportunities?.map((e) => String(e.id)) || []);
-  const linkedReleaseIds = new Set(employee.releases?.map((r) => String(r.id)) || []);
+  const linkedEngagementIds = new Set(employee.engagements?.map((r) => String(r.id)) || []);
   
-  // Combine opportunity IDs from both direct links and releases
+  // Combine opportunity IDs from both direct links and engagements
   const allOpportunityIds = useMemo(() => {
     const ids = new Set<string>();
     employee.opportunities?.forEach(e => ids.add(String(e.id)));
-    opportunityIdsFromReleases.forEach(id => ids.add(id));
+    opportunityIdsFromEngagements.forEach(id => ids.add(id));
     return Array.from(ids);
-  }, [employee.opportunities, opportunityIdsFromReleases]);
+  }, [employee.opportunities, opportunityIdsFromEngagements]);
 
   const availableOpportunities =
     opportunitiesData?.items.filter((e) => {
@@ -356,12 +356,12 @@ export function EmployeeRelationships({
           {allOpportunityIds.length > 0 ? (
             <div className="space-y-4">
               {allOpportunityIds.map((opportunityId) => {
-                // Find opportunity from opportunitiesData (since releases always have an opportunity)
+                // Find opportunity from opportunitiesData (since engagements always have an opportunity)
                 const opportunity = opportunitiesData?.items.find(e => String(e.id) === opportunityId);
                 if (!opportunity) return null;
                 
                 const isDirectlyLinked = linkedOpportunityIds.has(opportunityId);
-                const opportunityReleases = releasesByOpportunity[opportunityId] || [];
+                const opportunityEngagements = engagementsByOpportunity[opportunityId] || [];
                 return (
                   <div
                     key={opportunityId}
@@ -377,7 +377,7 @@ export function EmployeeRelationships({
                           {opportunity.name}
                         </span>
                         {!isDirectlyLinked && (
-                          <span className="ml-2 text-xs text-gray-500">(via Release)</span>
+                          <span className="ml-2 text-xs text-gray-500">(via Engagement)</span>
                         )}
                       </div>
                       {!readOnly && isDirectlyLinked && (
@@ -393,42 +393,42 @@ export function EmployeeRelationships({
                       )}
                     </div>
 
-                    {/* Releases for this opportunity */}
-                    {opportunityReleases.length > 0 ? (
+                    {/* Engagements for this opportunity */}
+                    {opportunityEngagements.length > 0 ? (
                       <div className="ml-4 space-y-2">
-                        <div className="text-sm font-medium text-gray-700">Associated Releases:</div>
-                        {opportunityReleases.map((release) => {
-                          const releaseData = employee.releases?.find(r => String(r.id) === String(release.id));
+                        <div className="text-sm font-medium text-gray-700">Associated Engagements:</div>
+                        {opportunityEngagements.map((engagement) => {
+                          const engagementData = employee.engagements?.find(e => String(e.id) === String(engagement.id));
                           return (
                             <div
-                              key={release.id}
+                              key={engagement.id}
                               className="flex flex-col gap-2 p-2 bg-white border rounded-md"
                             >
                               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                                 <div className="flex-1">
                                   <span
                                     className="text-blue-600 font-medium text-sm cursor-default"
-                                    title={`Release: ${release.name}`}
+                                    title={`Engagement: ${engagement.name}`}
                                   >
-                                    {release.name}
+                                    {engagement.name}
                                   </span>
                                   {/* Display association fields */}
-                                  {releaseData && (
+                                  {engagementData && (
                                     <div className="mt-1 text-xs text-gray-600 space-y-1">
-                                      {releaseData.role_name && (
-                                        <div><strong>Role:</strong> {releaseData.role_name}</div>
+                                      {engagementData.role_name && (
+                                        <div><strong>Role:</strong> {engagementData.role_name}</div>
                                       )}
-                                      {releaseData.start_date && (
-                                        <div><strong>Start Date:</strong> {normalizeDateForInput(releaseData.start_date)}</div>
+                                      {engagementData.start_date && (
+                                        <div><strong>Start Date:</strong> {normalizeDateForInput(engagementData.start_date)}</div>
                                       )}
-                                      {releaseData.end_date && (
-                                        <div><strong>End Date:</strong> {normalizeDateForInput(releaseData.end_date)}</div>
+                                      {engagementData.end_date && (
+                                        <div><strong>End Date:</strong> {normalizeDateForInput(engagementData.end_date)}</div>
                                       )}
-                                      {releaseData.project_rate !== undefined && (
-                                        <div><strong>Project Rate:</strong> ${releaseData.project_rate.toFixed(2)}</div>
+                                      {engagementData.project_rate !== undefined && (
+                                        <div><strong>Project Rate:</strong> ${engagementData.project_rate.toFixed(2)}</div>
                                       )}
-                                      {releaseData.delivery_center && (
-                                        <div><strong>Delivery Center:</strong> {deliveryCentersData?.items.find(dc => dc.code === releaseData.delivery_center)?.name || releaseData.delivery_center}</div>
+                                      {engagementData.delivery_center && (
+                                        <div><strong>Delivery Center:</strong> {deliveryCentersData?.items.find(dc => dc.code === engagementData.delivery_center)?.name || engagementData.delivery_center}</div>
                                       )}
                                     </div>
                                   )}
@@ -437,8 +437,8 @@ export function EmployeeRelationships({
                                   <Button
                                     size="sm"
                                     variant="ghost"
-                                    onClick={() => handleUnlinkRelease(release.id)}
-                                    disabled={unlinkFromRelease.isPending}
+                                    onClick={() => handleUnlinkEngagement(engagement.id)}
+                                    disabled={unlinkFromEngagement.isPending}
                                     className="w-full sm:w-auto text-red-600 hover:text-red-800"
                                   >
                                     Unlink
@@ -450,29 +450,29 @@ export function EmployeeRelationships({
                         })}
                       </div>
                     ) : (
-                      <div className="ml-4 text-sm text-gray-500">No releases associated with this opportunity</div>
+                      <div className="ml-4 text-sm text-gray-500">No engagements associated with this opportunity</div>
                     )}
 
                     {/* Link Release for this opportunity */}
                     {!readOnly && (() => {
-                      const availableReleasesForThisOpportunity = releasesData?.items.filter(
-                        (r) => r.opportunity_id === opportunity.id && !linkedReleaseIds.has(r.id)
+                      const availableEngagementsForThisOpportunity = engagementsData?.items.filter(
+                        (r) => r.opportunity_id === opportunity.id && !linkedEngagementIds.has(r.id)
                       ) || [];
                       
-                      if (availableReleasesForThisOpportunity.length === 0) {
+                      if (availableEngagementsForThisOpportunity.length === 0) {
                         return null;
                       }
                       
-                      const showForm = showReleaseForm[opportunity.id] || false;
+                      const showForm = showEngagementForm[opportunity.id] || false;
                       
                       return (
                         <div className="ml-4 space-y-3 pt-2 border-t">
                           {!showForm ? (
                             <Button
                               onClick={() => {
-                                setShowReleaseForm({ ...showReleaseForm, [opportunity.id]: true });
+                                setShowEngagementForm({ ...showEngagementForm, [opportunity.id]: true });
                                 // Reset form data with default project rate
-                                setReleaseFormData({
+                                setEngagementFormData({
                                   role_id: "",
                                   start_date: "",
                                   end_date: "",
@@ -484,40 +484,40 @@ export function EmployeeRelationships({
                               size="sm"
                               className="w-full sm:w-auto"
                             >
-                              Link Release
+                              Link Engagement
                             </Button>
                           ) : (
                             <div className="space-y-3 p-3 bg-white border rounded-md">
-                              <div className="text-sm font-medium mb-2">Link Release</div>
+                              <div className="text-sm font-medium mb-2">Link Engagement</div>
                               <Select
-                                value={selectedReleaseId}
+                                value={selectedEngagementId}
                                 onChange={(e) => {
                                   const value = e.target.value;
-                                  setSelectedReleaseId(value);
+                                  setSelectedEngagementId(value);
                                   if (value) {
                                     // Opportunity selection handled by selectedOpportunityId
                                   }
                                 }}
                                 className="w-full"
                               >
-                                <option value="">Select a release</option>
-                                {availableReleasesForThisOpportunity.map((release) => (
-                                  <option key={release.id} value={release.id}>
-                                    {release.name}
+                                <option value="">Select an engagement</option>
+                                {availableEngagementsForThisOpportunity.map((engagement) => (
+                                  <option key={engagement.id} value={engagement.id}>
+                                    {engagement.name}
                                   </option>
                                 ))}
                               </Select>
                               
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                  <Label htmlFor={`release-delivery-center-${opportunity.id}`}>Delivery Center *</Label>
+                                  <Label htmlFor={`engagement-delivery-center-${opportunity.id}`}>Delivery Center *</Label>
                                   <Select
-                                    id={`release-delivery-center-${opportunity.id}`}
-                                    value={releaseFormData.delivery_center}
+                                    id={`engagement-delivery-center-${opportunity.id}`}
+                                    value={engagementFormData.delivery_center}
                                     onChange={(e) => {
                                       const dc = e.target.value;
-                                      setReleaseFormData({
-                                        ...releaseFormData,
+                                      setEngagementFormData({
+                                        ...engagementFormData,
                                         delivery_center: dc,
                                         role_id: "",
                                       });
@@ -534,16 +534,16 @@ export function EmployeeRelationships({
                                 </div>
                                 
                                 <div>
-                                  <Label htmlFor={`release-role-${opportunity.id}`}>Role *</Label>
+                                  <Label htmlFor={`engagement-role-${opportunity.id}`}>Role *</Label>
                                   <Select
-                                    id={`release-role-${opportunity.id}`}
-                                    value={releaseFormData.role_id}
-                                    onChange={(e) => setReleaseFormData({ ...releaseFormData, role_id: e.target.value })}
+                                    id={`engagement-role-${opportunity.id}`}
+                                    value={engagementFormData.role_id}
+                                    onChange={(e) => setEngagementFormData({ ...engagementFormData, role_id: e.target.value })}
                                     className="w-full"
-                                    disabled={!releaseFormData.delivery_center}
+                                    disabled={!engagementFormData.delivery_center}
                                   >
                                     <option value="">Select role</option>
-                                    {rolesForDeliveryCenter(releaseFormData.delivery_center).map((role) => (
+                                    {rolesForDeliveryCenter(engagementFormData.delivery_center).map((role) => (
                                       <option key={role.id} value={role.id}>
                                         {role.role_name}
                                       </option>
@@ -552,36 +552,36 @@ export function EmployeeRelationships({
                                 </div>
                                 
                                 <div>
-                                  <Label htmlFor={`release-start-date-${opportunity.id}`}>Start Date *</Label>
+                                  <Label htmlFor={`engagement-start-date-${opportunity.id}`}>Start Date *</Label>
                                   <Input
-                                    id={`release-start-date-${opportunity.id}`}
+                                    id={`engagement-start-date-${opportunity.id}`}
                                     type="date"
-                                    value={releaseFormData.start_date}
-                                    onChange={(e) => setReleaseFormData({ ...releaseFormData, start_date: e.target.value })}
+                                    value={engagementFormData.start_date}
+                                    onChange={(e) => setEngagementFormData({ ...engagementFormData, start_date: e.target.value })}
                                     className="w-full"
                                   />
                                 </div>
                                 
                                 <div>
-                                  <Label htmlFor={`release-end-date-${opportunity.id}`}>End Date *</Label>
+                                  <Label htmlFor={`engagement-end-date-${opportunity.id}`}>End Date *</Label>
                                   <Input
-                                    id={`release-end-date-${opportunity.id}`}
+                                    id={`engagement-end-date-${opportunity.id}`}
                                     type="date"
-                                    value={releaseFormData.end_date}
-                                    onChange={(e) => setReleaseFormData({ ...releaseFormData, end_date: e.target.value })}
+                                    value={engagementFormData.end_date}
+                                    onChange={(e) => setEngagementFormData({ ...engagementFormData, end_date: e.target.value })}
                                     className="w-full"
                                   />
                                 </div>
                                 
                                 <div className="sm:col-span-2">
-                                  <Label htmlFor={`release-rate-${opportunity.id}`}>Project Rate *</Label>
+                                  <Label htmlFor={`engagement-rate-${opportunity.id}`}>Project Rate *</Label>
                                   <Input
-                                    id={`release-rate-${opportunity.id}`}
+                                    id={`engagement-rate-${opportunity.id}`}
                                     type="number"
                                     step="0.01"
                                     min="0"
-                                    value={releaseFormData.project_rate}
-                                    onChange={(e) => setReleaseFormData({ ...releaseFormData, project_rate: e.target.value })}
+                                    value={engagementFormData.project_rate}
+                                    onChange={(e) => setEngagementFormData({ ...engagementFormData, project_rate: e.target.value })}
                                     className="w-full"
                                     placeholder="0.00"
                                   />
@@ -590,18 +590,18 @@ export function EmployeeRelationships({
                               
                               <div className="flex gap-2">
                                 <Button
-                                  onClick={() => handleLinkRelease(opportunity.id)}
-                                  disabled={!selectedReleaseId || !releaseFormData.role_id || !releaseFormData.start_date || !releaseFormData.end_date || !releaseFormData.project_rate || !releaseFormData.delivery_center || linkToRelease.isPending}
+                                  onClick={() => handleLinkEngagement(opportunity.id)}
+                                  disabled={!selectedEngagementId || !engagementFormData.role_id || !engagementFormData.start_date || !engagementFormData.end_date || !engagementFormData.project_rate || !engagementFormData.delivery_center || linkToEngagement.isPending}
                                   size="sm"
                                   className="flex-1"
                                 >
-                                  {linkToRelease.isPending ? "Linking..." : "Link Release"}
+                                  {linkToEngagement.isPending ? "Linking..." : "Link Engagement"}
                                 </Button>
                                 <Button
                                   onClick={() => {
-                                    setShowReleaseForm({ ...showReleaseForm, [opportunity.id]: false });
-                                    setSelectedReleaseId("");
-                                    setReleaseFormData({
+                                    setShowEngagementForm({ ...showEngagementForm, [opportunity.id]: false });
+                                    setSelectedEngagementId("");
+                                    setEngagementFormData({
                                       role_id: "",
                                       start_date: "",
                                       end_date: "",
@@ -678,30 +678,30 @@ export function EmployeeRelationships({
                       Opportunity: {opportunitiesData?.items.find(e => e.id === selectedOpportunityId)?.name}
                     </div>
                     
-                    {/* Releases for this opportunity - each with its own fields */}
+                    {/* Engagements for this opportunity - each with its own fields */}
                     <div className="space-y-4">
                       <div className="text-sm font-semibold text-gray-700 mb-2">
-                        Releases * (Add at least one release with all fields)
+                        Engagements * (Add at least one engagement with all fields)
                       </div>
                       
-                      {releasesData?.items
-                        .filter((r) => r.opportunity_id === selectedOpportunityId)
-                        .map((release) => {
-                          const releaseFormIndex = opportunityFormData.releases.findIndex(r => r.release_id === release.id);
-                          const releaseForm = releaseFormIndex >= 0 ? opportunityFormData.releases[releaseFormIndex] : null;
+                      {engagementsData?.items
+                        .filter((e) => e.opportunity_id === selectedOpportunityId)
+                        .map((engagement) => {
+                          const engagementFormIndex = opportunityFormData.engagements.findIndex(e => e.engagement_id === engagement.id);
+                          const engagementForm = engagementFormIndex >= 0 ? opportunityFormData.engagements[engagementFormIndex] : null;
                           
                           return (
-                            <div key={release.id} className="border rounded-lg p-4 bg-white space-y-3">
+                            <div key={engagement.id} className="border rounded-lg p-4 bg-white space-y-3">
                               <div className="flex items-center justify-between">
-                                <div className="font-medium text-sm">{release.name}</div>
-                                {releaseForm ? (
+                                <div className="font-medium text-sm">{engagement.name}</div>
+                                {engagementForm ? (
                                   <Button
                                     type="button"
                                     size="sm"
                                     variant="ghost"
                                     onClick={() => {
                                       setOpportunityFormData({
-                                        releases: opportunityFormData.releases.filter(r => r.release_id !== release.id),
+                                        engagements: opportunityFormData.engagements.filter(e => e.engagement_id !== engagement.id),
                                       });
                                     }}
                                     className="text-red-600 hover:text-red-800"
@@ -715,10 +715,10 @@ export function EmployeeRelationships({
                                     variant="outline"
                                     onClick={() => {
                                       setOpportunityFormData({
-                                        releases: [
-                                          ...opportunityFormData.releases,
+                                        engagements: [
+                                          ...opportunityFormData.engagements,
                                           {
-                                            release_id: release.id,
+                                            engagement_id: engagement.id,
                                             role_id: "",
                                             start_date: "",
                                             end_date: "",
@@ -729,23 +729,23 @@ export function EmployeeRelationships({
                                       });
                                     }}
                                   >
-                                    Add Release
+                                    Add Engagement
                                   </Button>
                                 )}
                               </div>
                               
-                              {releaseForm && (
+                              {engagementForm && (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                                   <div>
-                                    <Label htmlFor={`release-delivery-center-${release.id}`}>Delivery Center *</Label>
+                                    <Label htmlFor={`engagement-delivery-center-${engagement.id}`}>Delivery Center *</Label>
                                     <Select
-                                      id={`release-delivery-center-${release.id}`}
-                                      value={releaseForm.delivery_center}
+                                      id={`engagement-delivery-center-${engagement.id}`}
+                                      value={engagementForm.delivery_center}
                                       onChange={(e) => {
                                         const dc = e.target.value;
-                                        const updated = [...opportunityFormData.releases];
-                                        updated[releaseFormIndex] = { ...releaseForm, delivery_center: dc, role_id: "" };
-                                        setOpportunityFormData({ releases: updated });
+                                        const updated = [...opportunityFormData.engagements];
+                                        updated[engagementFormIndex] = { ...engagementForm, delivery_center: dc, role_id: "" };
+                                        setOpportunityFormData({ engagements: updated });
                                       }}
                                       className="w-full"
                                       required
@@ -760,21 +760,21 @@ export function EmployeeRelationships({
                                   </div>
 
                                   <div>
-                                    <Label htmlFor={`release-role-${release.id}`}>Role *</Label>
+                                    <Label htmlFor={`engagement-role-${engagement.id}`}>Role *</Label>
                                     <Select
-                                      id={`release-role-${release.id}`}
-                                      value={releaseForm.role_id}
+                                      id={`engagement-role-${engagement.id}`}
+                                      value={engagementForm.role_id}
                                       onChange={(e) => {
-                                        const updated = [...opportunityFormData.releases];
-                                        updated[releaseFormIndex] = { ...releaseForm, role_id: e.target.value };
-                                        setOpportunityFormData({ releases: updated });
+                                        const updated = [...opportunityFormData.engagements];
+                                        updated[engagementFormIndex] = { ...engagementForm, role_id: e.target.value };
+                                        setOpportunityFormData({ engagements: updated });
                                       }}
                                       className="w-full"
                                       required
-                                      disabled={!releaseForm.delivery_center}
+                                      disabled={!engagementForm.delivery_center}
                                     >
                                       <option value="">Select role</option>
-                                      {rolesForDeliveryCenter(releaseForm.delivery_center).map((role) => (
+                                      {rolesForDeliveryCenter(engagementForm.delivery_center).map((role) => (
                                         <option key={role.id} value={role.id}>
                                           {role.role_name}
                                         </option>
@@ -783,15 +783,15 @@ export function EmployeeRelationships({
                                   </div>
                                   
                                   <div>
-                                    <Label htmlFor={`release-start-date-${release.id}`}>Start Date *</Label>
+                                    <Label htmlFor={`engagement-start-date-${engagement.id}`}>Start Date *</Label>
                                     <Input
-                                      id={`release-start-date-${release.id}`}
+                                      id={`engagement-start-date-${engagement.id}`}
                                       type="date"
-                                      value={releaseForm.start_date}
+                                      value={engagementForm.start_date}
                                       onChange={(e) => {
-                                        const updated = [...opportunityFormData.releases];
-                                        updated[releaseFormIndex] = { ...releaseForm, start_date: e.target.value };
-                                        setOpportunityFormData({ releases: updated });
+                                        const updated = [...opportunityFormData.engagements];
+                                        updated[engagementFormIndex] = { ...engagementForm, start_date: e.target.value };
+                                        setOpportunityFormData({ engagements: updated });
                                       }}
                                       className="w-full"
                                       required
@@ -799,15 +799,15 @@ export function EmployeeRelationships({
                                   </div>
                                   
                                   <div>
-                                    <Label htmlFor={`release-end-date-${release.id}`}>End Date *</Label>
+                                    <Label htmlFor={`engagement-end-date-${engagement.id}`}>End Date *</Label>
                                     <Input
-                                      id={`release-end-date-${release.id}`}
+                                      id={`engagement-end-date-${engagement.id}`}
                                       type="date"
-                                      value={releaseForm.end_date}
+                                      value={engagementForm.end_date}
                                       onChange={(e) => {
-                                        const updated = [...opportunityFormData.releases];
-                                        updated[releaseFormIndex] = { ...releaseForm, end_date: e.target.value };
-                                        setOpportunityFormData({ releases: updated });
+                                        const updated = [...opportunityFormData.engagements];
+                                        updated[engagementFormIndex] = { ...engagementForm, end_date: e.target.value };
+                                        setOpportunityFormData({ engagements: updated });
                                       }}
                                       className="w-full"
                                       required
@@ -815,17 +815,17 @@ export function EmployeeRelationships({
                                   </div>
                                   
                                   <div className="sm:col-span-2">
-                                    <Label htmlFor={`release-rate-${release.id}`}>Project Rate ($) *</Label>
+                                    <Label htmlFor={`engagement-rate-${engagement.id}`}>Project Rate ($) *</Label>
                                     <Input
-                                      id={`release-rate-${release.id}`}
+                                      id={`engagement-rate-${engagement.id}`}
                                       type="number"
                                       step="0.01"
                                       min="0"
-                                      value={releaseForm.project_rate}
+                                      value={engagementForm.project_rate}
                                       onChange={(e) => {
-                                        const updated = [...opportunityFormData.releases];
-                                        updated[releaseFormIndex] = { ...releaseForm, project_rate: e.target.value };
-                                        setOpportunityFormData({ releases: updated });
+                                        const updated = [...opportunityFormData.engagements];
+                                        updated[engagementFormIndex] = { ...engagementForm, project_rate: e.target.value };
+                                        setOpportunityFormData({ engagements: updated });
                                       }}
                                       className="w-full"
                                       placeholder="0.00"
@@ -838,8 +838,8 @@ export function EmployeeRelationships({
                           );
                         })}
                       
-                      {releasesData?.items.filter((r) => r.opportunity_id === selectedOpportunityId).length === 0 && (
-                        <div className="text-sm text-gray-500 italic p-2">No releases available for this opportunity</div>
+                      {engagementsData?.items.filter((e) => e.opportunity_id === selectedOpportunityId).length === 0 && (
+                        <div className="text-sm text-gray-500 italic p-2">No engagements available for this opportunity</div>
                       )}
                     </div>
                     
@@ -849,8 +849,8 @@ export function EmployeeRelationships({
                         disabled={
                           !selectedAccountId ||
                           !selectedOpportunityId ||
-                          !opportunityFormData.releases ||
-                          opportunityFormData.releases.length === 0 ||
+                          !opportunityFormData.engagements ||
+                          opportunityFormData.engagements.length === 0 ||
                           linkToOpportunity.isPending
                         }
                         className="flex-1"
@@ -861,7 +861,7 @@ export function EmployeeRelationships({
                         onClick={() => {
                           setSelectedOpportunityId("");
                           setOpportunityFormData({
-                            releases: [],
+                            engagements: [],
                           });
                         }}
                         variant="outline"

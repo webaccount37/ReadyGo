@@ -9,26 +9,26 @@ import { useOpportunities } from "@/hooks/useOpportunities";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { CURRENCIES } from "@/types/currency";
-import type { ReleaseCreate, ReleaseUpdate } from "@/types/release";
+import type { EngagementCreate, EngagementUpdate } from "@/types/engagement";
 
-interface ReleaseFormProps {
-  initialData?: Partial<ReleaseCreate>;
-  onSubmit: (data: ReleaseCreate | ReleaseUpdate) => Promise<void>;
+interface EngagementFormProps {
+  initialData?: Partial<EngagementCreate>;
+  onSubmit: (data: EngagementCreate | EngagementUpdate) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
 }
 
-export function ReleaseForm({
+export function EngagementForm({
   initialData,
   onSubmit,
   onCancel,
   isLoading = false,
-}: ReleaseFormProps) {
+}: EngagementFormProps) {
   const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
   const { data: deliveryCentersData } = useDeliveryCenters();
 
-  const [formData, setFormData] = useState<ReleaseCreate>({
+  const [formData, setFormData] = useState<EngagementCreate>({
     name: initialData?.name || "",
     opportunity_id: initialData?.opportunity_id || "",
     start_date: initialData?.start_date || undefined,
@@ -74,7 +74,7 @@ export function ReleaseForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label htmlFor="name">Release Name *</Label>
+        <Label htmlFor="name">Engagement Name *</Label>
         <Input
           id="name"
           value={formData.name}
@@ -111,7 +111,7 @@ export function ReleaseForm({
             onChange={(e) =>
               setFormData({
                 ...formData,
-                status: e.target.value as ReleaseCreate["status"],
+                status: e.target.value as EngagementCreate["status"],
               })
             }
           >
@@ -237,5 +237,4 @@ export function ReleaseForm({
     </form>
   );
 }
-
 

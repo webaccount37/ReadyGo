@@ -7,17 +7,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  useLinkEmployeeToRelease,
-  useUnlinkEmployeeFromRelease,
+  useLinkEmployeeToEngagement,
+  useUnlinkEmployeeFromEngagement,
 } from "@/hooks/useEmployees";
 import { useEmployees } from "@/hooks/useEmployees";
 import { useRoles } from "@/hooks/useRoles";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { normalizeDateForInput } from "@/lib/utils";
-import type { Release } from "@/types/release";
+import type { Engagement } from "@/types/engagement";
 
-interface ReleaseRelationshipsProps {
-  release: Release;
+interface EngagementRelationshipsProps {
+  engagement: Engagement;
   onUpdate: () => void;
   readOnly?: boolean;
 }
@@ -31,11 +31,11 @@ interface LinkEmployeeFormData {
   delivery_center: string;
 }
 
-export function ReleaseRelationships({
-  release,
+export function EngagementRelationships({
+  engagement,
   onUpdate,
   readOnly = false,
-}: ReleaseRelationshipsProps) {
+}: EngagementRelationshipsProps) {
   const [showEmployeeForm, setShowEmployeeForm] = useState(false);
   
   const { data: employeesData } = useEmployees({ limit: 1000 });
@@ -45,22 +45,22 @@ export function ReleaseRelationships({
   const [employeeFormData, setEmployeeFormData] = useState<LinkEmployeeFormData>({
     employee_id: "",
     role_id: "",
-    start_date: normalizeDateForInput(release.start_date),
-    end_date: normalizeDateForInput(release.end_date),
+    start_date: normalizeDateForInput(engagement.start_date),
+    end_date: normalizeDateForInput(engagement.end_date),
     delivery_center: "",
     project_rate: "",
   });
   
   // Note: Delivery center will be set when employee is selected (from employee's delivery_center field)
   
-  const linkToRelease = useLinkEmployeeToRelease({
+  const linkToEngagement = useLinkEmployeeToEngagement({
     onSuccess: async () => {
       setShowEmployeeForm(false);
       setEmployeeFormData({
         employee_id: "",
         role_id: "",
-        start_date: normalizeDateForInput(release.start_date),
-        end_date: normalizeDateForInput(release.end_date),
+        start_date: normalizeDateForInput(engagement.start_date),
+        end_date: normalizeDateForInput(engagement.end_date),
         project_rate: "",
         delivery_center: "", // Will be set when employee is selected
       });
@@ -76,7 +76,7 @@ export function ReleaseRelationships({
     },
   });
 
-  const unlinkFromRelease = useUnlinkEmployeeFromRelease({
+  const unlinkFromEngagement = useUnlinkEmployeeFromEngagement({
     onSuccess: async () => {
       await new Promise(resolve => setTimeout(resolve, 100));
       await onUpdate();
@@ -111,9 +111,9 @@ export function ReleaseRelationships({
     }
 
     try {
-      await linkToRelease.mutateAsync({
+      await linkToEngagement.mutateAsync({
         employeeId: employeeFormData.employee_id,
-        releaseId: release.id,
+        engagementId: engagement.id,
         linkData: {
           role_id: employeeFormData.role_id,
           start_date: employeeFormData.start_date,
@@ -128,29 +128,29 @@ export function ReleaseRelationships({
   };
 
   const handleUnlinkEmployee = async (employeeId: string) => {
-    if (!confirm("Are you sure you want to unlink this employee from the release?")) {
+    if (!confirm("Are you sure you want to unlink this employee from the engagement?")) {
       return;
     }
 
     try {
-      await unlinkFromRelease.mutateAsync({
+      await unlinkFromEngagement.mutateAsync({
         employeeId,
-        releaseId: release.id,
+        engagementId: engagement.id,
       });
     } catch (err) {
       console.error("Failed to unlink employee:", err);
     }
   };
 
-  // Get employees from release (if available in the release object)
-  const releaseEmployees = (release as any).employees || [];
+  // Get employees from engagement (if available in the engagement object)
+  const engagementEmployees = (engagement as any).employees || [];
   
   // Log dates for debugging
   useEffect(() => {
-    if (releaseEmployees.length > 0) {
-      releaseEmployees.forEach((employee: any) => {
+    if (engagementEmployees.length > 0) {
+      engagementEmployees.forEach((employee: any) => {
         if (employee.start_date && employee.end_date) {
-          console.log(`[ReleaseRelationships ${release.id}-${employee.id}] Received dates:`, {
+          console.log(`[EngagementRelationships ${engagement.id}-${employee.id}] Received dates:`, {
             raw_start_date: employee.start_date,
             raw_end_date: employee.end_date,
             parsed_start_date: normalizeDateForInput(employee.start_date),
@@ -159,7 +159,7 @@ export function ReleaseRelationships({
         }
       });
     }
-  }, [releaseEmployees, release.id]);
+  }, [engagementEmployees, engagement.id]);
 
   return (
     <div className="space-y-6">
@@ -169,10 +169,10 @@ export function ReleaseRelationships({
           <CardTitle className="text-lg">Associated Employees</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Display employees linked to release */}
-          {releaseEmployees.length > 0 ? (
+          {/* Display employees linked to engagement */}
+          {engagementEmployees.length > 0 ? (
             <div className="space-y-2">
-              {releaseEmployees.map((employee: any) => (
+              {engagementEmployees.map((employee: any) => (
                 <div
                   key={employee.id}
                   className="flex flex-col gap-2 p-2 bg-white border rounded-md"
@@ -230,8 +230,8 @@ export function ReleaseRelationships({
                     setEmployeeFormData({
                       employee_id: "",
                       role_id: "",
-                      start_date: normalizeDateForInput(release.start_date),
-                      end_date: normalizeDateForInput(release.end_date),
+                      start_date: normalizeDateForInput(engagement.start_date),
+                      end_date: normalizeDateForInput(engagement.end_date),
                       project_rate: "",
                       delivery_center: "", // Will be set when employee is selected
                     });
@@ -360,12 +360,12 @@ export function ReleaseRelationships({
                         !employeeFormData.end_date ||
                         !employeeFormData.project_rate ||
                         !employeeFormData.delivery_center ||
-                        linkToRelease.isPending
+                        linkToEngagement.isPending
                       }
                       size="sm"
                       className="flex-1"
                     >
-                      {linkToRelease.isPending ? "Linking..." : "Link Employee"}
+                      {linkToEngagement.isPending ? "Linking..." : "Link Employee"}
                     </Button>
                     <Button
                       onClick={() => {
@@ -373,8 +373,8 @@ export function ReleaseRelationships({
                         setEmployeeFormData({
                           employee_id: "",
                           role_id: "",
-                          start_date: release.start_date || "",
-                          end_date: release.end_date || "",
+                          start_date: engagement.start_date || "",
+                          end_date: engagement.end_date || "",
                           project_rate: "",
                           delivery_center: "", // Will be set when employee is selected
                         });
@@ -394,4 +394,3 @@ export function ReleaseRelationships({
     </div>
   );
 }
-

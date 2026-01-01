@@ -9,7 +9,7 @@ from app.api.v1.endpoints import (
     users,
     employees,
     opportunities,
-    releases,
+    engagements,
     calendars,
     accounts,
     contacts,
@@ -25,7 +25,7 @@ api_router.include_router(health.router, tags=["health"])
 api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(employees.router, prefix="/employees", tags=["employees"])
 api_router.include_router(opportunities.router, prefix="/opportunities", tags=["opportunities"])
-api_router.include_router(releases.router, prefix="/releases", tags=["releases"])
+api_router.include_router(engagements.router, prefix="/engagements", tags=["engagements"])
 api_router.include_router(calendars.router, prefix="/calendars", tags=["calendars"])
 api_router.include_router(accounts.router, prefix="/accounts", tags=["accounts"])
 api_router.include_router(contacts.router, prefix="/contacts", tags=["contacts"])

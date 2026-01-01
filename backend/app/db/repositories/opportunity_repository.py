@@ -103,14 +103,14 @@ class OpportunityRepository(BaseRepository[Opportunity]):
     async def get_with_relationships(self, opportunity_id: UUID) -> Optional[Opportunity]:
         """Get opportunity with related entities."""
         # TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models
-        from app.models.release import Release
+        from app.models.engagement import Engagement
         
         result = await self.session.execute(
             select(Opportunity)
             .options(
                 selectinload(Opportunity.account),
                 # TODO: Load employees from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
-                selectinload(Opportunity.releases),
+                selectinload(Opportunity.engagements),
                 selectinload(Opportunity.parent_opportunity),
             )
             .where(Opportunity.id == opportunity_id)

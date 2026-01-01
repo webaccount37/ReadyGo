@@ -21,7 +21,7 @@ export interface OpportunityEmployee {
   delivery_center?: string;
 }
 
-export interface OpportunityRelease {
+export interface OpportunityEngagement {
   id: string;
   name: string;
   opportunity_id: string;
@@ -51,7 +51,7 @@ export interface Opportunity {
   invoice_customer: boolean;
   billable_expenses: boolean;
   attributes?: Record<string, unknown>;
-  releases?: OpportunityRelease[];
+  engagements?: OpportunityEngagement[];
   employees?: OpportunityEmployee[];
   // New deal/forecast fields
   probability?: number;

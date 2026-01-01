@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { useReleases } from "@/hooks/useReleases";
+import { useEngagements } from "@/hooks/useEngagements";
 import type { EstimateCreate, EstimateUpdate } from "@/types/estimate";
 
 interface EstimateFormProps {
@@ -21,9 +21,9 @@ export function EstimateForm({
   onCancel,
   isLoading = false,
 }: EstimateFormProps) {
-  const { data: releasesData } = useReleases({ limit: 100 });
+  const { data: engagementsData } = useEngagements({ limit: 100 });
   const [formData, setFormData] = useState<EstimateCreate>({
-    release_id: initialData?.release_id || "",
+    engagement_id: initialData?.engagement_id || "",
     name: initialData?.name || "",
     description: initialData?.description || "",
   });
@@ -36,20 +36,20 @@ export function EstimateForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label htmlFor="release_id">Release *</Label>
+        <Label htmlFor="engagement_id">Engagement *</Label>
         <Select
-          id="release_id"
-          value={formData.release_id}
+          id="engagement_id"
+          value={formData.engagement_id}
           onChange={(e) =>
-            setFormData({ ...formData, release_id: e.target.value })
+            setFormData({ ...formData, engagement_id: e.target.value })
           }
           required
-          disabled={!!initialData?.release_id}
+          disabled={!!initialData?.engagement_id}
         >
-          <option value="">Select a release</option>
-          {releasesData?.items?.map((release) => (
-            <option key={release.id} value={release.id}>
-              {release.name} ({release.opportunity_name || release.opportunity_id})
+          <option value="">Select an engagement</option>
+          {engagementsData?.items?.map((engagement) => (
+            <option key={engagement.id} value={engagement.id}>
+              {engagement.name} ({engagement.opportunity_name || engagement.opportunity_id})
             </option>
           ))}
         </Select>

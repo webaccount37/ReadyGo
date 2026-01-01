@@ -42,14 +42,14 @@ class QuoteController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
-        release_id: Optional[UUID] = None,
+        engagement_id: Optional[UUID] = None,
         status: Optional[str] = None,
     ) -> QuoteListResponse:
         """List quotes with optional filters."""
         quotes, total = await self.quote_service.list_quotes(
             skip=skip,
             limit=limit,
-            release_id=release_id,
+            engagement_id=engagement_id,
             status=status,
         )
         return QuoteListResponse(items=quotes, total=total)

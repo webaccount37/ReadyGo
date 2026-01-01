@@ -34,7 +34,7 @@ class Estimate(Base):
     __tablename__ = "estimates"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    release_id = Column(UUID(as_uuid=True), ForeignKey("releases.id"), nullable=False, index=True)
+    engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True)
     description = Column(String(2000), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True, index=True)
@@ -42,7 +42,7 @@ class Estimate(Base):
     attributes = Column(JSON, nullable=True, default=dict)
     
     # Relationships
-    release = relationship("Release", back_populates="estimates")
+    engagement = relationship("Engagement", back_populates="estimates")
     created_by_employee = relationship("Employee", foreign_keys=[created_by])
     line_items = relationship("EstimateLineItem", back_populates="estimate", cascade="all, delete-orphan", order_by="EstimateLineItem.row_order", foreign_keys="[EstimateLineItem.estimate_id]", primaryjoin="Estimate.id == EstimateLineItem.estimate_id")
     phases = relationship("EstimatePhase", back_populates="estimate", cascade="all, delete-orphan", order_by="EstimatePhase.row_order", foreign_keys="[EstimatePhase.estimate_id]", primaryjoin="Estimate.id == EstimatePhase.estimate_id")

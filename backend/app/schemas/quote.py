@@ -137,7 +137,7 @@ class QuoteLineItemResponse(BaseModel):
 
 class QuoteBase(BaseModel):
     """Base quote schema with common fields."""
-    release_id: UUID
+    engagement_id: UUID
     name: str = Field(..., min_length=1, max_length=255)
     currency: str = Field(default="USD", min_length=3, max_length=3)
     status: QuoteStatus = QuoteStatus.DRAFT
@@ -162,8 +162,8 @@ class QuoteUpdate(BaseModel):
 class QuoteResponse(QuoteBase):
     """Schema for quote response."""
     id: UUID
-    release_id: UUID
-    release_name: Optional[str] = None
+    engagement_id: UUID
+    engagement_name: Optional[str] = None
     opportunity_id: Optional[UUID] = None
     opportunity_name: Optional[str] = None
     created_by: Optional[UUID] = None

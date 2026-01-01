@@ -43,7 +43,7 @@ async def create_estimate(
 async def list_estimates(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    release_id: UUID = Query(None),
+    engagement_id: UUID = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> EstimateListResponse:
     """List estimates with optional filters."""
@@ -51,7 +51,7 @@ async def list_estimates(
     return await controller.list_estimates(
         skip=skip,
         limit=limit,
-        release_id=release_id,
+        engagement_id=engagement_id,
     )
 
 

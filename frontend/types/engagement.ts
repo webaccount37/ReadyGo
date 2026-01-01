@@ -1,10 +1,10 @@
 /**
- * Release types matching backend schemas.
+ * Engagement types matching backend schemas.
  */
 
-export type ReleaseStatus = "planning" | "active" | "completed" | "on-hold";
+export type EngagementStatus = "planning" | "active" | "completed" | "on-hold";
 
-export interface ReleaseEmployee {
+export interface EngagementEmployee {
   id: string;
   first_name: string;
   last_name: string;
@@ -17,7 +17,7 @@ export interface ReleaseEmployee {
   delivery_center?: string;
 }
 
-export interface Release {
+export interface Engagement {
   id: string;
   name: string;
   opportunity_id: string;
@@ -25,24 +25,24 @@ export interface Release {
   start_date?: string;
   end_date?: string;
   budget?: string;
-  status: ReleaseStatus;
+  status: EngagementStatus;
   billing_term_id?: string;
   billing_term_name?: string;
   description?: string;
   default_currency: string;
   delivery_center_id?: string;
   delivery_center_name?: string;
-  employees?: ReleaseEmployee[];
+  employees?: EngagementEmployee[];
   attributes?: Record<string, unknown>;
 }
 
-export interface ReleaseCreate {
+export interface EngagementCreate {
   name: string;
   opportunity_id: string;
   start_date?: string;
   end_date?: string;
   budget?: string;
-  status?: ReleaseStatus;
+  status?: EngagementStatus;
   billing_term_id?: string;
   description?: string;
   default_currency?: string;
@@ -50,13 +50,13 @@ export interface ReleaseCreate {
   attributes?: Record<string, unknown>;
 }
 
-export interface ReleaseUpdate {
+export interface EngagementUpdate {
   name?: string;
   opportunity_id?: string;
   start_date?: string;
   end_date?: string;
   budget?: string;
-  status?: ReleaseStatus;
+  status?: EngagementStatus;
   billing_term_id?: string;
   description?: string;
   default_currency?: string;
@@ -64,10 +64,10 @@ export interface ReleaseUpdate {
   attributes?: Record<string, unknown>;
 }
 
-export type ReleaseResponse = Release;
+export type EngagementResponse = Engagement;
 
-export interface ReleaseListResponse {
-  items: ReleaseResponse[];
+export interface EngagementListResponse {
+  items: EngagementResponse[];
   total: number;
 }
 

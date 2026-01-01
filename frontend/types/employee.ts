@@ -35,7 +35,7 @@ export interface Employee {
     project_rate?: number;
     delivery_center?: string;
   }>;
-  releases?: Array<{
+  engagements?: Array<{
     id: string;
     name: string;
     opportunity_id: string;

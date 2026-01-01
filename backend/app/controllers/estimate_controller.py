@@ -42,13 +42,13 @@ class EstimateController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
-        release_id: Optional[UUID] = None,
+        engagement_id: Optional[UUID] = None,
     ) -> EstimateListResponse:
         """List estimates with optional filters."""
         estimates, total = await self.estimate_service.list_estimates(
             skip=skip,
             limit=limit,
-            release_id=release_id,
+            engagement_id=engagement_id,
         )
         return EstimateListResponse(items=estimates, total=total)
     
@@ -65,7 +65,7 @@ class EstimateController(BaseController):
         return await self.estimate_service.delete_estimate(estimate_id)
     
     async def set_active_version(self, estimate_id: UUID) -> Optional[EstimateResponse]:
-        """Set an estimate as the active version for its release."""
+        """Set an estimate as the active version for its engagement."""
         return await self.estimate_service.set_active_version(estimate_id)
     
     async def clone_estimate(self, estimate_id: UUID, new_name: Optional[str] = None) -> EstimateDetailResponse:

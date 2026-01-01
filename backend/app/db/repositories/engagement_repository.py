@@ -1,5 +1,5 @@
 """
-Release repository for database operations.
+Engagement repository for database operations.
 """
 
 from typing import Optional, List
@@ -10,21 +10,21 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
-from app.models.release import Release, ReleaseStatus
+from app.models.engagement import Engagement, EngagementStatus
 
 
-class ReleaseRepository(BaseRepository[Release]):
-    """Repository for release operations."""
+class EngagementRepository(BaseRepository[Engagement]):
+    """Repository for engagement operations."""
     
     def __init__(self, session: AsyncSession):
-        super().__init__(Release, session)
+        super().__init__(Engagement, session)
     
     def _base_query(self):
         """Base query with eager loading of opportunity, billing_term, and delivery_center relationships."""
-        return select(Release).options(
-            selectinload(Release.opportunity),
-            selectinload(Release.billing_term),
-            selectinload(Release.delivery_center)
+        return select(Engagement).options(
+            selectinload(Engagement.opportunity),
+            selectinload(Engagement.billing_term),
+            selectinload(Engagement.delivery_center)
         )
     
     async def list(
@@ -32,22 +32,22 @@ class ReleaseRepository(BaseRepository[Release]):
         skip: int = 0,
         limit: int = 100,
         **filters,
-    ) -> List[Release]:
-        """List releases with pagination and filters, eagerly loading opportunity."""
+    ) -> List[Engagement]:
+        """List engagements with pagination and filters, eagerly loading opportunity."""
         query = self._base_query()
         
         # Apply filters
         for key, value in filters.items():
-            if hasattr(Release, key):
-                query = query.where(getattr(Release, key) == value)
+            if hasattr(Engagement, key):
+                query = query.where(getattr(Engagement, key) == value)
         
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def get(self, id: UUID) -> Optional[Release]:
-        """Get release by ID with opportunity relationship loaded."""
-        query = self._base_query().where(Release.id == id)
+    async def get(self, id: UUID) -> Optional[Engagement]:
+        """Get engagement by ID with opportunity relationship loaded."""
+        query = self._base_query().where(Engagement.id == id)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
@@ -56,21 +56,21 @@ class ReleaseRepository(BaseRepository[Release]):
         opportunity_id: UUID,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Release]:
-        """List releases by opportunity."""
-        query = self._base_query().where(Release.opportunity_id == opportunity_id)
+    ) -> List[Engagement]:
+        """List engagements by opportunity."""
+        query = self._base_query().where(Engagement.opportunity_id == opportunity_id)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
     async def list_by_status(
         self,
-        status: ReleaseStatus,
+        status: EngagementStatus,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Release]:
-        """List releases by status."""
-        query = self._base_query().where(Release.status == status)
+    ) -> List[Engagement]:
+        """List engagements by status."""
+        query = self._base_query().where(Engagement.status == status)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -81,29 +81,29 @@ class ReleaseRepository(BaseRepository[Release]):
         end_date: Optional[date] = None,
         skip: int = 0,
         limit: int = 100,
-    ) -> List[Release]:
-        """List releases within date range."""
+    ) -> List[Engagement]:
+        """List engagements within date range."""
         query = self._base_query()
         if start_date:
-            query = query.where(Release.start_date >= start_date)
+            query = query.where(Engagement.start_date >= start_date)
         if end_date:
-            query = query.where(Release.end_date <= end_date)
+            query = query.where(Engagement.end_date <= end_date)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def get_with_relationships(self, release_id: UUID) -> Optional[Release]:
-        """Get release with related entities."""
+    async def get_with_relationships(self, engagement_id: UUID) -> Optional[Engagement]:
+        """Get engagement with related entities."""
         # Note: Employees are now loaded from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
         # This is handled in the service layer, not the repository
         result = await self.session.execute(
-            select(Release)
+            select(Engagement)
             .options(
-                selectinload(Release.opportunity),
-                selectinload(Release.billing_term),
-                selectinload(Release.delivery_center),
+                selectinload(Engagement.opportunity),
+                selectinload(Engagement.billing_term),
+                selectinload(Engagement.delivery_center),
             )
-            .where(Release.id == release_id)
+            .where(Engagement.id == engagement_id)
         )
         return result.scalar_one_or_none()
 

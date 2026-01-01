@@ -3,12 +3,12 @@
 import { useState } from "react";
 import { useEmployees } from "@/hooks/useEmployees";
 import { useOpportunities } from "@/hooks/useOpportunities";
-import { useReleases } from "@/hooks/useReleases";
+import { useEngagements } from "@/hooks/useEngagements";
 import {
   useLinkEmployeeToOpportunity,
   useUnlinkEmployeeFromOpportunity,
-  useLinkEmployeeToRelease,
-  useUnlinkEmployeeFromRelease,
+  useLinkEmployeeToEngagement,
+  useUnlinkEmployeeFromEngagement,
 } from "@/hooks/useEmployees";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,16 +18,16 @@ import { Label } from "@/components/ui/label";
 export default function RelationshipsPage() {
   const [selectedEmployee, setSelectedEmployee] = useState<string>("");
   const [selectedOpportunity, setSelectedOpportunity] = useState<string>("");
-  const [selectedRelease, setSelectedRelease] = useState<string>("");
+  const [selectedEngagement, setSelectedEngagement] = useState<string>("");
 
   const { data: employeesData } = useEmployees({ limit: 100 });
   const { data: opportunitiesData } = useOpportunities({ limit: 100 });
-  const { data: releasesData } = useReleases({ limit: 100 });
+  const { data: engagementsData } = useEngagements({ limit: 100 });
 
   const linkEmployeeToOpportunity = useLinkEmployeeToOpportunity();
   const unlinkEmployeeFromOpportunity = useUnlinkEmployeeFromOpportunity();
-  const linkEmployeeToRelease = useLinkEmployeeToRelease();
-  const unlinkEmployeeFromRelease = useUnlinkEmployeeFromRelease();
+  const linkEmployeeToEngagement = useLinkEmployeeToEngagement();
+  const unlinkEmployeeFromEngagement = useUnlinkEmployeeFromEngagement();
 
   const handleLinkOpportunity = async () => {
     if (!selectedEmployee || !selectedOpportunity) {
@@ -56,28 +56,28 @@ export default function RelationshipsPage() {
     }
   };
 
-  const handleLinkRelease = async () => {
-    if (!selectedEmployee || !selectedRelease) {
-      alert("Please select both an employee and a release");
+  const handleLinkEngagement = async () => {
+    if (!selectedEmployee || !selectedEngagement) {
+      alert("Please select both an employee and an engagement");
       return;
     }
     // Note: This test page requires manual entry of link data
     // In production, use the employee edit page which has the full form
-    alert("Please use the employee edit page to link releases with required fields (Role, Start Date, End Date, Project Rate, Delivery Center)");
+    alert("Please use the employee edit page to link engagements with required fields (Role, Start Date, End Date, Project Rate, Delivery Center)");
   };
 
-  const handleUnlinkRelease = async () => {
-    if (!selectedEmployee || !selectedRelease) {
-      alert("Please select both an employee and a release");
+  const handleUnlinkEngagement = async () => {
+    if (!selectedEmployee || !selectedEngagement) {
+      alert("Please select both an employee and an engagement");
       return;
     }
     try {
-      await unlinkEmployeeFromRelease.mutateAsync({
+      await unlinkEmployeeFromEngagement.mutateAsync({
         employeeId: selectedEmployee,
-        releaseId: selectedRelease,
+        engagementId: selectedEngagement,
       });
-      alert("Employee unlinked from release successfully!");
-      setSelectedRelease("");
+      alert("Employee unlinked from engagement successfully!");
+      setSelectedEngagement("");
     } catch (err) {
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -88,7 +88,7 @@ export default function RelationshipsPage() {
       <div className="mb-6">
         <h1 className="text-3xl font-bold text-gray-900">Manage Relationships</h1>
         <p className="text-gray-600 mt-1">
-          Link employees to opportunities and releases
+          Link employees to opportunities and engagements
         </p>
       </div>
 
@@ -157,16 +157,16 @@ export default function RelationshipsPage() {
           </CardContent>
         </Card>
 
-        {/* Employee-Release Relationships */}
+        {/* Employee-Engagement Relationships */}
         <Card>
           <CardHeader>
-            <CardTitle>Employee ↔ Release</CardTitle>
+            <CardTitle>Employee ↔ Engagement</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <Label htmlFor="employee-release">Employee</Label>
+              <Label htmlFor="employee-engagement">Employee</Label>
               <Select
-                id="employee-release"
+                id="employee-engagement"
                 value={selectedEmployee}
                 onChange={(e) => setSelectedEmployee(e.target.value)}
               >
@@ -180,16 +180,16 @@ export default function RelationshipsPage() {
             </div>
 
             <div>
-              <Label htmlFor="release-select">Release</Label>
+              <Label htmlFor="engagement-select">Engagement</Label>
               <Select
-                id="release-select"
-                value={selectedRelease}
-                onChange={(e) => setSelectedRelease(e.target.value)}
+                id="engagement-select"
+                value={selectedEngagement}
+                onChange={(e) => setSelectedEngagement(e.target.value)}
               >
-                <option value="">Select a release</option>
-                {releasesData?.items.map((release) => (
-                  <option key={release.id} value={release.id}>
-                    {release.name}
+                <option value="">Select an engagement</option>
+                {engagementsData?.items.map((engagement) => (
+                  <option key={engagement.id} value={engagement.id}>
+                    {engagement.name}
                   </option>
                 ))}
               </Select>
@@ -197,25 +197,25 @@ export default function RelationshipsPage() {
 
             <div className="flex gap-2 pt-2">
               <Button
-                onClick={handleLinkRelease}
+                onClick={handleLinkEngagement}
                 disabled={
                   !selectedEmployee ||
-                  !selectedRelease ||
-                  linkEmployeeToRelease.isPending
+                  !selectedEngagement ||
+                  linkEmployeeToEngagement.isPending
                 }
               >
-                {linkEmployeeToRelease.isPending ? "Linking..." : "Link"}
+                {linkEmployeeToEngagement.isPending ? "Linking..." : "Link"}
               </Button>
               <Button
                 variant="destructive"
-                onClick={handleUnlinkRelease}
+                onClick={handleUnlinkEngagement}
                 disabled={
                   !selectedEmployee ||
-                  !selectedRelease ||
-                  unlinkEmployeeFromRelease.isPending
+                  !selectedEngagement ||
+                  unlinkEmployeeFromEngagement.isPending
                 }
               >
-                {unlinkEmployeeFromRelease.isPending ? "Unlinking..." : "Unlink"}
+                {unlinkEmployeeFromEngagement.isPending ? "Unlinking..." : "Unlink"}
               </Button>
             </div>
           </CardContent>
@@ -229,7 +229,7 @@ export default function RelationshipsPage() {
         <CardContent>
           <ul className="list-disc list-inside space-y-2 text-gray-600">
             <li>Select an employee from the dropdown</li>
-            <li>Select a project or release to link/unlink</li>
+            <li>Select a project or engagement to link/unlink</li>
             <li>Click &quot;Link&quot; to create a relationship</li>
             <li>Click &quot;Unlink&quot; to remove a relationship</li>
             <li>You can view relationships by checking the employee details with include_relationships=true</li>

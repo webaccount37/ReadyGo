@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
-import { useReleases } from "@/hooks/useReleases";
+import { useEngagements } from "@/hooks/useEngagements";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Estimate } from "@/types/estimate";
@@ -42,17 +42,17 @@ export default function EstimatesPage() {
     }
   };
 
-  // Fetch releases to get opportunity and delivery center info
-  const { data: releasesData } = useReleases({ limit: 1000 });
+  // Fetch engagements to get opportunity and delivery center info
+  const { data: engagementsData } = useEngagements({ limit: 1000 });
 
-  // Group estimates by release
-  const groupedByRelease = useMemo(() => {
-    if (!data?.items || !releasesData?.items) return {};
+  // Group estimates by engagement
+  const groupedByEngagement = useMemo(() => {
+    if (!data?.items || !engagementsData?.items) return {};
 
     const grouped: Record<
       string,
       {
-        release: {
+        engagement: {
           id: string;
           name: string;
           opportunity_id?: string;
@@ -64,57 +64,57 @@ export default function EstimatesPage() {
       }
     > = {};
 
-    // Create a map of releases for quick lookup
-    const releasesMap = new Map(
-      releasesData.items.map((r) => [r.id, r])
+    // Create a map of engagements for quick lookup
+    const engagementsMap = new Map(
+      engagementsData.items.map((e) => [e.id, e])
     );
 
-    // Group estimates by release_id
+    // Group estimates by engagement_id
     data.items.forEach((estimate) => {
-      const releaseId = estimate.release_id;
-      if (!grouped[releaseId]) {
-        const release = releasesMap.get(releaseId);
-        if (release) {
-          grouped[releaseId] = {
-            release: {
-              id: release.id,
-              name: release.name,
-              opportunity_id: release.opportunity_id,
-              opportunity_name: release.opportunity_name,
-              delivery_center_id: release.delivery_center_id,
-              delivery_center_name: release.delivery_center_name,
+      const engagementId = estimate.engagement_id;
+      if (!grouped[engagementId]) {
+        const engagement = engagementsMap.get(engagementId);
+        if (engagement) {
+          grouped[engagementId] = {
+            engagement: {
+              id: engagement.id,
+              name: engagement.name,
+              opportunity_id: engagement.opportunity_id,
+              opportunity_name: engagement.opportunity_name,
+              delivery_center_id: engagement.delivery_center_id,
+              delivery_center_name: engagement.delivery_center_name,
             },
             estimates: [],
           };
         }
       }
-      if (grouped[releaseId]) {
-        grouped[releaseId].estimates.push(estimate);
+      if (grouped[engagementId]) {
+        grouped[engagementId].estimates.push(estimate);
       }
     });
 
-    // Sort estimates within each release by name
+    // Sort estimates within each engagement by name
     Object.values(grouped).forEach((group) => {
       group.estimates.sort((a, b) => a.name.localeCompare(b.name));
     });
 
     return grouped;
-  }, [data, releasesData]);
+  }, [data, engagementsData]);
 
   // Filter grouped data by search query
   const filteredGroups = useMemo(() => {
     if (!searchQuery.trim()) {
-      return groupedByRelease;
+      return groupedByEngagement;
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered: typeof groupedByRelease = {};
+    const filtered: typeof groupedByEngagement = {};
 
-    Object.entries(groupedByRelease).forEach(([releaseId, group]) => {
-      const releaseMatches =
-        group.release.name.toLowerCase().includes(query) ||
-        group.release.opportunity_name?.toLowerCase().includes(query) ||
-        group.release.delivery_center_name?.toLowerCase().includes(query);
+    Object.entries(groupedByEngagement).forEach(([engagementId, group]) => {
+      const engagementMatches =
+        group.engagement.name.toLowerCase().includes(query) ||
+        group.engagement.opportunity_name?.toLowerCase().includes(query) ||
+        group.engagement.delivery_center_name?.toLowerCase().includes(query);
 
       const matchingEstimates = group.estimates.filter(
         (estimate) =>
@@ -122,16 +122,16 @@ export default function EstimatesPage() {
           estimate.description?.toLowerCase().includes(query)
       );
 
-      if (releaseMatches || matchingEstimates.length > 0) {
-        filtered[releaseId] = {
+      if (engagementMatches || matchingEstimates.length > 0) {
+        filtered[engagementId] = {
           ...group,
-          estimates: releaseMatches ? group.estimates : matchingEstimates,
+          estimates: engagementMatches ? group.estimates : matchingEstimates,
         };
       }
     });
 
     return filtered;
-  }, [groupedByRelease, searchQuery]);
+  }, [groupedByEngagement, searchQuery]);
 
   const handleSetActive = async (estimateId: string) => {
     try {
@@ -169,7 +169,7 @@ export default function EstimatesPage() {
           <div className="flex gap-4">
             <div className="flex-1">
               <Input
-                placeholder="Search by release, opportunity, delivery center, or estimate name..."
+                placeholder="Search by engagement, opportunity, delivery center, or estimate name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -193,22 +193,22 @@ export default function EstimatesPage() {
       ) : (
         <div className="space-y-6">
           {Object.values(filteredGroups).map((group) => (
-            <Card key={group.release.id}>
+            <Card key={group.engagement.id}>
               <CardHeader>
                 <CardTitle className="text-xl">
-                  {highlightText(group.release.name, searchQuery)}
+                  {highlightText(group.engagement.name, searchQuery)}
                 </CardTitle>
                 <div className="flex gap-4 text-sm text-gray-600 mt-2">
-                  {group.release.opportunity_name && (
+                  {group.engagement.opportunity_name && (
                     <span>
                       <span className="font-semibold">Opportunity:</span>{" "}
-                      {group.release.opportunity_name}
+                      {group.engagement.opportunity_name}
                     </span>
                   )}
-                  {group.release.delivery_center_name && (
+                  {group.engagement.delivery_center_name && (
                     <span>
                       <span className="font-semibold">Delivery Center:</span>{" "}
-                      {group.release.delivery_center_name}
+                      {group.engagement.delivery_center_name}
                     </span>
                   )}
                 </div>

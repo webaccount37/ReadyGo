@@ -20,7 +20,7 @@ from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyH
 from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
-from app.db.repositories.release_repository import ReleaseRepository
+from app.db.repositories.engagement_repository import EngagementRepository
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours
 from app.models.role_rate import RoleRate
 from app.models.role import Role
@@ -46,23 +46,23 @@ class EstimateService(BaseService):
         self.role_rate_repo = RoleRateRepository(session)
         self.role_repo = RoleRepository(session)
         self.employee_repo = EmployeeRepository(session)
-        self.release_repo = ReleaseRepository(session)
+        self.engagement_repo = EngagementRepository(session)
     
     async def create_estimate(self, estimate_data: EstimateCreate) -> EstimateResponse:
         """Create a new estimate."""
-        # Get release to check for existing active estimate
-        release = await self.release_repo.get(estimate_data.release_id)
-        if not release:
-            raise ValueError("Release not found")
+        # Get engagement to check for existing active estimate
+        engagement = await self.engagement_repo.get(estimate_data.engagement_id)
+        if not engagement:
+            raise ValueError("Engagement not found")
         
         estimate_dict = estimate_data.model_dump(exclude_unset=True)
         
         # Auto-generate version name if name is "NEW", empty, or None
         name = estimate_dict.get("name")
         if not name or name.strip() == "" or name == "NEW":
-            # Get all existing estimates for this release to find the highest version number
-            existing_estimates = await self.estimate_repo.list_by_release(
-                release_id=estimate_data.release_id,
+            # Get all existing estimates for this engagement to find the highest version number
+            existing_estimates = await self.estimate_repo.list_by_engagement(
+                engagement_id=estimate_data.engagement_id,
                 skip=0,
                 limit=1000  # Get all estimates
             )
@@ -88,13 +88,13 @@ class EstimateService(BaseService):
         
         # Set active_version based on whether there's already an active estimate
         # If this is the first estimate or explicitly set, use the provided value
-        # Otherwise, ensure only one active estimate per release
+        # Otherwise, ensure only one active estimate per engagement
         if estimate_dict.get("active_version", False):
-            # If setting this as active, deactivate all other estimates for this release
-            await self._deactivate_other_estimates(estimate_data.release_id)
+            # If setting this as active, deactivate all other estimates for this engagement
+            await self._deactivate_other_estimates(estimate_data.engagement_id)
         else:
             # Check if there's already an active estimate
-            existing_active = await self._get_active_estimate(estimate_data.release_id)
+            existing_active = await self._get_active_estimate(estimate_data.engagement_id)
             if not existing_active:
                 # No active estimate exists, make this one active by default
                 estimate_dict["active_version"] = True
@@ -103,7 +103,7 @@ class EstimateService(BaseService):
         await self.session.flush()  # Flush to get estimate.id
         
         # Create default line items from active estimate if one exists
-        active_estimate = await self._get_active_estimate(estimate_data.release_id)
+        active_estimate = await self._get_active_estimate(estimate_data.engagement_id)
         if active_estimate and active_estimate.id != estimate.id:
             # Copy line items from active estimate
             active_line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
@@ -179,12 +179,12 @@ class EstimateService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
-        release_id: Optional[UUID] = None,
+        engagement_id: Optional[UUID] = None,
     ) -> Tuple[List[EstimateResponse], int]:
         """List estimates with optional filters."""
         filters = {}
-        if release_id:
-            filters["release_id"] = release_id
+        if engagement_id:
+            filters["engagement_id"] = engagement_id
         
         estimates = await self.estimate_repo.list(skip=skip, limit=limit, **filters)
         total = await self.estimate_repo.count(**filters)
@@ -203,9 +203,9 @@ class EstimateService(BaseService):
         
         update_dict = estimate_data.model_dump(exclude_unset=True)
         
-        # Handle active_version changes - ensure only one active estimate per release
+        # Handle active_version changes - ensure only one active estimate per engagement
         if "active_version" in update_dict and update_dict["active_version"]:
-            await self._deactivate_other_estimates(estimate.release_id)
+            await self._deactivate_other_estimates(estimate.engagement_id)
         
         updated = await self.estimate_repo.update(estimate_id, **update_dict)
         await self.session.commit()
@@ -222,13 +222,13 @@ class EstimateService(BaseService):
         return deleted
     
     async def set_active_version(self, estimate_id: UUID) -> Optional[EstimateResponse]:
-        """Set an estimate as the active version for its release."""
+        """Set an estimate as the active version for its engagement."""
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             return None
         
-        # Deactivate all other estimates for this release
-        await self._deactivate_other_estimates(estimate.release_id)
+        # Deactivate all other estimates for this engagement
+        await self._deactivate_other_estimates(estimate.engagement_id)
         
         # Set this estimate as active
         updated = await self.estimate_repo.update(estimate_id, active_version=True)
@@ -247,9 +247,9 @@ class EstimateService(BaseService):
         
         # Auto-generate version name if not provided
         if not new_name:
-            # Get all existing estimates for this release to find the highest version number
-            existing_estimates = await self.estimate_repo.list_by_release(
-                release_id=estimate.release_id,
+            # Get all existing estimates for this engagement to find the highest version number
+            existing_estimates = await self.estimate_repo.list_by_engagement(
+                engagement_id=estimate.engagement_id,
                 skip=0,
                 limit=1000  # Get all estimates
             )
@@ -275,7 +275,7 @@ class EstimateService(BaseService):
         
         # Create new estimate
         new_estimate_dict = {
-            "release_id": estimate.release_id,
+            "engagement_id": estimate.engagement_id,
             "name": new_name,
             "description": estimate.description,
             "attributes": estimate.attributes.copy() if estimate.attributes else {},
@@ -356,25 +356,25 @@ class EstimateService(BaseService):
         
         return Decimal("0"), Decimal("0")
     
-    async def _get_active_estimate(self, release_id: UUID) -> Optional[Estimate]:
-        """Get the active estimate for a release."""
+    async def _get_active_estimate(self, engagement_id: UUID) -> Optional[Estimate]:
+        """Get the active estimate for an engagement."""
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
-                    Estimate.release_id == release_id,
+                    Estimate.engagement_id == engagement_id,
                     Estimate.active_version == True
                 )
             )
         )
         return result.scalar_one_or_none()
     
-    async def _deactivate_other_estimates(self, release_id: UUID) -> None:
-        """Deactivate all estimates for a release except the current one being created."""
+    async def _deactivate_other_estimates(self, engagement_id: UUID) -> None:
+        """Deactivate all estimates for an engagement except the current one being created."""
         await self.session.execute(
             update(Estimate)
             .where(
                 and_(
-                    Estimate.release_id == release_id,
+                    Estimate.engagement_id == engagement_id,
                     Estimate.active_version == True
                 )
             )
@@ -392,16 +392,16 @@ class EstimateService(BaseService):
         if not estimate:
             raise ValueError("Estimate not found")
         
-        # Get release to get currency
-        release = await self.release_repo.get(estimate.release_id)
-        if not release:
-            raise ValueError("Release not found")
+        # Get engagement to get currency
+        engagement = await self.engagement_repo.get(estimate.engagement_id)
+        if not engagement:
+            raise ValueError("Engagement not found")
         
         # Convert role_id + delivery_center_id to role_rates_id if needed
         role_rates_id = line_item_data.role_rates_id
         if not role_rates_id and line_item_data.role_id and line_item_data.delivery_center_id:
-            # Get or create role rate - use currency from release
-            currency = line_item_data.currency or release.default_currency
+            # Get or create role rate - use currency from engagement
+            currency = line_item_data.currency or engagement.default_currency
             role_rate = await self._get_or_create_role_rate(
                 line_item_data.role_id,
                 line_item_data.delivery_center_id,
@@ -435,7 +435,7 @@ class EstimateService(BaseService):
             "employee_id": line_item_data.employee_id,
             "rate": rate,
             "cost": cost,
-            "currency": line_item_data.currency or release.default_currency,
+            "currency": line_item_data.currency or engagement.default_currency,
             "start_date": line_item_data.start_date,
             "end_date": line_item_data.end_date,
             "row_order": row_order,
@@ -495,10 +495,10 @@ class EstimateService(BaseService):
         
         # Convert role_id + delivery_center_id to role_rates_id if provided
         if "role_id" in update_dict and "delivery_center_id" in update_dict:
-            # Get currency from update_dict or existing line item or release
+            # Get currency from update_dict or existing line item or engagement
             estimate = await self.estimate_repo.get(estimate_id)
-            release = await self.release_repo.get(estimate.release_id) if estimate else None
-            currency = update_dict.get("currency") or line_item.currency or (release.default_currency if release else "USD")
+            engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
+            currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
             
             role_rate = await self._get_or_create_role_rate(
                 update_dict["role_id"],
@@ -787,21 +787,21 @@ class EstimateService(BaseService):
         
         inspector = inspect(estimate)
         
-        # Safely get release name and currency if loaded
-        release_name = None
-        release_currency = None
+        # Safely get engagement name and currency if loaded
+        engagement_name = None
+        engagement_currency = None
         opportunity_id = None
         opportunity_name = None
         try:
-            if inspector.attrs.release.loaded_value is not None:
-                release = inspector.attrs.release.loaded_value
-                if release:
-                    release_name = release.name
-                    release_currency = release.default_currency
-                    # Check if opportunity is loaded on release
-                    release_inspector = inspect(release)
-                    if release_inspector.attrs.opportunity.loaded_value is not None:
-                        opportunity = release_inspector.attrs.opportunity.loaded_value
+            if inspector.attrs.engagement.loaded_value is not None:
+                engagement = inspector.attrs.engagement.loaded_value
+                if engagement:
+                    engagement_name = engagement.name
+                    engagement_currency = engagement.default_currency
+                    # Check if opportunity is loaded on engagement
+                    engagement_inspector = inspect(engagement)
+                    if engagement_inspector.attrs.opportunity.loaded_value is not None:
+                        opportunity = engagement_inspector.attrs.opportunity.loaded_value
                         if opportunity:
                             opportunity_id = opportunity.id
                             opportunity_name = opportunity.name
@@ -829,14 +829,14 @@ class EstimateService(BaseService):
         
         estimate_dict = {
             "id": estimate.id,
-            "release_id": estimate.release_id,
+            "engagement_id": estimate.engagement_id,
             "name": estimate.name,
-            "currency": release_currency or "USD",  # Get currency from release
+            "currency": engagement_currency or "USD",  # Get currency from engagement
             "description": estimate.description,
             "active_version": estimate.active_version,
             "phases": phases_list,
             "attributes": estimate.attributes or {},
-            "release_name": release_name,
+            "engagement_name": engagement_name,
             "opportunity_id": opportunity_id,
             "opportunity_name": opportunity_name,
             "created_by": estimate.created_by,
@@ -919,7 +919,7 @@ class EstimateService(BaseService):
             start_date_iso = line_item.start_date.date().isoformat()
             logger.warning(f"  start_date was datetime! date()={line_item.start_date.date()}, isoformat={start_date_iso}")
         elif isinstance(line_item.start_date, date):
-            # Pure date object - call isoformat() directly (same as Release service)
+            # Pure date object - call isoformat() directly (same as Engagement service)
             start_date_iso = line_item.start_date.isoformat()
             logger.info(f"  start_date.isoformat() = {start_date_iso}")
         else:
@@ -930,7 +930,7 @@ class EstimateService(BaseService):
             end_date_iso = line_item.end_date.date().isoformat()
             logger.warning(f"  end_date was datetime! date()={line_item.end_date.date()}, isoformat={end_date_iso}")
         elif isinstance(line_item.end_date, date):
-            # Pure date object - call isoformat() directly (same as Release service)
+            # Pure date object - call isoformat() directly (same as Engagement service)
             end_date_iso = line_item.end_date.isoformat()
             logger.info(f"  end_date.isoformat() = {end_date_iso}")
         else:
@@ -939,8 +939,8 @@ class EstimateService(BaseService):
         logger.info(f"  === SERIALIZATION ===")
         logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
         
-        # Serialize dates directly as ISO strings (EXACTLY like Release/Opportunity services)
-        # Release service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
+        # Serialize dates directly as ISO strings (EXACTLY like Engagement/Opportunity services)
+        # Engagement service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
         # Get role_id and delivery_center_id from role_rate for backward compatibility
         role_id = None
         delivery_center_id = None
@@ -960,8 +960,8 @@ class EstimateService(BaseService):
             "rate": line_item.rate,
             "cost": line_item.cost,
             "currency": line_item.currency,
-            "start_date": start_date_iso,  # ISO string (same as Release service)
-            "end_date": end_date_iso,  # ISO string (same as Release service)
+            "start_date": start_date_iso,  # ISO string (same as Engagement service)
+            "end_date": end_date_iso,  # ISO string (same as Engagement service)
             "row_order": line_item.row_order,
             "billable": line_item.billable,
             "role_name": role_name,
@@ -975,7 +975,7 @@ class EstimateService(BaseService):
             if weekly_hours_attr and weekly_hours_attr.loaded_value is not None:
                 weekly_hours_list = weekly_hours_attr.loaded_value
                 if weekly_hours_list:
-                    # Build dicts directly, serializing dates as ISO strings (same as Release service)
+                    # Build dicts directly, serializing dates as ISO strings (same as Engagement service)
                     line_item_dict["weekly_hours"] = [
                         {
                             "id": wh.id,

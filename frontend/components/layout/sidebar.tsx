@@ -46,7 +46,7 @@ const navGroups: NavGroup[] = [
   {
     title: "Project Delivery",
     items: [
-      { title: "Releases", href: "/releases", icon: Package },
+      { title: "Engagements", href: "/engagements", icon: Package },
       { title: "Estimates", href: "/estimates", icon: Calculator },
       { title: "Quoting", href: "#", comingSoon: true, icon: FileCheck },
       { title: "Forecast", href: "#", comingSoon: true, icon: TrendingUp },

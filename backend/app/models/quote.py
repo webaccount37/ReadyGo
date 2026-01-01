@@ -42,7 +42,7 @@ class Quote(Base):
     __tablename__ = "quotes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    release_id = Column(UUID(as_uuid=True), ForeignKey("releases.id"), nullable=False, index=True)
+    engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id"), nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True)
     currency = Column(String(3), nullable=False, default="USD")
     status = Column(
@@ -55,7 +55,7 @@ class Quote(Base):
     attributes = Column(JSON, nullable=True, default=dict)
     
     # Relationships
-    release = relationship("Release", back_populates="quotes")
+    engagement = relationship("Engagement", back_populates="quotes")
     created_by_employee = relationship("Employee", foreign_keys=[created_by])
     line_items = relationship("QuoteLineItem", back_populates="quote", cascade="all, delete-orphan", order_by="QuoteLineItem.row_order")
     phases = relationship("QuotePhase", back_populates="quote", cascade="all, delete-orphan", order_by="QuotePhase.row_order")

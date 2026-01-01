@@ -20,10 +20,10 @@ class QuoteRepository(BaseRepository[Quote]):
     
     def _base_query(self):
         """Base query with eager loading of relationships."""
-        from app.models.release import Release
+        from app.models.engagement import Engagement
         
         return select(Quote).options(
-            selectinload(Quote.release).selectinload(Release.opportunity),
+            selectinload(Quote.engagement).selectinload(Engagement.opportunity),
             selectinload(Quote.created_by_employee),
             selectinload(Quote.phases),
         )
@@ -63,14 +63,14 @@ class QuoteRepository(BaseRepository[Quote]):
         result = await self.session.execute(query)
         return result.scalar_one()
     
-    async def list_by_release(
+    async def list_by_engagement(
         self,
-        release_id: UUID,
+        engagement_id: UUID,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Quote]:
-        """List quotes by release."""
-        query = self._base_query().where(Quote.release_id == release_id)
+        """List quotes by engagement."""
+        query = self._base_query().where(Quote.engagement_id == engagement_id)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -90,13 +90,13 @@ class QuoteRepository(BaseRepository[Quote]):
     async def get_with_line_items(self, quote_id: UUID) -> Optional[Quote]:
         """Get quote with all line items and weekly hours."""
         from app.models.quote import QuoteLineItem, QuoteWeeklyHours
-        from app.models.release import Release
+        from app.models.engagement import Engagement
         from app.models.opportunity import Opportunity
         
         result = await self.session.execute(
             select(Quote)
             .options(
-                selectinload(Quote.release).selectinload(Release.opportunity),
+                selectinload(Quote.engagement).selectinload(Engagement.opportunity),
                 selectinload(Quote.created_by_employee),
                 selectinload(Quote.phases),
                 selectinload(Quote.line_items)

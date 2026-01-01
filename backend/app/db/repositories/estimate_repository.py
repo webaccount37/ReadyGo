@@ -20,10 +20,10 @@ class EstimateRepository(BaseRepository[Estimate]):
     
     def _base_query(self):
         """Base query with eager loading of relationships."""
-        from app.models.release import Release
+        from app.models.engagement import Engagement
         
         return select(Estimate).options(
-            selectinload(Estimate.release).selectinload(Release.opportunity),
+            selectinload(Estimate.engagement).selectinload(Engagement.opportunity),
             selectinload(Estimate.created_by_employee),
             selectinload(Estimate.phases),
         )
@@ -63,14 +63,14 @@ class EstimateRepository(BaseRepository[Estimate]):
         result = await self.session.execute(query)
         return result.scalar_one()
     
-    async def list_by_release(
+    async def list_by_engagement(
         self,
-        release_id: UUID,
+        engagement_id: UUID,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Estimate]:
-        """List estimates by release."""
-        query = self._base_query().where(Estimate.release_id == release_id)
+        """List estimates by engagement."""
+        query = self._base_query().where(Estimate.engagement_id == engagement_id)
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -78,7 +78,7 @@ class EstimateRepository(BaseRepository[Estimate]):
     async def get_with_line_items(self, estimate_id: UUID) -> Optional[Estimate]:
         """Get estimate with all line items and weekly hours."""
         from app.models.estimate import EstimateLineItem, EstimateWeeklyHours
-        from app.models.release import Release
+        from app.models.engagement import Engagement
         from app.models.role_rate import RoleRate
         from app.models.role import Role
         from app.models.delivery_center import DeliveryCenter
@@ -86,7 +86,7 @@ class EstimateRepository(BaseRepository[Estimate]):
         result = await self.session.execute(
             select(Estimate)
             .options(
-                selectinload(Estimate.release).selectinload(Release.opportunity),
+                selectinload(Estimate.engagement).selectinload(Engagement.opportunity),
                 selectinload(Estimate.created_by_employee),
                 selectinload(Estimate.phases),
                 selectinload(Estimate.line_items)

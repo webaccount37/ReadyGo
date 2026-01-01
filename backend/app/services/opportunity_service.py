@@ -14,13 +14,13 @@ from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
-from app.db.repositories.release_repository import ReleaseRepository
+from app.db.repositories.engagement_repository import EngagementRepository
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate, OpportunityResponse
 from app.models.opportunity import OpportunityStatus
 from app.utils.currency_converter import convert_to_usd
 from sqlalchemy import select, and_
 from app.models.estimate import Estimate, EstimateLineItem
-from app.models.release import Release
+from app.models.engagement import Engagement
 
 
 class OpportunityService(BaseService):
@@ -33,7 +33,7 @@ class OpportunityService(BaseService):
         self.role_repo = RoleRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.line_item_repo = EstimateLineItemRepository(session)
-        self.release_repo = ReleaseRepository(session)
+        self.engagement_repo = EngagementRepository(session)
     
     @staticmethod
     def calculate_probability_from_status(status: OpportunityStatus) -> float:
@@ -336,21 +336,21 @@ class OpportunityService(BaseService):
         return True
     
     async def _get_employees_from_active_estimates_for_opportunity(self, opportunity_id: UUID) -> List[dict]:
-        """Get employees from active estimate line items for all releases in an opportunity."""
-        # Get all releases for this opportunity
-        releases_result = await self.session.execute(
-            select(Release).where(Release.opportunity_id == opportunity_id)
+        """Get employees from active estimate line items for all engagements in an opportunity."""
+        # Get all engagements for this opportunity
+        engagements_result = await self.session.execute(
+            select(Engagement).where(Engagement.opportunity_id == opportunity_id)
         )
-        releases = releases_result.scalars().all()
+        engagements = engagements_result.scalars().all()
         
         employees_dict = {}  # employee_id -> employee data
         
-        for release in releases:
-            # Get active estimate for this release
+        for engagement in engagements:
+            # Get active estimate for this engagement
             estimate_result = await self.session.execute(
                 select(Estimate).where(
                     and_(
-                        Estimate.release_id == release.id,
+                        Estimate.engagement_id == engagement.id,
                         Estimate.active_version == True
                     )
                 )
@@ -402,13 +402,13 @@ class OpportunityService(BaseService):
         
         return list(employees_dict.values())
     
-    async def _get_employees_from_active_estimates_for_release(self, release_id: UUID) -> List[dict]:
-        """Get employees from active estimate line items for a release."""
-        # Get active estimate for this release
+    async def _get_employees_from_active_estimates_for_engagement(self, engagement_id: UUID) -> List[dict]:
+        """Get employees from active estimate line items for an engagement."""
+        # Get active estimate for this engagement
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
-                    Estimate.release_id == release_id,
+                    Estimate.engagement_id == engagement_id,
                     Estimate.active_version == True
                 )
             )
@@ -530,7 +530,7 @@ class OpportunityService(BaseService):
             employees = await self._get_employees_from_active_estimates_for_opportunity(opportunity.id)
             opportunity_dict["employees"] = employees
         else:
-            opportunity_dict["releases"] = []
+            opportunity_dict["engagements"] = []
             opportunity_dict["employees"] = []
         
         return OpportunityResponse.model_validate(opportunity_dict)

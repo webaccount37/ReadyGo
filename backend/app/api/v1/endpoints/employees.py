@@ -16,9 +16,9 @@ from app.schemas.employee import (
 )
 from app.schemas.relationships import (
     LinkEmployeesToOpportunityRequest,
-    LinkEmployeesToReleaseRequest,
+    LinkEmployeesToEngagementRequest,
     LinkEmployeeToOpportunityRequest,
-    LinkEmployeeToReleaseRequest,
+    LinkEmployeeToEngagementRequest,
     UnlinkRequest,
 )
 
@@ -128,7 +128,7 @@ async def link_employee_to_opportunity(
         controller = EmployeeController(db)
         request = LinkEmployeesToOpportunityRequest(
             employee_ids=[employee_id],
-            releases=link_data.releases,
+            engagements=link_data.engagements,
         )
         success = await controller.link_employees_to_opportunity(opportunity_id, request)
         if not success:
@@ -176,16 +176,16 @@ async def unlink_employee_from_opportunity(
         )
 
 
-@router.post("/{employee_id}/releases/{release_id}/link", status_code=status.HTTP_204_NO_CONTENT)
-async def link_employee_to_release(
+@router.post("/{employee_id}/engagements/{engagement_id}/link", status_code=status.HTTP_204_NO_CONTENT)
+async def link_employee_to_engagement(
     employee_id: UUID,
-    release_id: UUID,
-    link_data: LinkEmployeeToReleaseRequest,
+    engagement_id: UUID,
+    link_data: LinkEmployeeToEngagementRequest,
     db: AsyncSession = Depends(get_db),
 ):
-    """Link an employee to a release with required association fields."""
+    """Link an employee to an engagement with required association fields."""
     controller = EmployeeController(db)
-    request = LinkEmployeesToReleaseRequest(
+    request = LinkEmployeesToEngagementRequest(
         employee_ids=[employee_id],
         role_id=link_data.role_id,
         start_date=link_data.start_date,
@@ -193,28 +193,28 @@ async def link_employee_to_release(
         project_rate=link_data.project_rate,
         delivery_center=link_data.delivery_center,
     )
-    success = await controller.link_employees_to_release(release_id, request)
+    success = await controller.link_employees_to_engagement(engagement_id, request)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Employee or release not found",
+            detail="Employee or engagement not found",
         )
 
 
-@router.delete("/{employee_id}/releases/{release_id}/unlink", status_code=status.HTTP_204_NO_CONTENT)
-async def unlink_employee_from_release(
+@router.delete("/{employee_id}/engagements/{engagement_id}/unlink", status_code=status.HTTP_204_NO_CONTENT)
+async def unlink_employee_from_engagement(
     employee_id: UUID,
-    release_id: UUID,
+    engagement_id: UUID,
     db: AsyncSession = Depends(get_db),
 ):
-    """Unlink an employee from a release."""
+    """Unlink an employee from an engagement."""
     controller = EmployeeController(db)
     request = UnlinkRequest(ids=[employee_id])
-    success = await controller.unlink_employees_from_release(release_id, request)
+    success = await controller.unlink_employees_from_engagement(engagement_id, request)
     if not success:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Employee or release not found",
+            detail="Employee or engagement not found",
         )
 
 

@@ -47,14 +47,14 @@ export default function HomePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Releases</CardTitle>
+            <CardTitle>Engagements</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-gray-600 mb-4">
-              Manage project releases and iterations.
+              Manage project engagements and iterations.
             </p>
-            <Link href="/releases">
-              <Button>View Releases</Button>
+            <Link href="/engagements">
+              <Button>View Engagements</Button>
             </Link>
           </CardContent>
         </Card>

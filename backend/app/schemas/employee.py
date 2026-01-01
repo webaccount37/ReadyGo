@@ -75,7 +75,7 @@ class EmployeeUpdate(BaseModel):
 
 
 class OpportunityReference(BaseModel):
-    """Opportunity reference (no association fields - fields are on releases)."""
+    """Opportunity reference (no association fields - fields are on engagements)."""
     id: UUID
     name: str
     role_id: Optional[UUID] = None
@@ -89,11 +89,11 @@ class OpportunityReference(BaseModel):
         from_attributes = True
 
 
-class ReleaseReference(BaseModel):
-    """Release reference with association fields."""
+class EngagementReference(BaseModel):
+    """Engagement reference with association fields."""
     id: UUID
     name: str
-    opportunity_id: UUID  # Include opportunity_id to group releases by opportunity
+    opportunity_id: UUID  # Include opportunity_id to group engagements by opportunity
     role_id: Optional[UUID] = None
     role_name: Optional[str] = None
     start_date: Optional[str] = None  # ISO date string
@@ -109,7 +109,7 @@ class EmployeeResponse(EmployeeBase):
     """Schema for employee response."""
     id: UUID
     opportunities: Optional[List[OpportunityReference]] = None
-    releases: Optional[List[ReleaseReference]] = None
+    engagements: Optional[List[EngagementReference]] = None
     
     class Config:
         from_attributes = True

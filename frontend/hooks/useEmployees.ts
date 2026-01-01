@@ -113,8 +113,8 @@ export function useDeleteEmployee(
  */
 export function useLinkEmployeeToOpportunity(
   options?: UseMutationOptions<void, Error, { employeeId: string; opportunityId: string; linkData: {
-    releases: Array<{
-      release_id: string;
+    engagements: Array<{
+      engagement_id: string;
       role_id: string;
       start_date: string;
       end_date: string;
@@ -126,8 +126,8 @@ export function useLinkEmployeeToOpportunity(
   const queryClient = useQueryClient();
 
   return useMutation<void, Error, { employeeId: string; opportunityId: string; linkData: {
-    releases: Array<{
-      release_id: string;
+    engagements: Array<{
+      engagement_id: string;
       role_id: string;
       start_date: string;
       end_date: string;
@@ -141,11 +141,11 @@ export function useLinkEmployeeToOpportunity(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
-      // Invalidate release queries since linking to opportunity also creates release associations
-      queryClient.invalidateQueries({ queryKey: ["releases"] });
-      // Invalidate each release detail query that was linked
-      variables.linkData.releases.forEach(release => {
-        queryClient.invalidateQueries({ queryKey: ["releases", "detail", release.release_id] });
+      // Invalidate engagement queries since linking to opportunity also creates engagement associations
+      queryClient.invalidateQueries({ queryKey: ["engagements"] });
+      // Invalidate each engagement detail query that was linked
+      variables.linkData.engagements.forEach(engagement => {
+        queryClient.invalidateQueries({ queryKey: ["engagements", "detail", engagement.engagement_id] });
       });
     },
     ...options,
@@ -167,18 +167,18 @@ export function useUnlinkEmployeeFromOpportunity(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
-      // Invalidate release queries since unlinking from opportunity may affect release associations
-      queryClient.invalidateQueries({ queryKey: ["releases"] });
+      // Invalidate engagement queries since unlinking from opportunity may affect engagement associations
+      queryClient.invalidateQueries({ queryKey: ["engagements"] });
     },
     ...options,
   });
 }
 
 /**
- * Link employee to a release.
+ * Link employee to an engagement.
  */
-export function useLinkEmployeeToRelease(
-  options?: UseMutationOptions<void, Error, { employeeId: string; releaseId: string; linkData: {
+export function useLinkEmployeeToEngagement(
+  options?: UseMutationOptions<void, Error, { employeeId: string; engagementId: string; linkData: {
     role_id: string;
     start_date: string;
     end_date: string;
@@ -188,47 +188,47 @@ export function useLinkEmployeeToRelease(
 ) {
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, { employeeId: string; releaseId: string; linkData: {
+  return useMutation<void, Error, { employeeId: string; engagementId: string; linkData: {
     role_id: string;
     start_date: string;
     end_date: string;
     project_rate: number;
     delivery_center: string;
   } }>({
-    mutationFn: ({ employeeId, releaseId, linkData }) =>
-      employeesApi.linkEmployeeToRelease(employeeId, releaseId, linkData),
+    mutationFn: ({ employeeId, engagementId, linkData }) =>
+      employeesApi.linkEmployeeToEngagement(employeeId, engagementId, linkData),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
-      // Invalidate all release queries including detail queries with relationships
-      queryClient.invalidateQueries({ queryKey: ["releases"] });
-      // Specifically invalidate the release detail query for this release (with and without relationships)
-      queryClient.invalidateQueries({ queryKey: ["releases", "detail", variables.releaseId] });
+      // Invalidate all engagement queries including detail queries with relationships
+      queryClient.invalidateQueries({ queryKey: ["engagements"] });
+      // Specifically invalidate the engagement detail query for this engagement (with and without relationships)
+      queryClient.invalidateQueries({ queryKey: ["engagements", "detail", variables.engagementId] });
     },
     ...options,
   });
 }
 
 /**
- * Unlink employee from a release.
+ * Unlink employee from an engagement.
  */
-export function useUnlinkEmployeeFromRelease(
-  options?: UseMutationOptions<void, Error, { employeeId: string; releaseId: string }>
+export function useUnlinkEmployeeFromEngagement(
+  options?: UseMutationOptions<void, Error, { employeeId: string; engagementId: string }>
 ) {
   const queryClient = useQueryClient();
 
-  return useMutation<void, Error, { employeeId: string; releaseId: string }>({
-    mutationFn: ({ employeeId, releaseId }) =>
-      employeesApi.unlinkEmployeeFromRelease(employeeId, releaseId),
+  return useMutation<void, Error, { employeeId: string; engagementId: string }>({
+    mutationFn: ({ employeeId, engagementId }) =>
+      employeesApi.unlinkEmployeeFromEngagement(employeeId, engagementId),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
-      // Invalidate all release queries including detail queries with relationships
-      queryClient.invalidateQueries({ queryKey: ["releases"] });
-      // Specifically invalidate the release detail query for this release (with and without relationships)
-      queryClient.invalidateQueries({ queryKey: ["releases", "detail", variables.releaseId] });
+      // Invalidate all engagement queries including detail queries with relationships
+      queryClient.invalidateQueries({ queryKey: ["engagements"] });
+      // Specifically invalidate the engagement detail query for this engagement (with and without relationships)
+      queryClient.invalidateQueries({ queryKey: ["engagements", "detail", variables.engagementId] });
     },
     ...options,
   });

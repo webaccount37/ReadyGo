@@ -19,7 +19,7 @@ from app.db.repositories.quote_weekly_hours_repository import QuoteWeeklyHoursRe
 from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
-from app.db.repositories.release_repository import ReleaseRepository
+from app.db.repositories.engagement_repository import EngagementRepository
 from app.models.quote import Quote, QuoteLineItem, QuoteWeeklyHours, QuoteStatus
 from app.models.role_rate import RoleRate
 from app.models.role import Role
@@ -45,42 +45,42 @@ class QuoteService(BaseService):
         self.role_rate_repo = RoleRateRepository(session)
         self.role_repo = RoleRepository(session)
         self.employee_repo = EmployeeRepository(session)
-        self.release_repo = ReleaseRepository(session)
+        self.engagement_repo = EngagementRepository(session)
     
     async def create_quote(self, quote_data: QuoteCreate) -> QuoteResponse:
         """Create a new quote."""
-        # Get release with employee associations to inherit employees
-        # Use the same method the Release service uses to get correct dates
-        release = await self.release_repo.get_with_relationships(quote_data.release_id)
-        if not release:
-            raise ValueError("Release not found")
+        # Get engagement with employee associations to inherit employees
+        # Use the same method the Engagement service uses to get correct dates
+        engagement = await self.engagement_repo.get_with_relationships(quote_data.engagement_id)
+        if not engagement:
+            raise ValueError("Engagement not found")
         
-        # Also get the release via ReleaseService to ensure we have the same data structure
-        # This ensures dates are handled the same way as the Release page
-        from app.services.release_service import ReleaseService
-        release_service = ReleaseService(self.session)
-        release_response = await release_service.get_release_with_relationships(quote_data.release_id)
-        if not release_response:
-            raise ValueError("Release not found")
+        # Also get the engagement via EngagementService to ensure we have the same data structure
+        # This ensures dates are handled the same way as the Engagement page
+        from app.services.engagement_service import EngagementService
+        engagement_service = EngagementService(self.session)
+        engagement_response = await engagement_service.get_engagement_with_relationships(quote_data.engagement_id)
+        if not engagement_response:
+            raise ValueError("Engagement not found")
         
         quote_dict = quote_data.model_dump(exclude_unset=True)
-        if not quote_dict.get("currency") and release.default_currency:
-            quote_dict["currency"] = release.default_currency
+        if not quote_dict.get("currency") and engagement.default_currency:
+            quote_dict["currency"] = engagement.default_currency
         
         quote = await self.quote_repo.create(**quote_dict)
         await self.session.flush()  # Flush to get quote.id
         
-        # Create default line items from release employees
-        # Get the release response to use the same dates that the Release page shows
-        from app.services.release_service import ReleaseService
-        release_service = ReleaseService(self.session)
-        release_response = await release_service.get_release_with_relationships(quote_data.release_id)
+        # Create default line items from engagement employees
+        # Get the engagement response to use the same dates that the Engagement page shows
+        from app.services.engagement_service import EngagementService
+        engagement_service = EngagementService(self.session)
+        engagement_response = await engagement_service.get_engagement_with_relationships(quote_data.engagement_id)
         
-        # Create a map of employee_id -> dates from the release response (these are correct)
+        # Create a map of employee_id -> dates from the engagement response (these are correct)
         employee_date_map = {}
-        if release_response and release_response.employees:
-            logger.info(f"Release response has {len(release_response.employees)} employees")
-            for emp in release_response.employees:
+        if engagement_response and engagement_response.employees:
+            logger.info(f"Engagement response has {len(engagement_response.employees)} employees")
+            for emp in engagement_response.employees:
                 if emp.get("start_date") and emp.get("end_date"):
                     employee_date_map[emp["id"]] = {
                         "start_date": emp["start_date"],
@@ -89,11 +89,11 @@ class QuoteService(BaseService):
                     logger.info(f"  Mapped employee {emp['id']}: start_date={emp['start_date']}, end_date={emp['end_date']}")
         logger.info(f"Created employee_date_map with {len(employee_date_map)} entries")
         
-        if release.employee_associations:
-            logger.info(f"Creating default line items from {len(release.employee_associations)} release employees for quote {quote.id}")
+        if engagement.employee_associations:
+            logger.info(f"Creating default line items from {len(engagement.employee_associations)} engagement employees for quote {quote.id}")
             row_order = 0
             
-            for emp_assoc in release.employee_associations:
+            for emp_assoc in engagement.employee_associations:
                 logger.info(f"  Processing employee {emp_assoc.employee_id}, role {emp_assoc.role_id}, dc {emp_assoc.delivery_center_id}")
                 
                 # LOG: What does Release service see?
@@ -105,7 +105,7 @@ class QuoteService(BaseService):
                 if isinstance(emp_assoc.end_date, date):
                     logger.info(f"  emp_assoc.end_date.isoformat() = {emp_assoc.end_date.isoformat()}")
                 
-                # Use project_rate from EmployeeRelease association as the rate
+                # Use project_rate from EmployeeEngagement association as the rate
                 # Get cost from employee's internal_cost_rate
                 employee = await self.employee_repo.get(emp_assoc.employee_id)
                 if employee:
@@ -126,7 +126,7 @@ class QuoteService(BaseService):
                 # Release service does: assoc.start_date.isoformat() which produces "2025-12-31"
                 # We must use the exact same date objects, ensuring no timezone conversion
                 
-                # Extract dates exactly as they are stored in EmployeeRelease
+                # Extract dates exactly as they are stored in EmployeeEngagement
                 # Use year/month/day directly to avoid any timezone conversion
                 if isinstance(emp_assoc.start_date, date):
                     # Pure date object - use directly (same as Release service does)
@@ -218,9 +218,9 @@ class QuoteService(BaseService):
                     logger.info(f"  line_item.end_date.date().isoformat() = {line_item.end_date.date().isoformat()}")
                 row_order += 1
             
-            logger.info(f"Created {row_order} default line items from release employees")
+            logger.info(f"Created {row_order} default line items from engagement employees")
         else:
-            logger.warning(f"Release {quote_data.release_id} has no employee associations")
+            logger.warning(f"Engagement {quote_data.engagement_id} has no employee associations")
         
         await self.session.commit()
         
@@ -259,13 +259,13 @@ class QuoteService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
-        release_id: Optional[UUID] = None,
+        engagement_id: Optional[UUID] = None,
         status: Optional[str] = None,
     ) -> Tuple[List[QuoteResponse], int]:
         """List quotes with optional filters."""
         filters = {}
-        if release_id:
-            filters["release_id"] = release_id
+        if engagement_id:
+            filters["engagement_id"] = engagement_id
         if status:
             try:
                 filters["status"] = QuoteStatus(status)
@@ -310,7 +310,7 @@ class QuoteService(BaseService):
         
         # Create new quote
         new_quote_dict = {
-            "release_id": quote.release_id,
+            "engagement_id": quote.engagement_id,
             "name": new_name,
             "currency": quote.currency,
             "status": QuoteStatus.DRAFT,
@@ -454,7 +454,7 @@ class QuoteService(BaseService):
         
         # Sync to EmployeeRelease if employee is assigned
         if line_item.employee_id:
-            await self._sync_line_item_to_employee_release(line_item, quote.release_id)
+            await self._sync_line_item_to_employee_engagement(line_item, quote.engagement_id)
         
         await self.session.commit()
         
@@ -463,18 +463,18 @@ class QuoteService(BaseService):
             raise ValueError("Failed to retrieve created line item")
         return self._line_item_to_response(line_item)
     
-    async def _sync_line_item_to_employee_release(self, line_item: QuoteLineItem, release_id: UUID) -> None:
-        """Sync a quote line item to EmployeeRelease association."""
-        from app.models.association_models import EmployeeRelease
+    async def _sync_line_item_to_employee_engagement(self, line_item: QuoteLineItem, engagement_id: UUID) -> None:
+        """Sync a quote line item to EmployeeEngagement association."""
+        from app.models.employee_engagement import EmployeeEngagement
         
         if not line_item.employee_id:
             return  # No employee assigned, nothing to sync
         
-        # Check if EmployeeRelease association already exists
+        # Check if EmployeeEngagement association already exists
         result = await self.session.execute(
-            select(EmployeeRelease).where(
-                EmployeeRelease.release_id == release_id,
-                EmployeeRelease.employee_id == line_item.employee_id
+            select(EmployeeEngagement).where(
+                EmployeeEngagement.engagement_id == engagement_id,
+                EmployeeEngagement.employee_id == line_item.employee_id
             )
         )
         association = result.scalar_one_or_none()
@@ -485,27 +485,50 @@ class QuoteService(BaseService):
             association.start_date = line_item.start_date
             association.end_date = line_item.end_date
             association.project_rate = float(line_item.rate)  # Use rate as project_rate
-            association.delivery_center_id = line_item.delivery_center_id
-            logger.info(f"Updated EmployeeRelease: employee_id={line_item.employee_id}, release_id={release_id}")
+            # Get delivery center code from delivery_center_id
+            if line_item.delivery_center_id:
+                from app.models.delivery_center import DeliveryCenter
+                dc_result = await self.session.execute(
+                    select(DeliveryCenter).where(DeliveryCenter.id == line_item.delivery_center_id)
+                )
+                dc = dc_result.scalar_one_or_none()
+                if dc:
+                    association.delivery_center = dc.code
+            logger.info(f"Updated EmployeeEngagement: employee_id={line_item.employee_id}, engagement_id={engagement_id}")
         else:
+            # Get delivery center code from delivery_center_id
+            delivery_center_code = None
+            if line_item.delivery_center_id:
+                from app.models.delivery_center import DeliveryCenter
+                dc_result = await self.session.execute(
+                    select(DeliveryCenter).where(DeliveryCenter.id == line_item.delivery_center_id)
+                )
+                dc = dc_result.scalar_one_or_none()
+                if dc:
+                    delivery_center_code = dc.code
+            
+            if not delivery_center_code:
+                logger.warning(f"Could not find delivery center for line item {line_item.id}")
+                return
+            
             # Create new association
-            association = EmployeeRelease(
+            association = EmployeeEngagement(
                 employee_id=line_item.employee_id,
-                release_id=release_id,
+                engagement_id=engagement_id,
                 role_id=line_item.role_id,
                 start_date=line_item.start_date,
                 end_date=line_item.end_date,
                 project_rate=float(line_item.rate),  # Use rate as project_rate
-                delivery_center_id=line_item.delivery_center_id,
+                delivery_center=delivery_center_code,
             )
             self.session.add(association)
-            logger.info(f"Created EmployeeRelease: employee_id={line_item.employee_id}, release_id={release_id}")
+            logger.info(f"Created EmployeeEngagement: employee_id={line_item.employee_id}, engagement_id={engagement_id}")
     
-    async def _sync_employee_with_release(self, quote_id: UUID, employee_id: UUID) -> None:
-        """Remove employee from release if they're no longer in any quote line items."""
-        from app.models.association_models import EmployeeRelease
+    async def _sync_employee_with_engagement(self, quote_id: UUID, employee_id: UUID) -> None:
+        """Remove employee from engagement if they're no longer in any quote line items."""
+        from app.models.employee_engagement import EmployeeEngagement
         
-        # Get the quote to find the release
+        # Get the quote to find the engagement
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return
@@ -517,14 +540,14 @@ class QuoteService(BaseService):
         )
         
         if not employee_still_in_quote:
-            # Employee is no longer in any line items, remove from release
-            logger.info(f"Employee {employee_id} no longer in quote {quote_id}, removing from release {quote.release_id}")
+            # Employee is no longer in any line items, remove from engagement
+            logger.info(f"Employee {employee_id} no longer in quote {quote_id}, removing from engagement {quote.engagement_id}")
             
-            # Find and delete the EmployeeRelease association
+            # Find and delete the EmployeeEngagement association
             result = await self.session.execute(
-                select(EmployeeRelease).where(
-                    EmployeeRelease.release_id == quote.release_id,
-                    EmployeeRelease.employee_id == employee_id
+                select(EmployeeEngagement).where(
+                    EmployeeEngagement.engagement_id == quote.engagement_id,
+                    EmployeeEngagement.employee_id == employee_id
                 )
             )
             association = result.scalar_one_or_none()
@@ -532,7 +555,7 @@ class QuoteService(BaseService):
             if association:
                 await self.session.delete(association)
                 await self.session.commit()
-                logger.info(f"Removed employee {employee_id} from release {quote.release_id}")
+                logger.info(f"Removed employee {employee_id} from engagement {quote.engagement_id}")
     
     async def update_line_item(
         self,
@@ -573,7 +596,7 @@ class QuoteService(BaseService):
         updated = await self.line_item_repo.update(line_item_id, **update_dict)
         await self.session.flush()  # Flush to get updated values
         
-        # Get the quote to access release_id
+        # Get the quote to access engagement_id
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return None
@@ -581,13 +604,13 @@ class QuoteService(BaseService):
         # Check if employee was removed or changed - if so, check if old employee should be removed from release
         new_employee_id = update_dict.get("employee_id", old_employee_id)
         if old_employee_id and old_employee_id != new_employee_id:
-            await self._sync_employee_with_release(quote_id, old_employee_id)
+            await self._sync_employee_with_engagement(quote_id, old_employee_id)
         
         # Sync to EmployeeRelease if employee is assigned (new or existing)
         if new_employee_id:
             updated_line_item = await self.line_item_repo.get(line_item_id)
             if updated_line_item:
-                await self._sync_line_item_to_employee_release(updated_line_item, quote.release_id)
+                await self._sync_line_item_to_employee_engagement(updated_line_item, quote.engagement_id)
         
         await self.session.commit()
         
@@ -627,7 +650,7 @@ class QuoteService(BaseService):
             
             # Check if employee should be removed from release
             if employee_id_to_check:
-                await self._sync_employee_with_release(quote_id, employee_id_to_check)
+                await self._sync_employee_with_engagement(quote_id, employee_id_to_check)
         else:
             logger.warning(f"Delete operation returned False for line item {line_item_id}")
             await self.session.rollback()
@@ -845,19 +868,19 @@ class QuoteService(BaseService):
         
         inspector = inspect(quote)
         
-        # Safely get release name if loaded
-        release_name = None
+        # Safely get engagement name if loaded
+        engagement_name = None
         opportunity_id = None
         opportunity_name = None
         try:
-            if inspector.attrs.release.loaded_value is not None:
-                release = inspector.attrs.release.loaded_value
-                if release:
-                    release_name = release.name
-                    # Check if opportunity is loaded on release
-                    release_inspector = inspect(release)
-                    if release_inspector.attrs.opportunity.loaded_value is not None:
-                        opportunity = release_inspector.attrs.opportunity.loaded_value
+            if inspector.attrs.engagement.loaded_value is not None:
+                engagement = inspector.attrs.engagement.loaded_value
+                if engagement:
+                    engagement_name = engagement.name
+                    # Check if opportunity is loaded on engagement
+                    engagement_inspector = inspect(engagement)
+                    if engagement_inspector.attrs.opportunity.loaded_value is not None:
+                        opportunity = engagement_inspector.attrs.opportunity.loaded_value
                         if opportunity:
                             opportunity_id = opportunity.id
                             opportunity_name = opportunity.name
@@ -885,14 +908,14 @@ class QuoteService(BaseService):
         
         quote_dict = {
             "id": quote.id,
-            "release_id": quote.release_id,
+            "engagement_id": quote.engagement_id,
             "name": quote.name,
             "currency": quote.currency,
             "status": quote.status,
             "description": quote.description,
             "phases": phases_list,
             "attributes": quote.attributes or {},
-            "release_name": release_name,
+            "engagement_name": engagement_name,
             "opportunity_id": opportunity_id,
             "opportunity_name": opportunity_name,
             "created_by": quote.created_by,

@@ -102,5 +102,5 @@ class Opportunity(Base):
     billing_term = relationship("BillingTerm", back_populates="opportunities")
     delivery_center = relationship("DeliveryCenter", back_populates="opportunities")
     opportunity_owner = relationship("Employee", foreign_keys=[opportunity_owner_id], back_populates="owned_opportunities")
-    releases = relationship("Release", back_populates="opportunity", cascade="all, delete-orphan")
+    engagements = relationship("Engagement", back_populates="opportunity", cascade="all, delete-orphan")
 
