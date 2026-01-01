@@ -9,7 +9,7 @@ import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { useCreateLineItem, useUpdateLineItem, useDeleteLineItem, useEstimateDetail } from "@/hooks/useEstimates";
 import { estimatesApi } from "@/lib/api/estimates";
 import { useQueryClient } from "@tanstack/react-query";
-import type { EstimateLineItemCreate, EstimateLineItem } from "@/types/estimate";
+import type { EstimateLineItemCreate, EstimateLineItem, EstimateLineItemUpdate } from "@/types/estimate";
 import { convertCurrency } from "@/lib/utils/currency";
 import { AutoFillDialog } from "./auto-fill-dialog";
 
@@ -217,7 +217,7 @@ export function EstimateEmptyRow({
         }
 
         // Only update if meaningful fields changed (not cost/rate if they're auto-calculated)
-        const updateData: Partial<EstimateLineItemCreate> = {};
+        const updateData: Partial<EstimateLineItemUpdate> = {};
         let hasChanges = false;
 
         // Only include fields that actually changed
@@ -231,7 +231,8 @@ export function EstimateEmptyRow({
             hasChanges = true;
           }
           if (changedFields.has("employee_id")) {
-            updateData.employee_id = formData.employee_id || undefined;
+            // Send null when clearing employee_id to properly remove the association
+            updateData.employee_id = formData.employee_id || null;
             hasChanges = true;
           }
           if (changedFields.has("start_date")) {
@@ -262,7 +263,8 @@ export function EstimateEmptyRow({
             hasChanges = true;
           }
           if (formData.employee_id !== lastSavedDataRef.current.employee_id) {
-            updateData.employee_id = formData.employee_id || undefined;
+            // Send null when clearing employee_id to properly remove the association
+            updateData.employee_id = formData.employee_id || null;
             hasChanges = true;
           }
           if (formData.start_date !== lastSavedDataRef.current.start_date) {
@@ -863,7 +865,7 @@ export function EstimateEmptyRow({
         <Select
           value={formData.employee_id || ""}
           onChange={(e) =>
-            setFormData({ ...formData, employee_id: e.target.value || undefined })
+            setFormData({ ...formData, employee_id: e.target.value || "" })
           }
           className="text-xs h-7 w-full"
         >

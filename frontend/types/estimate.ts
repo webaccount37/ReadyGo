@@ -98,7 +98,7 @@ export interface EstimateLineItemCreate {
 export interface EstimateLineItemUpdate {
   role_id?: string;
   delivery_center_id?: string;
-  employee_id?: string;
+  employee_id?: string | null; // null is used to clear the employee association
   rate?: string;
   cost?: string;
   currency?: string;

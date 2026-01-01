@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import type { EstimateLineItem, EstimateDetailResponse } from "@/types/estimate";
+import type { EstimateLineItem, EstimateDetailResponse, EstimateLineItemUpdate } from "@/types/estimate";
 import { AutoFillDialog } from "./auto-fill-dialog";
 import { useUpdateLineItem } from "@/hooks/useEstimates";
 import { useDeleteLineItem } from "@/hooks/useEstimates";
@@ -318,12 +318,30 @@ export function EstimateLineItemRow({
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         // Only send the specific field being changed, not all fields
-        const updateData: Record<string, string | boolean | undefined> = {};
+        const updateData: Partial<EstimateLineItemUpdate> = {};
         if (field === "billable") {
           // Handle billable as boolean - value is string "true"/"false"
-          updateData[field] = value === "true" || value === "True";
-        } else {
-          updateData[field] = value;
+          updateData.billable = value === "true" || value === "True";
+        } else if (field === "employee_id") {
+          // For employee_id, send null when clearing (empty string becomes null)
+          // This allows the backend to properly clear the association
+          updateData.employee_id = value === "" || value === undefined ? null : value;
+        } else if (field === "cost") {
+          updateData.cost = value;
+        } else if (field === "rate") {
+          updateData.rate = value;
+        } else if (field === "start_date") {
+          updateData.start_date = value;
+        } else if (field === "end_date") {
+          updateData.end_date = value;
+        } else if (field === "delivery_center_id") {
+          updateData.delivery_center_id = value;
+        } else if (field === "role_id") {
+          updateData.role_id = value;
+        } else if (field === "currency") {
+          updateData.currency = value;
+        } else if (field === "row_order") {
+          updateData.row_order = value ? parseInt(value, 10) : undefined;
         }
 
         await updateLineItem.mutateAsync({
@@ -663,10 +681,12 @@ export function EstimateLineItemRow({
           <Select
             value={employeeValue}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-              setEmployeeValue(e.target.value);
+              const newValue = e.target.value;
+              setEmployeeValue(newValue);
+              // Pass empty string when clearing - handleFieldUpdate will convert to null
               handleFieldUpdate(
                 "employee_id",
-                e.target.value || undefined,
+                newValue || "",
                 lineItem.employee_id || ""
               );
             }}
