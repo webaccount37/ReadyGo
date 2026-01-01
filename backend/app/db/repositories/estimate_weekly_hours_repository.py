@@ -134,7 +134,30 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
         """Delete all weekly hours for a line item."""
         result = await self.session.execute(
             delete(EstimateWeeklyHours).where(
-                EstimateWeeklyHours.quote_line_item_id == line_item_id
+                EstimateWeeklyHours.estimate_line_item_id == line_item_id
+            )
+        )
+        await self.session.flush()
+        return result.rowcount
+    
+    async def delete_duplicate_monday_for_sunday(
+        self,
+        line_item_id: UUID,
+        sunday_date: date,
+    ) -> int:
+        """Delete Monday record if Sunday record exists for the same week.
+        
+        When we save a Sunday date (e.g., 2026-01-04), we should delete
+        any Monday record (e.g., 2026-01-05) for the same week to avoid duplicates.
+        """
+        from datetime import timedelta
+        monday_date = sunday_date + timedelta(days=1)
+        result = await self.session.execute(
+            delete(EstimateWeeklyHours).where(
+                and_(
+                    EstimateWeeklyHours.estimate_line_item_id == line_item_id,
+                    EstimateWeeklyHours.week_start_date == monday_date
+                )
             )
         )
         await self.session.flush()

@@ -11,9 +11,17 @@ interface EstimateSpreadsheetProps {
   estimate: EstimateDetailResponse;
   startDate?: string;
   endDate?: string;
+  engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
+  engagementCurrency?: string; // Engagement default_currency
 }
 
-export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSpreadsheetProps) {
+export function EstimateSpreadsheet({ 
+  estimate, 
+  startDate, 
+  endDate,
+  engagementDeliveryCenterId,
+  engagementCurrency 
+}: EstimateSpreadsheetProps) {
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
   const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count
   const [emptyRowIds] = useState<Set<string>>(() => {
@@ -33,6 +41,9 @@ export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSp
   
   // Always show at least the specified number of empty rows
   const existingLineItems = estimate.line_items || [];
+  // Calculate empty rows needed - maintain a minimum number of empty rows
+  // When items are created, we don't want to immediately add a new empty row
+  // So we show empty rows based on the initial count, not dynamically adding more
   const emptyRowsNeeded = Math.max(0, emptyRowsCount - existingLineItems.length);
   
   const handleContextMenu = (e: React.MouseEvent, rowIndex: number) => {
@@ -278,10 +289,10 @@ export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSp
                     Employee
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
-                    Cost
+                    Cost ({engagementCurrency || estimate.currency || "USD"})
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
-                    Rate
+                    Rate ({engagementCurrency || estimate.currency || "USD"})
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[100px]">
                     Start Date
@@ -345,8 +356,9 @@ export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSp
                     key={lineItem.id}
                     lineItem={lineItem}
                     weeks={weeks}
-                    currency={estimate.currency || "USD"}
+                    currency={engagementCurrency || estimate.currency || "USD"}
                     estimateId={estimate.id}
+                    engagementDeliveryCenterId={engagementDeliveryCenterId}
                     onContextMenu={(e) => handleContextMenu(e, index)}
                   />
                 ))}
@@ -359,9 +371,10 @@ export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSp
                       key={stableId}
                       estimateId={estimate.id}
                       weeks={weeks}
-                      currency={estimate.currency || "USD"}
+                      currency={engagementCurrency || estimate.currency || "USD"}
                       rowIndex={existingLineItems.length + index}
                       stableId={stableId}
+                      engagementDeliveryCenterId={engagementDeliveryCenterId}
                       onContextMenu={(e) =>
                         handleContextMenu(e, existingLineItems.length + index)
                       }
@@ -372,7 +385,7 @@ export function EstimateSpreadsheet({ estimate, startDate, endDate }: EstimateSp
                   <EstimateTotalsRow
                     lineItems={existingLineItems}
                     weeks={weeks}
-                    currency={estimate.currency || "USD"}
+                    currency={engagementCurrency || estimate.currency || "USD"}
                   />
                 )}
                 {/* Add Row button */}

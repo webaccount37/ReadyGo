@@ -721,7 +721,7 @@ class QuoteService(BaseService):
         return []
     
     def _generate_weeks(self, start_date: date, end_date: date) -> List[date]:
-        """Generate list of week start dates (Mondays) between start and end dates."""
+        """Generate list of week start dates (Sundays) between start and end dates."""
         weeks = []
         current = self._get_week_start(start_date)
         end_week_start = self._get_week_start(end_date)
@@ -733,9 +733,12 @@ class QuoteService(BaseService):
         return weeks
     
     def _get_week_start(self, d: date) -> date:
-        """Get the Monday (week start) for a given date."""
-        days_since_monday = d.weekday()
-        return d - timedelta(days=days_since_monday)
+        """Get the Sunday (week start) for a given date."""
+        # weekday() returns 0=Monday, 1=Tuesday, ..., 6=Sunday
+        # To get days since Sunday: (weekday() + 1) % 7
+        # Sunday (6) -> (6+1)%7 = 0, Monday (0) -> (0+1)%7 = 1, etc.
+        days_since_sunday = (d.weekday() + 1) % 7
+        return d - timedelta(days=days_since_sunday)
     
     async def calculate_totals(self, quote_id: UUID) -> QuoteTotalsResponse:
         """Calculate totals for a quote."""

@@ -4,7 +4,7 @@
 
 // EstimateStatus removed - status is no longer used
 
-export type AutoFillPattern = "uniform" | "ramp_up" | "ramp_down" | "custom";
+export type AutoFillPattern = "uniform" | "ramp_up" | "ramp_down" | "ramp_up_down" | "custom";
 
 export interface EstimateWeeklyHours {
   id: string;
@@ -113,6 +113,7 @@ export interface AutoFillRequest {
   hours_per_week?: string;
   start_hours?: string;
   end_hours?: string;
+  interval_hours?: string;
   custom_hours?: Record<string, string>;
 }
 

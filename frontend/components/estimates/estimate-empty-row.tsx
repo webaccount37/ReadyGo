@@ -3,13 +3,15 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { useRoles } from "@/hooks/useRoles";
+import { useRoles, useRole } from "@/hooks/useRoles";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
-import { useEmployees } from "@/hooks/useEmployees";
-import { useCreateLineItem, useUpdateLineItem } from "@/hooks/useEstimates";
+import { useEmployees, useEmployee } from "@/hooks/useEmployees";
+import { useCreateLineItem, useUpdateLineItem, useDeleteLineItem, useEstimateDetail } from "@/hooks/useEstimates";
 import { estimatesApi } from "@/lib/api/estimates";
 import { useQueryClient } from "@tanstack/react-query";
-import type { EstimateLineItemCreate } from "@/types/estimate";
+import type { EstimateLineItemCreate, EstimateLineItem } from "@/types/estimate";
+import { convertCurrency } from "@/lib/utils/currency";
+import { AutoFillDialog } from "./auto-fill-dialog";
 
 interface EstimateEmptyRowProps {
   estimateId: string;
@@ -17,6 +19,7 @@ interface EstimateEmptyRowProps {
   currency: string;
   rowIndex: number;
   stableId: string; // Stable ID to prevent remounting
+  engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
@@ -26,6 +29,7 @@ export function EstimateEmptyRow({
   currency,
   rowIndex: _rowIndex,
   stableId,
+  engagementDeliveryCenterId,
   onContextMenu,
 }: EstimateEmptyRowProps) {
   const { data: rolesData } = useRoles();
@@ -33,15 +37,32 @@ export function EstimateEmptyRow({
   const { data: employeesData } = useEmployees({ limit: 100 });
   const createLineItem = useCreateLineItem();
   const updateLineItem = useUpdateLineItem();
+  const deleteLineItemMutation = useDeleteLineItem();
   const queryClient = useQueryClient();
 
-  const [lineItemId, setLineItemId] = useState<string | null>(null);
+  // Initialize lineItemId from localStorage or null
+  const getInitialLineItemId = (): string | null => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+      return saved || null;
+    }
+    return null;
+  };
+
+  const [lineItemId, setLineItemId] = useState<string | null>(getInitialLineItemId);
+  const [isAutoFillOpen, setIsAutoFillOpen] = useState(false);
   const isReceivingBackendUpdateRef = useRef(false);
+
+  // Fetch estimate detail to get the line item when it's created
+  const { data: estimateDetail } = useEstimateDetail(estimateId, {
+    enabled: true, // Always fetch to check for existing line items
+  });
 
   // Use a ref to persist formData across refetches, initialized from localStorage if available
   const getInitialFormData = (): EstimateLineItemCreate => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`empty-row-${stableId}-${estimateId}`);
+      // Include rowIndex in key to prevent first row from affecting second row
+      const saved = localStorage.getItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
@@ -56,7 +77,7 @@ export function EstimateEmptyRow({
     }
     return {
       role_id: "",
-      delivery_center_id: "",
+      delivery_center_id: engagementDeliveryCenterId || "", // Always use Engagement Invoice Center (required)
       employee_id: "",
       rate: "",
       cost: "",
@@ -70,25 +91,103 @@ export function EstimateEmptyRow({
   };
 
   const [formData, setFormData] = useState<EstimateLineItemCreate>(getInitialFormData);
+
+  // SIMPLE: Each row is tied directly to its database record ID
+  // If we have a lineItemId (from localStorage or creation), use it directly
+  // Once a line item is created, it will be rendered as EstimateLineItemRow after refetch
+  const lineItem = lineItemId
+    ? estimateDetail?.line_items?.find((item) => item.id === lineItemId)
+    : null;
+
+  // Check if this line item is already being rendered as EstimateLineItemRow
+  // Only clear if THIS specific row's lineItemId is in the rendered list
+  // Don't clear based on matching - that would clear other rows incorrectly
+  const isRenderedAsLineItemRow = lineItemId && estimateDetail?.line_items?.some(item => item.id === lineItemId);
+  
+  // Clear formData and lineItemId ONLY if this specific row's lineItemId is already rendered
+  // This prevents the empty row from showing duplicate data when the line item is rendered as EstimateLineItemRow
+  useEffect(() => {
+    if (isRenderedAsLineItemRow && lineItemId) {
+      // This specific line item is now rendered as EstimateLineItemRow, so clear this empty row
+      console.log("Clearing empty row because its line item is already rendered as EstimateLineItemRow:", lineItemId);
+      setLineItemId(null);
+      setFormData(getInitialFormData());
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+        localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+      }
+    }
+  }, [isRenderedAsLineItemRow, lineItemId, stableId, estimateId, _rowIndex, estimateDetail]);
+
+  // The effective line item ID is simply the lineItemId we have stored
+  // This ensures each row only operates on its own database record
+  const effectiveLineItemId = lineItemId || null;
+  const effectiveLineItem = lineItem || null;
+  
+  // For Delete button: show if this row has a database record
+  // Check both lineItemId and if a matching record exists in estimateDetail
+  // Use String() comparison for cost/rate to handle string vs number differences
+  const matchingExistingRecord = estimateDetail?.line_items?.find(item => 
+    item.role_id === formData.role_id &&
+    item.delivery_center_id === engagementDeliveryCenterId &&
+    String(item.cost) === String(formData.cost) &&
+    String(item.rate) === String(formData.rate)
+  );
+  
+  const hasDatabaseRecord = effectiveLineItemId !== null || matchingExistingRecord !== undefined;
+  const recordIdForDelete = effectiveLineItemId || matchingExistingRecord?.id || null;
+
+  // Debug logging
+  useEffect(() => {
+    if (lineItemId) {
+      console.log("Row lineItemId:", {
+        lineItemId,
+        lineItemExists: !!lineItem,
+        formDataRoleId: formData.role_id,
+      });
+    }
+  }, [lineItemId, lineItem, formData.role_id]);
+
+  // Persist lineItemId to localStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      if (lineItemId) {
+        localStorage.setItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`, lineItemId);
+      } else {
+        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+      }
+    }
+  }, [lineItemId, stableId, estimateId, _rowIndex]);
+
+  // Fetch role details when role is selected (to get role rates)
+  const { data: selectedRoleData } = useRole(formData.role_id || "", true, {
+    enabled: !!formData.role_id,
+  });
+
+  // Fetch employee details when employee is selected (to get employee rates)
+  const { data: selectedEmployeeData } = useEmployee(formData.employee_id || "", false, {
+    enabled: !!formData.employee_id,
+  });
   
   // Save formData to localStorage whenever it changes (but not on initial mount)
   useEffect(() => {
     if (typeof window !== "undefined") {
       const hasData = formData.role_id || formData.delivery_center_id || formData.employee_id || formData.rate || formData.cost;
       if (hasData) {
-        localStorage.setItem(`empty-row-${stableId}-${estimateId}`, JSON.stringify(formData));
+        // Include rowIndex in key to prevent first row from affecting second row
+        localStorage.setItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`, JSON.stringify(formData));
       } else {
-        localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
+        localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
       }
     }
-  }, [formData, stableId, estimateId]);
+  }, [formData, stableId, estimateId, _rowIndex]);
   
   // Clear localStorage when line item is created (this row becomes a real line item)
   useEffect(() => {
     if (lineItemId && typeof window !== "undefined") {
-      localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
+      localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
     }
-  }, [lineItemId, stableId, estimateId]);
+  }, [lineItemId, stableId, estimateId, _rowIndex]);
   const [isSaving, setIsSaving] = useState(false);
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
     new Map()
@@ -194,8 +293,48 @@ export function EstimateEmptyRow({
         } finally {
           setIsSaving(false);
         }
-      } else if (formData.role_id && formData.delivery_center_id && !isCreatingRef.current && !lineItemId) {
-        // Create new line item if we have required fields
+      } else if (formData.role_id && !isCreatingRef.current && !lineItemId) {
+        // Before creating, check if a matching line item already exists
+        // This prevents duplicates when Role is selected and Cost/Rate are auto-populated
+        if (estimateDetail?.line_items) {
+          const matchingItem = estimateDetail.line_items.find(item => 
+            item.role_id === formData.role_id &&
+            item.delivery_center_id === engagementDeliveryCenterId &&
+            item.cost === formData.cost &&
+            item.rate === formData.rate
+          );
+          
+          if (matchingItem) {
+            // Found existing line item - use it instead of creating duplicate
+            console.log("Found existing line item, using it instead of creating:", matchingItem.id);
+            setLineItemId(matchingItem.id);
+            lastSavedDataRef.current = { ...formData };
+            return; // Don't create a new one
+          }
+        }
+        
+        // Create line item when Role is selected and we have meaningful data (hours or cost/rate)
+        // Cost/Rate are auto-populated when Role is selected, so they should trigger creation
+        const hasHours = weeklyHoursValues.size > 0 && Array.from(weeklyHoursValues.values()).some(h => h && parseFloat(h) > 0);
+        const hasRates = (formData.rate && formData.rate !== "0" && formData.rate !== "") || 
+                         (formData.cost && formData.cost !== "0" && formData.cost !== "");
+        
+        console.log("Checking if line item should be created:", {
+          role_id: formData.role_id,
+          delivery_center_id: engagementDeliveryCenterId,
+          hasHours,
+          hasRates,
+          rate: formData.rate,
+          cost: formData.cost,
+          willCreate: hasHours || hasRates,
+        });
+        
+        if (!hasHours && !hasRates) {
+          // Don't create line item yet - wait for user to enter hours or rates
+          return;
+        }
+        
+        // Create new line item if we have required fields and meaningful data
         // Double-check we're not already creating and don't have a line item ID
         if (isCreatingRef.current || lineItemId) {
           return;
@@ -204,11 +343,22 @@ export function EstimateEmptyRow({
         setIsSaving(true);
         try {
           // Ensure rate and cost are always provided (backend requires them)
-          const createData = {
-            ...formData,
+          // delivery_center_id always comes from engagementDeliveryCenterId (required)
+          const createData: any = {
+            role_id: formData.role_id,
+            delivery_center_id: engagementDeliveryCenterId, // Always use Engagement Invoice Center (required)
+            employee_id: formData.employee_id || undefined,
             rate: formData.rate || "0",
             cost: formData.cost || "0",
+            currency: formData.currency || currency,
+            start_date: formData.start_date,
+            end_date: formData.end_date,
+            billable: formData.billable ?? true,
           };
+          // Remove undefined/empty employee_id - backend expects valid UUID or omitted
+          if (!createData.employee_id) {
+            delete createData.employee_id;
+          }
           const newLineItem = await createLineItem.mutateAsync({
             estimateId,
             data: createData,
@@ -229,7 +379,7 @@ export function EstimateEmptyRow({
         }
       }
     }, 500); // 500ms debounce
-  }, [lineItemId, formData, estimateId, createLineItem, updateLineItem, queryClient, isSaving]);
+  }, [lineItemId, formData, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, engagementDeliveryCenterId, currency, weeklyHoursValues]);
 
   // Track previous formData to detect what changed
   const prevFormDataRef = useRef<EstimateLineItemCreate>(formData);
@@ -242,8 +392,8 @@ export function EstimateEmptyRow({
       return;
     }
 
-    // Only trigger autoSave if we have required fields
-    if (!formData.role_id || !formData.delivery_center_id) {
+    // Only trigger autoSave if we have role_id (delivery_center_id is optional)
+    if (!formData.role_id) {
       prevFormDataRef.current = { ...formData };
       return;
     }
@@ -265,7 +415,8 @@ export function EstimateEmptyRow({
     if (prevFormDataRef.current.end_date !== formData.end_date) {
       changedFields.add("end_date");
     }
-    // Only track cost/rate if they were manually changed (not empty and different from previous)
+    // Track cost/rate changes - always track if they changed (for creation, we need to know)
+    // If we don't have a line item yet, cost/rate changes should trigger creation
     if (prevFormDataRef.current.cost !== formData.cost && formData.cost) {
       changedFields.add("cost");
     }
@@ -273,21 +424,26 @@ export function EstimateEmptyRow({
       changedFields.add("rate");
     }
 
-    // Only auto-save if meaningful fields changed (exclude cost/rate if they're just auto-calculated)
-    // Cost/rate changes alone shouldn't trigger a save unless they were manually edited
+    // Auto-save if meaningful fields changed
+    // Include cost/rate changes if:
+    // 1. We don't have a line item yet (need to create) OR
+    // 2. We have a line item and cost/rate were manually changed
     const hasMeaningfulChanges = changedFields.has("role_id") ||
       changedFields.has("delivery_center_id") ||
       changedFields.has("employee_id") ||
       changedFields.has("start_date") ||
       changedFields.has("end_date");
 
-    // Only include cost/rate if they were manually changed AND we have a line item ID (update, not create)
-    const hasManualCostRateChange = lineItemId && (
-      (changedFields.has("cost") && formData.cost) ||
-      (changedFields.has("rate") && formData.rate)
-    );
+    // Cost/rate changes trigger creation if no line item exists, or update if line item exists
+    const hasCostRateChange = (changedFields.has("cost") && formData.cost) ||
+      (changedFields.has("rate") && formData.rate);
+    
+    const shouldTriggerAutoSave = hasMeaningfulChanges || 
+      (hasCostRateChange && !lineItemId) || // Cost/rate changes trigger creation
+      (hasCostRateChange && lineItemId);    // Cost/rate changes trigger update
 
-    if (hasMeaningfulChanges || hasManualCostRateChange) {
+    if (shouldTriggerAutoSave) {
+      console.log("Auto-save triggered with changes:", Array.from(changedFields), { hasLineItem: !!lineItemId });
       autoSave(changedFields);
     }
 
@@ -321,6 +477,236 @@ export function EstimateEmptyRow({
       autoSave(changedFields);
     }
   }, [formData.cost, formData.rate, lineItemId, autoSave, isSaving]);
+
+  // Track previous role and employee to detect changes
+  const prevRoleIdRef = useRef<string>(formData.role_id || "");
+  const prevEmployeeIdRef = useRef<string>(formData.employee_id || "");
+  const lastPopulatedRoleDataRef = useRef<string>("");
+
+  // When Role is selected, update Cost and Rate based on Engagement Invoice Center & Role
+  useEffect(() => {
+    // Skip if we're currently saving, creating, or receiving backend updates
+    if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
+      if (formData.role_id !== prevRoleIdRef.current) {
+        prevRoleIdRef.current = formData.role_id || "";
+        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
+      }
+      return;
+    }
+
+    // Need role_id, engagement delivery center, and selectedRoleData to proceed
+    if (!formData.role_id || !engagementDeliveryCenterId || !selectedRoleData) {
+      // If role changed but data not loaded yet, update ref
+      if (formData.role_id !== prevRoleIdRef.current) {
+        prevRoleIdRef.current = formData.role_id || "";
+        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
+      }
+      return;
+    }
+
+    // Check if we've already populated for this role+engagement+currency combination
+    const currentKey = `${formData.role_id}-${engagementDeliveryCenterId}-${currency}`;
+    const roleChanged = formData.role_id !== prevRoleIdRef.current;
+    
+    // If role changed, reset the populated flag
+    if (roleChanged) {
+      lastPopulatedRoleDataRef.current = "";
+    }
+    
+    // Skip if we've already populated for this exact combination (and role hasn't changed)
+    if (!roleChanged && lastPopulatedRoleDataRef.current === currentKey) {
+      return;
+    }
+
+    console.log("Role effect running - populating Cost & Rate", {
+      role_id: formData.role_id,
+      engagementDeliveryCenterId,
+      currency,
+      roleChanged,
+      currentKey,
+      lastPopulated: lastPopulatedRoleDataRef.current,
+      role_rates_count: selectedRoleData?.role_rates?.length || 0,
+    });
+
+    // Find the role rate that matches engagement delivery center and currency
+    // Compare as strings to handle UUID string comparison
+    const matchingRate = selectedRoleData.role_rates?.find(
+      (rate) =>
+        String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+        rate.default_currency === currency
+    );
+
+    let newCost: string;
+    let newRate: string;
+
+    if (matchingRate) {
+      newCost = String(matchingRate.internal_cost_rate || "0");
+      newRate = String(matchingRate.external_rate || "0");
+    } else {
+      // Fallback to role default rates if no matching rate found
+      const role = rolesData?.items?.find((r) => r.id === formData.role_id);
+      if (role) {
+        newCost = String(role.role_internal_cost_rate || "0");
+        newRate = String(role.role_external_rate || "0");
+      } else {
+        prevRoleIdRef.current = formData.role_id || "";
+        return;
+      }
+    }
+
+    // Update Rate always (Rate always comes from Role)
+    // Update Cost only if NO employee is selected (if employee selected, Cost comes from employee)
+    const hasEmployee = !!formData.employee_id;
+    
+    console.log("Updating Cost & Rate:", {
+      newCost,
+      newRate,
+      hasEmployee,
+      willUpdateCost: !hasEmployee,
+      currentCost: formData.cost,
+      currentRate: formData.rate,
+    });
+    
+    setFormData((prev) => {
+      const updates: Partial<EstimateLineItemCreate> = {
+        rate: newRate,
+      };
+      
+      // Only update cost if no employee is selected
+      if (!hasEmployee) {
+        updates.cost = newCost;
+      }
+      
+      return { ...prev, ...updates };
+    });
+    
+    prevRoleIdRef.current = formData.role_id || "";
+    lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
+  }, [formData.role_id, formData.employee_id, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef]);
+
+  // Track if we've already populated cost for this employee
+  const lastPopulatedEmployeeRef = useRef<string>("");
+
+  // When Employee is selected or cleared, update Cost accordingly
+  useEffect(() => {
+    // Skip if we're currently saving, creating, or receiving backend updates
+    if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
+      if (formData.employee_id !== prevEmployeeIdRef.current) {
+        prevEmployeeIdRef.current = formData.employee_id || "";
+        lastPopulatedEmployeeRef.current = ""; // Reset when employee changes
+      }
+      return;
+    }
+
+    const currentEmployeeId = formData.employee_id || "";
+    const employeeChanged = currentEmployeeId !== prevEmployeeIdRef.current;
+    
+    // If employee changed, reset the populated flag
+    if (employeeChanged) {
+      lastPopulatedEmployeeRef.current = "";
+      prevEmployeeIdRef.current = currentEmployeeId;
+    }
+    
+    // Skip if we've already populated cost for this employee (and employee hasn't changed)
+    if (!employeeChanged && lastPopulatedEmployeeRef.current === currentEmployeeId) {
+      return;
+    }
+
+    // If employee was cleared (set to empty), revert Cost to Role-based cost
+    if (!currentEmployeeId) {
+      // Need role and engagement delivery center to get role-based cost
+      if (formData.role_id && engagementDeliveryCenterId && selectedRoleData) {
+        // Find the role rate that matches engagement delivery center and currency
+        const matchingRate = selectedRoleData.role_rates?.find(
+          (rate) =>
+            String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+            rate.default_currency === currency
+        );
+
+        let newCost: string;
+        if (matchingRate) {
+          newCost = String(matchingRate.internal_cost_rate || "0");
+        } else {
+          // Fallback to role default rates if no matching rate found
+          const role = rolesData?.items?.find((r) => r.id === formData.role_id);
+          if (role) {
+            newCost = String(role.role_internal_cost_rate || "0");
+          } else {
+            prevEmployeeIdRef.current = currentEmployeeId;
+            return;
+          }
+        }
+
+        // Update cost to role-based cost
+        if (newCost !== formData.cost) {
+          setFormData((prev) => ({
+            ...prev,
+            cost: newCost,
+            // Rate is NOT updated - it stays based on Role
+          }));
+        }
+      }
+      prevEmployeeIdRef.current = currentEmployeeId;
+      return;
+    }
+
+    // Employee was selected - update cost from employee's internal_cost_rate
+    if (!selectedEmployeeData) {
+      // Employee data not loaded yet, wait for it
+      prevEmployeeIdRef.current = currentEmployeeId;
+      return;
+    }
+
+    console.log("Employee effect running - updating Cost", {
+      employee_id: currentEmployeeId,
+      selectedEmployeeData: !!selectedEmployeeData,
+      internal_cost_rate: selectedEmployeeData?.internal_cost_rate,
+      default_currency: selectedEmployeeData?.default_currency,
+      target_currency: currency,
+    });
+
+    // Update only cost from employee's internal_cost_rate
+    // Convert currency if Employee Cost Default Currency differs from Engagement Invoice Center Currency
+    if (selectedEmployeeData.internal_cost_rate !== undefined) {
+      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+      
+      // Convert to Engagement Invoice Center Currency if different
+      if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
+        console.log("Converting currency:", {
+          from: employeeCurrency,
+          to: currency,
+          originalAmount: employeeCost,
+        });
+        const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
+        console.log("Conversion result:", {
+          convertedAmount: convertedCost,
+        });
+        employeeCost = convertedCost;
+      }
+      
+      const newCost = String(employeeCost);
+      console.log("Updating Cost from Employee:", {
+        originalCost: selectedEmployeeData.internal_cost_rate,
+        employeeCurrency,
+        convertedCost: employeeCost,
+        newCost,
+        currentCost: formData.cost,
+      });
+      
+      // Always update cost from employee (don't check if changed, as it should update when employee changes)
+      setFormData((prev) => ({
+        ...prev,
+        cost: newCost,
+        // Rate is NOT updated - it stays based on Role
+      }));
+      
+      // Mark as populated
+      lastPopulatedEmployeeRef.current = currentEmployeeId;
+    }
+
+    prevEmployeeIdRef.current = currentEmployeeId;
+  }, [formData.employee_id, formData.role_id, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, isSaving, isCreatingRef]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Ensure we have required fields and create line item if needed
@@ -492,30 +878,36 @@ export function EstimateEmptyRow({
 
       {/* Cost */}
       <td className="border border-gray-300 px-2 py-1" style={{ width: '120px', minWidth: '120px' }}>
-        <Input
-          type="number"
-          step="0.01"
-          value={formData.cost || ""}
-          onChange={(e) => {
-            setFormData({ ...formData, cost: e.target.value });
-          }}
-          placeholder="Auto"
-          className="text-xs h-7 w-full"
-        />
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-500">{currency}</span>
+          <Input
+            type="number"
+            step="0.01"
+            value={formData.cost || ""}
+            onChange={(e) => {
+              setFormData({ ...formData, cost: e.target.value });
+            }}
+            placeholder="Auto"
+            className="text-xs h-7 flex-1"
+          />
+        </div>
       </td>
 
       {/* Rate */}
       <td className="border border-gray-300 px-2 py-1" style={{ width: '120px', minWidth: '120px' }}>
-        <Input
-          type="number"
-          step="0.01"
-          value={formData.rate || ""}
-          onChange={(e) => {
-            setFormData({ ...formData, rate: e.target.value });
-          }}
-          placeholder="Auto"
-          className="text-xs h-7 w-full"
-        />
+        <div className="flex items-center gap-1">
+          <span className="text-[10px] text-gray-500">{currency}</span>
+          <Input
+            type="number"
+            step="0.01"
+            value={formData.rate || ""}
+            onChange={(e) => {
+              setFormData({ ...formData, rate: e.target.value });
+            }}
+            placeholder="Auto"
+            className="text-xs h-7 flex-1"
+          />
+        </div>
       </td>
 
       {/* Start Date */}
@@ -548,12 +940,155 @@ export function EstimateEmptyRow({
         />
       </td>
 
-      {/* Actions - Empty for empty rows */}
+      {/* Actions */}
       <td className="border border-gray-300 px-2 py-1">
-        {isSaving && (
-          <span className="text-xs text-gray-400" title="Saving...">
-            ...
-          </span>
+        <div className="flex gap-2 items-center">
+          {isSaving && (
+            <span className="text-xs text-gray-400" title="Saving...">
+              ...
+            </span>
+          )}
+          {/* Show Fill button when ROLE, COST, RATE, START DATE, and END DATE are present */}
+          {formData.role_id &&
+            formData.cost &&
+            formData.rate &&
+            formData.start_date &&
+            formData.end_date && (
+              <button
+                onClick={async () => {
+                  // Ensure we have a line item before opening Fill dialog
+                  // First, check if a matching line item already exists in the database
+                  let lineItemToUse = effectiveLineItem;
+                  
+                  if (!lineItemToUse && estimateDetail?.line_items) {
+                    // Try to find existing line item by matching role_id, delivery_center_id, cost, and rate
+                    // Use String() comparison for cost/rate to handle string vs number differences
+                    const matchingItem = estimateDetail.line_items.find(item => 
+                      item.role_id === formData.role_id &&
+                      item.delivery_center_id === engagementDeliveryCenterId &&
+                      String(item.cost) === String(formData.cost) &&
+                      String(item.rate) === String(formData.rate)
+                    );
+                    
+                    if (matchingItem) {
+                      // Found existing line item - use it instead of creating duplicate
+                      lineItemToUse = matchingItem;
+                      setLineItemId(matchingItem.id);
+                      setIsAutoFillOpen(true);
+                      return; // Don't create a new one
+                    }
+                  }
+                  
+                  // If we still don't have a line item, create one
+                  if (!lineItemToUse && !effectiveLineItemId) {
+                    try {
+                      // delivery_center_id always comes from engagementDeliveryCenterId (required)
+                      const createData: any = {
+                        role_id: formData.role_id,
+                        delivery_center_id: engagementDeliveryCenterId, // Always use Engagement Invoice Center (required)
+                        employee_id: formData.employee_id || undefined,
+                        rate: formData.rate || "0",
+                        cost: formData.cost || "0",
+                        currency: formData.currency || currency,
+                        start_date: formData.start_date,
+                        end_date: formData.end_date,
+                        billable: formData.billable ?? true,
+                      };
+                      // Remove undefined/empty employee_id - backend expects valid UUID or omitted
+                      if (!createData.employee_id) {
+                        delete createData.employee_id;
+                      }
+                      const newLineItem = await createLineItem.mutateAsync({
+                        estimateId,
+                        data: createData,
+                      });
+                      setLineItemId(newLineItem.id);
+                      lineItemToUse = newLineItem;
+                      // Wait for the query to update, then open dialog
+                      await queryClient.invalidateQueries({
+                        queryKey: ["estimates", "detail", estimateId, true],
+                      });
+                      // Open dialog with the newly created line item
+                      setIsAutoFillOpen(true);
+                    } catch (err) {
+                      console.error("Failed to create line item for Fill:", err);
+                      alert(`Failed to create line item: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                  } else if (lineItemToUse || effectiveLineItemId) {
+                    // We have a line item (either found or already had one) - just open dialog
+                    setIsAutoFillOpen(true);
+                  }
+                }}
+                className="text-xs text-blue-600 hover:underline"
+                title="Auto-fill hours"
+              >
+                Fill
+              </button>
+            )}
+          {/* Show Delete button if this row has a database record */}
+          {hasDatabaseRecord && recordIdForDelete ? (
+            <button
+              onClick={async () => {
+                if (deleteLineItemMutation.isPending) {
+                  return;
+                }
+                if (confirm("Are you sure you want to delete this line item and all its weekly hours?")) {
+                  try {
+                    await deleteLineItemMutation.mutateAsync({
+                      estimateId,
+                      lineItemId: recordIdForDelete,
+                    });
+                    // Reset the row state after successful deletion
+                    setLineItemId(null);
+                    setFormData(getInitialFormData());
+                    // Clear localStorage
+                    if (typeof window !== "undefined") {
+                      localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+                      localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+                    }
+                  } catch (err: any) {
+                    console.error("Failed to delete line item:", err);
+                    // If the line item doesn't exist (404), clear the stale lineItemId
+                    if (err?.response?.status === 404 || err?.message?.includes("not found")) {
+                      console.log("Line item not found, clearing stale lineItemId");
+                      setLineItemId(null);
+                      if (typeof window !== "undefined") {
+                        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+                      }
+                    } else {
+                      alert(`Failed to delete line item: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                  }
+                }
+              }}
+              disabled={deleteLineItemMutation.isPending}
+              className="text-xs text-red-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Delete line item and weekly hours"
+            >
+              {deleteLineItemMutation.isPending ? "Deleting..." : "Delete"}
+            </button>
+          ) : null}
+        </div>
+        {/* AutoFill Dialog */}
+        {isAutoFillOpen && (effectiveLineItem || (estimateDetail?.line_items?.find(item => 
+          item.role_id === formData.role_id &&
+          item.delivery_center_id === engagementDeliveryCenterId &&
+          String(item.cost) === String(formData.cost) &&
+          String(item.rate) === String(formData.rate)
+        ))) && (
+          <AutoFillDialog
+            lineItem={effectiveLineItem || estimateDetail!.line_items!.find(item => 
+              item.role_id === formData.role_id &&
+              item.delivery_center_id === engagementDeliveryCenterId &&
+              String(item.cost) === String(formData.cost) &&
+              String(item.rate) === String(formData.rate)
+            )!}
+            onClose={() => setIsAutoFillOpen(false)}
+            onSuccess={() => {
+              setIsAutoFillOpen(false);
+              // The mutation already handles cache invalidation, no need to do it here
+            }}
+          />
         )}
       </td>
 
@@ -575,7 +1110,8 @@ export function EstimateEmptyRow({
         const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
         const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
         const isWithinRange = weekStartNormalized <= endDateNormalized && weekEndNormalized >= startDateNormalized;
-        const canEdit = formData.role_id && formData.delivery_center_id && isWithinRange;
+        // delivery_center_id always comes from engagementDeliveryCenterId (required), so check that instead
+        const canEdit = formData.role_id && engagementDeliveryCenterId && isWithinRange;
         
         return (
           <td

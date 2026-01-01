@@ -1,15 +1,16 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import type { EstimateLineItem } from "@/types/estimate";
+import type { EstimateLineItem, EstimateDetailResponse } from "@/types/estimate";
 import { AutoFillDialog } from "./auto-fill-dialog";
 import { useUpdateLineItem } from "@/hooks/useEstimates";
 import { useDeleteLineItem } from "@/hooks/useEstimates";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { useRoles } from "@/hooks/useRoles";
+import { useRoles, useRole } from "@/hooks/useRoles";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
-import { useEmployees } from "@/hooks/useEmployees";
+import { useEmployees, useEmployee } from "@/hooks/useEmployees";
+import { convertCurrency } from "@/lib/utils/currency";
 import { estimatesApi } from "@/lib/api/estimates";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -18,6 +19,7 @@ interface EstimateLineItemRowProps {
   weeks: Date[];
   currency: string;
   estimateId: string;
+  engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
@@ -26,12 +28,21 @@ export function EstimateLineItemRow({
   weeks,
   currency,
   estimateId,
+  engagementDeliveryCenterId,
   onContextMenu,
 }: EstimateLineItemRowProps) {
   const [isAutoFillOpen, setIsAutoFillOpen] = useState(false);
   const queryClient = useQueryClient();
   const updateLineItem = useUpdateLineItem();
   const deleteLineItemMutation = useDeleteLineItem();
+  
+  // Debug: Log when lineItem prop changes
+  useEffect(() => {
+    console.log("EstimateLineItemRow: lineItem prop changed", {
+      id: lineItem.id,
+      weeklyHoursCount: lineItem.weekly_hours?.length ?? 0
+    });
+  }, [lineItem.id, lineItem.weekly_hours?.length]);
 
   // Always-editable values (spreadsheet style)
   const [costValue, setCostValue] = useState(lineItem.cost || "0");
@@ -110,6 +121,16 @@ export function EstimateLineItemRow({
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: employeesData } = useEmployees({ limit: 100 });
 
+  // Fetch role details when role is selected (to get role rates)
+  const { data: selectedRoleData } = useRole(roleValue || "", true, {
+    enabled: !!roleValue,
+  });
+
+  // Fetch employee details when employee is selected (to get employee rates)
+  const { data: selectedEmployeeData } = useEmployee(employeeValue || "", false, {
+    enabled: !!employeeValue,
+  });
+
   // Helper function to parse date strings as local dates (avoid timezone conversion)
   // This prevents JavaScript from interpreting date strings as UTC midnight
   const parseLocalDate = (dateStr: string): Date => {
@@ -132,20 +153,119 @@ export function EstimateLineItemRow({
     return formatDateKey(week);
   };
 
-  // Initialize weekly hours map
+  // Initialize weekly hours map - update whenever lineItem or weekly_hours changes
   useEffect(() => {
-    const hoursMap = new Map<string, string>();
-    lineItem.weekly_hours?.forEach((wh) => {
-      const weekKey = formatDateKey(parseLocalDate(wh.week_start_date));
-      hoursMap.set(weekKey, wh.hours);
+    // Skip updates if we're currently in the middle of an update to prevent feedback loops
+    if (isUpdatingRef.current) {
+      return;
+    }
+    
+    console.log("EstimateLineItemRow: Building hoursMap from weekly_hours", {
+      weeklyHoursCount: lineItem.weekly_hours?.length ?? 0,
+      weeklyHours: lineItem.weekly_hours
     });
+    
+    const hoursMap = new Map<string, string>();
+    lineItem.weekly_hours?.forEach((wh, index) => {
+      // Parse the week_start_date from backend
+      const weekDate = parseLocalDate(wh.week_start_date);
+      
+      // Backend now stores Sunday dates, but we need to handle both:
+      // 1. If it's already a Sunday (new data), use it directly
+      // 2. If it's a Monday (old data), convert to Sunday
+      const dayOfWeek = weekDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+      
+      let sundayDate: Date;
+      if (dayOfWeek === 0) {
+        // Already Sunday (new format)
+        sundayDate = weekDate;
+      } else if (dayOfWeek === 1) {
+        // Monday (old format) - convert to previous Sunday
+        sundayDate = new Date(weekDate);
+        sundayDate.setDate(sundayDate.getDate() - 1);
+      } else {
+        // Other day - shouldn't happen, but convert to Sunday of that week
+        const daysSinceSunday = dayOfWeek;
+        sundayDate = new Date(weekDate);
+        sundayDate.setDate(sundayDate.getDate() - daysSinceSunday);
+      }
+      
+      const weekKey = formatDateKey(sundayDate);
+      
+      // If we already have a value for this week key, prefer Sunday records (dayOfWeek === 0) over Monday records (dayOfWeek === 1)
+      // This handles the case where we have both old Monday records and new Sunday records for the same week
+      if (hoursMap.has(weekKey)) {
+        // Find the existing record that's already in the map
+        const existingRecord = lineItem.weekly_hours?.find((existingWh, existingIndex) => {
+          if (existingIndex >= index) return false; // Only check records we've already processed
+          const existingDate = parseLocalDate(existingWh.week_start_date);
+          const existingDayOfWeek = existingDate.getDay();
+          let existingSunday: Date;
+          if (existingDayOfWeek === 0) {
+            existingSunday = existingDate;
+          } else if (existingDayOfWeek === 1) {
+            existingSunday = new Date(existingDate);
+            existingSunday.setDate(existingSunday.getDate() - 1);
+          } else {
+            existingSunday = new Date(existingDate);
+            existingSunday.setDate(existingSunday.getDate() - existingDayOfWeek);
+          }
+          return formatDateKey(existingSunday) === weekKey;
+        });
+        
+        const existingDayOfWeek = existingRecord ? parseLocalDate(existingRecord.week_start_date).getDay() : 1;
+        
+        // Prefer Sunday (0) over Monday (1) or any other day
+        if (dayOfWeek === 0 && existingDayOfWeek !== 0) {
+          // Current record is Sunday, existing is not - replace it
+          hoursMap.set(weekKey, wh.hours);
+          console.log(`  [${index}] OVERWRITING with Sunday record: week_start_date=${wh.week_start_date}, weekKey=${weekKey}, hours=${wh.hours} (replacing ${existingRecord?.week_start_date})`);
+        } else {
+          // Keep existing, skip current
+          console.log(`  [${index}] SKIPPING duplicate: week_start_date=${wh.week_start_date}, weekKey=${weekKey}, hours=${wh.hours} (keeping existing ${existingRecord?.week_start_date})`);
+        }
+      } else {
+        hoursMap.set(weekKey, wh.hours);
+        console.log(`  [${index}] ADDING: week_start_date=${wh.week_start_date}, parsed=${weekDate.toISOString().split('T')[0]}, dayOfWeek=${dayOfWeek}, convertedSunday=${weekKey}, hours=${wh.hours}`);
+      }
+    });
+    
+    console.log("EstimateLineItemRow: Final hoursMap", {
+      size: hoursMap.size,
+      keys: Array.from(hoursMap.keys()),
+      entries: Array.from(hoursMap.entries())
+    });
+    
     setWeeklyHoursValues(hoursMap);
-  }, [lineItem.weekly_hours]);
+  }, [
+    lineItem.id,
+    // Use JSON.stringify to create a stable dependency that detects any changes
+    JSON.stringify(lineItem.weekly_hours?.map(wh => ({
+      week_start_date: wh.week_start_date,
+      hours: wh.hours
+    })) ?? [])
+  ]);
 
-  // Create a map of weekly hours for quick lookup
+  // Create a map of weekly hours for quick lookup (same conversion logic as useEffect)
   const weeklyHoursMap = new Map<string, string>();
   lineItem.weekly_hours?.forEach((wh) => {
-    const weekKey = getWeekKey(parseLocalDate(wh.week_start_date));
+    const weekDate = parseLocalDate(wh.week_start_date);
+    const dayOfWeek = weekDate.getDay();
+    
+    let sundayDate: Date;
+    if (dayOfWeek === 0) {
+      sundayDate = weekDate;
+    } else if (dayOfWeek === 1) {
+      // Monday (old format) - convert to previous Sunday
+      sundayDate = new Date(weekDate);
+      sundayDate.setDate(sundayDate.getDate() - 1);
+    } else {
+      const daysSinceSunday = dayOfWeek;
+      sundayDate = new Date(weekDate);
+      sundayDate.setDate(sundayDate.getDate() - daysSinceSunday);
+    }
+    
+    const weekKey = formatDateKey(sundayDate);
     weeklyHoursMap.set(weekKey, wh.hours);
   });
 
@@ -246,6 +366,187 @@ export function EstimateLineItemRow({
     };
   }, []);
 
+  // Track previous role and employee to detect changes
+  const prevRoleRef = useRef<string>(roleValue);
+  const prevEmployeeRef = useRef<string>(employeeValue);
+  const lastPopulatedRoleDataRef = useRef<string>("");
+
+  // When Role is selected, update Cost and Rate based on Engagement Invoice Center & Role
+  useEffect(() => {
+    // Skip if we're currently updating to prevent feedback loops
+    if (isUpdatingRef.current) {
+      if (roleValue !== prevRoleRef.current) {
+        prevRoleRef.current = roleValue;
+        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
+      }
+      return;
+    }
+
+    // Need roleValue, engagement delivery center, and selectedRoleData to proceed
+    if (!roleValue || !engagementDeliveryCenterId || !selectedRoleData) {
+      // If role changed but data not loaded yet, update ref
+      if (roleValue !== prevRoleRef.current) {
+        prevRoleRef.current = roleValue;
+        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
+      }
+      return;
+    }
+
+    // Check if we've already populated for this role+engagement+currency combination
+    const currentKey = `${roleValue}-${engagementDeliveryCenterId}-${currency}`;
+    const roleChanged = roleValue !== prevRoleRef.current;
+    
+    // If role changed, reset the populated flag
+    if (roleChanged) {
+      lastPopulatedRoleDataRef.current = "";
+    }
+    
+    // Skip if we've already populated for this exact combination
+    if (lastPopulatedRoleDataRef.current === currentKey) {
+      return;
+    }
+
+    // Find the role rate that matches engagement delivery center and currency
+    // Compare as strings to handle UUID string comparison
+    const matchingRate = selectedRoleData.role_rates?.find(
+      (rate) =>
+        String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+        rate.default_currency === currency
+    );
+
+    let newCost: string;
+    let newRate: string;
+
+    if (matchingRate) {
+      // Update both cost and rate from the role rate
+      newCost = String(matchingRate.internal_cost_rate || "0");
+      newRate = String(matchingRate.external_rate || "0");
+    } else {
+      // Fallback to role default rates if no matching rate found
+      const role = rolesData?.items?.find((r) => r.id === roleValue);
+      if (role) {
+        newCost = String(role.role_internal_cost_rate || "0");
+        newRate = String(role.role_external_rate || "0");
+      } else {
+        prevRoleRef.current = roleValue;
+        return;
+      }
+    }
+
+    // Update Rate always (Rate always comes from Role)
+    setRateValue(newRate);
+    handleFieldUpdate("rate", newRate, lineItem.rate || "0");
+
+    // Update Cost only if NO employee is selected (if employee selected, Cost comes from employee)
+    const hasEmployee = !!employeeValue;
+    if (!hasEmployee) {
+      setCostValue(newCost);
+      handleFieldUpdate("cost", newCost, lineItem.cost || "0");
+    }
+
+    prevRoleRef.current = roleValue;
+    lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
+  }, [roleValue, employeeValue, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate]);
+
+  // When Employee is selected or cleared, update Cost accordingly
+  useEffect(() => {
+    // Skip if we're currently updating to prevent feedback loops
+    if (isUpdatingRef.current) {
+      if (employeeValue !== prevEmployeeRef.current) {
+        prevEmployeeRef.current = employeeValue;
+      }
+      return;
+    }
+
+    // Only proceed if employee actually changed
+    if (employeeValue === prevEmployeeRef.current) {
+      return;
+    }
+
+    // If employee was cleared (set to empty), revert Cost to Role-based cost
+    if (!employeeValue) {
+      // Need role and engagement delivery center to get role-based cost
+      if (roleValue && engagementDeliveryCenterId && selectedRoleData) {
+        // Find the role rate that matches engagement delivery center and currency
+        const matchingRate = selectedRoleData.role_rates?.find(
+          (rate) =>
+            String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+            rate.default_currency === currency
+        );
+
+        let newCost: string;
+        if (matchingRate) {
+          newCost = String(matchingRate.internal_cost_rate || "0");
+        } else {
+          // Fallback to role default rates if no matching rate found
+          const role = rolesData?.items?.find((r) => r.id === roleValue);
+          if (role) {
+            newCost = String(role.role_internal_cost_rate || "0");
+          } else {
+            prevEmployeeRef.current = employeeValue;
+            return;
+          }
+        }
+
+        // Update cost to role-based cost
+        setCostValue(newCost);
+        // Trigger save - only cost, NOT rate (use original value from lineItem)
+        handleFieldUpdate("cost", newCost, lineItem.cost || "0");
+      }
+      prevEmployeeRef.current = employeeValue;
+      return;
+    }
+
+    // Employee was selected - update cost from employee's internal_cost_rate
+    if (!selectedEmployeeData) {
+      // Employee data not loaded yet, wait for it
+      prevEmployeeRef.current = employeeValue;
+      return;
+    }
+
+    // Update only cost from employee's internal_cost_rate
+    // Convert currency if Employee Cost Default Currency differs from Engagement Invoice Center Currency
+    if (selectedEmployeeData.internal_cost_rate !== undefined) {
+      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+      
+      console.log("Employee effect (line item row) - converting currency", {
+        originalCost: employeeCost,
+        employeeCurrency,
+        targetCurrency: currency,
+        needsConversion: employeeCurrency.toUpperCase() !== currency.toUpperCase(),
+      });
+      
+      // Convert to Engagement Invoice Center Currency if different
+      if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
+        const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
+        console.log("Currency conversion result:", {
+          from: employeeCurrency,
+          to: currency,
+          original: employeeCost,
+          converted: convertedCost,
+        });
+        employeeCost = convertedCost;
+      }
+      
+      const newCost = String(employeeCost);
+      console.log("Updating Cost from Employee (line item row):", {
+        originalCost: selectedEmployeeData.internal_cost_rate,
+        employeeCurrency,
+        convertedCost: employeeCost,
+        newCost,
+        currentCost: costValue,
+      });
+      
+      // Always update cost from employee (don't check if changed, as it should update when employee changes)
+      setCostValue(newCost);
+      // Trigger save - only cost, NOT rate (use original value from lineItem)
+      handleFieldUpdate("cost", newCost, lineItem.cost || "0");
+    }
+
+    prevEmployeeRef.current = employeeValue;
+  }, [employeeValue, roleValue, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost]);
+
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Parse dates as local dates to avoid timezone conversion issues
     const parseLocalDate = (dateStr: string): Date => {
@@ -268,18 +569,36 @@ export function EstimateLineItemRow({
 
     hoursSaveTimeoutRef.current = setTimeout(async () => {
       try {
-        await estimatesApi.autoFillHours(estimateId, lineItem.id, {
+        console.log(`Saving weekly hours to database: weekKey=${weekKey}, hours=${hours}, lineItemId=${lineItem.id}`);
+        
+        // Save to database immediately
+        const response = await estimatesApi.autoFillHours(estimateId, lineItem.id, {
           pattern: "custom",
           custom_hours: {
             [weekKey]: hours,
           },
         });
-        queryClient.invalidateQueries({
+        
+        console.log("Save response:", response);
+        console.log("Response weekly_hours:", response?.[0]?.weekly_hours);
+        
+        // Invalidate cache to trigger refetch from database
+        await queryClient.invalidateQueries({
           queryKey: ["estimates", "detail", estimateId, true],
         });
+        
+        // Refetch to get fresh data from database
+        const refetchResult = await queryClient.refetchQueries({
+          queryKey: ["estimates", "detail", estimateId, true],
+        });
+        
+        console.log("Refetch completed, checking data...");
+        const freshData = queryClient.getQueryData<EstimateDetailResponse>(["estimates", "detail", estimateId, true]);
+        const freshLineItem = freshData?.line_items?.find(item => item.id === lineItem.id);
+        console.log("Fresh line item weekly_hours:", freshLineItem?.weekly_hours);
       } catch (err) {
         console.error("Failed to update weekly hours:", err);
-        // Revert on error
+        // Revert on error - get the original value from the prop
         const originalHours = weeklyHoursMap.get(weekKey) || "0";
         setWeeklyHoursValues((prev: Map<string, string>) => {
           const next = new Map(prev);
@@ -287,7 +606,7 @@ export function EstimateLineItemRow({
           return next;
         });
       }
-    }, 500);
+    }, 300); // Reduced debounce for faster save
   };
 
 
@@ -299,10 +618,13 @@ export function EstimateLineItemRow({
           <Select
             value={deliveryCenterValue}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-              setDeliveryCenterValue(e.target.value);
+              const newValue = e.target.value;
+              setDeliveryCenterValue(newValue);
+              // Payable Center (delivery_center_id) can be updated independently
+              // Backend will handle it using current role_id and Engagement Invoice Center for rate lookup
               handleFieldUpdate(
                 "delivery_center_id",
-                e.target.value,
+                newValue,
                 lineItem.delivery_center_id
               );
             }}
@@ -361,32 +683,38 @@ export function EstimateLineItemRow({
 
         {/* Cost */}
         <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
-          <Input
-            type="number"
-            step="0.01"
-            value={costValue}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-              setCostValue(e.target.value);
-              handleFieldUpdate("cost", e.target.value, lineItem.cost || "0");
-            }}
-            placeholder="Auto"
-            className="text-xs h-7 w-full"
-          />
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">{currency}</span>
+            <Input
+              type="number"
+              step="0.01"
+              value={costValue}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setCostValue(e.target.value);
+                handleFieldUpdate("cost", e.target.value, lineItem.cost || "0");
+              }}
+              placeholder="Auto"
+              className="text-xs h-7 flex-1"
+            />
+          </div>
         </td>
 
         {/* Rate */}
         <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
-          <Input
-            type="number"
-            step="0.01"
-            value={rateValue}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-              setRateValue(e.target.value);
-              handleFieldUpdate("rate", e.target.value, lineItem.rate || "0");
-            }}
-            placeholder="Auto"
-            className="text-xs h-7 w-full"
-          />
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">{currency}</span>
+            <Input
+              type="number"
+              step="0.01"
+              value={rateValue}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setRateValue(e.target.value);
+                handleFieldUpdate("rate", e.target.value, lineItem.rate || "0");
+              }}
+              placeholder="Auto"
+              className="text-xs h-7 flex-1"
+            />
+          </div>
         </td>
 
         {/* Start Date */}
@@ -434,11 +762,11 @@ export function EstimateLineItemRow({
         </td>
 
         {/* Actions */}
-        <td className="border border-gray-300 px-2 py-1">
-          <div className="flex gap-2">
+        <td className="border border-gray-300 px-2 py-1" style={{ minWidth: '100px' }}>
+          <div className="flex gap-2 items-center">
             <button
               onClick={() => setIsAutoFillOpen(true)}
-              className="text-xs text-blue-600 hover:underline"
+              className="text-xs text-blue-600 hover:underline cursor-pointer whitespace-nowrap"
               title="Auto-fill hours"
             >
               Fill
@@ -450,7 +778,7 @@ export function EstimateLineItemRow({
                   return; // Prevent multiple clicks
                 }
                 console.log("Delete button clicked for line item:", lineItem.id);
-                if (confirm("Are you sure you want to delete this line item?")) {
+                if (confirm("Are you sure you want to delete this line item and all its weekly hours?")) {
                   console.log("User confirmed deletion");
                   try {
                     console.log("Calling mutateAsync with:", { estimateId, lineItemId: lineItem.id });
@@ -469,8 +797,8 @@ export function EstimateLineItemRow({
                 }
               }}
               disabled={deleteLineItemMutation.isPending}
-              className="text-xs text-red-600 hover:underline disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Delete line item"
+              className="text-xs text-red-600 hover:underline cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+              title="Delete line item and weekly hours"
             >
               {deleteLineItemMutation.isPending ? "Deleting..." : "Delete"}
             </button>
@@ -481,19 +809,24 @@ export function EstimateLineItemRow({
         {weeks.map((week) => {
           const weekKey = getWeekKey(week);
           const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey) || "0";
-                      const weekDate = new Date(week); // week is already a Date object
-                      const startDate = parseLocalDate(startDateValue);
-                      const endDate = parseLocalDate(endDateValue);
-                      // Check if week overlaps with date range (week starts Sunday, ends Saturday)
-                      // A week overlaps if the Start or End Date is ON or BETWEEN Sunday through Saturday
-                      const weekEnd = new Date(weekDate);
-                      weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
-                      // Normalize dates to midnight for accurate comparison
-                      const weekStartNormalized = new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate());
-                      const weekEndNormalized = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
-                      const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
-                      const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
-                      const isInRange = weekStartNormalized <= endDateNormalized && weekEndNormalized >= startDateNormalized;
+          
+          // Calculate if this week is within the date range
+          // week is already a Date object (Sunday of the week)
+          const weekDate = week;
+          const startDate = parseLocalDate(startDateValue);
+          const endDate = parseLocalDate(endDateValue);
+          
+          // Check if week overlaps with date range (week starts Sunday, ends Saturday)
+          // A week overlaps if the Start or End Date is ON or BETWEEN Sunday through Saturday
+          const weekEnd = new Date(weekDate);
+          weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
+          
+          // Normalize dates to midnight for accurate comparison
+          const weekStartNormalized = new Date(weekDate.getFullYear(), weekDate.getMonth(), weekDate.getDate());
+          const weekEndNormalized = new Date(weekEnd.getFullYear(), weekEnd.getMonth(), weekEnd.getDate());
+          const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
+          const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
+          const isInRange = weekStartNormalized <= endDateNormalized && weekEndNormalized >= startDateNormalized;
 
           return (
             <td
@@ -508,10 +841,12 @@ export function EstimateLineItemRow({
                 step="0.1"
                 value={hours}
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const newHours = e.target.value;
+                  const newHours = e.target.value || "0";
+                  console.log(`Input onChange: weekKey=${weekKey}, oldValue=${hours}, newValue=${newHours}`);
                   setWeeklyHoursValues((prev: Map<string, string>) => {
                     const next = new Map(prev);
                     next.set(weekKey, newHours);
+                    console.log(`Updated weeklyHoursValues map, weekKey=${weekKey} now has value=${next.get(weekKey)}`);
                     return next;
                   });
                   handleWeeklyHoursUpdate(weekKey, newHours);

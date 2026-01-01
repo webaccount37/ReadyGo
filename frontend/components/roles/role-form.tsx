@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +14,7 @@ type RoleFormValues = {
   status: RoleCreate["status"];
   role_rates: Array<{
     delivery_center_code: string;
-    currency: string;
+    default_currency: string;
     internal_cost_rate: string;
     external_rate: string;
   }>;
@@ -42,26 +42,40 @@ export function RoleForm({
       initialData?.role_rates?.length
         ? initialData.role_rates.map((rate) => ({
             delivery_center_code: rate.delivery_center_code,
-            currency: rate.currency,
+            default_currency: rate.default_currency,
             internal_cost_rate: String(rate.internal_cost_rate),
             external_rate: String(rate.external_rate),
           }))
         : [
             {
               delivery_center_code: deliveryCentersData?.items[0]?.code || "",
-              currency: "USD",
+              default_currency: "USD",
               internal_cost_rate: "",
               external_rate: "",
             },
           ],
   });
 
+  // Update delivery center code when delivery centers load (for new roles only)
+  useEffect(() => {
+    if (!initialData && deliveryCentersData?.items?.length && formData.role_rates[0]?.delivery_center_code === "") {
+      setFormData((prev) => ({
+        ...prev,
+        role_rates: prev.role_rates.map((rate, index) =>
+          index === 0 && rate.delivery_center_code === ""
+            ? { ...rate, delivery_center_code: deliveryCentersData.items[0].code }
+            : rate
+        ),
+      }));
+    }
+  }, [deliveryCentersData, initialData]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const parsedRates = formData.role_rates.map((rate) => ({
       delivery_center_code: rate.delivery_center_code,
-      currency: rate.currency.trim(),
+      default_currency: rate.default_currency.trim(),
       internal_cost_rate: parseFloat(rate.internal_cost_rate),
       external_rate: parseFloat(rate.external_rate),
     }));
@@ -76,7 +90,7 @@ export function RoleForm({
         alert("Delivery center is required for each rate.");
         return;
       }
-      if (!rate.currency) {
+      if (!rate.default_currency) {
         alert("Currency is required for each rate.");
         return;
       }
@@ -93,7 +107,7 @@ export function RoleForm({
       role_internal_cost_rate: primaryRate.internal_cost_rate,
       role_external_rate: primaryRate.external_rate,
       status: formData.status,
-      default_currency: primaryRate.currency,
+      default_currency: primaryRate.default_currency,
       role_rates: parsedRates,
     });
   };
@@ -107,13 +121,17 @@ export function RoleForm({
   };
 
   const addRate = () => {
+    if (!deliveryCentersData?.items?.length) {
+      alert("Please wait for delivery centers to load before adding a rate.");
+      return;
+    }
     setFormData((prev) => ({
       ...prev,
       role_rates: [
         ...prev.role_rates,
         {
-          delivery_center_code: deliveryCentersData?.items[0]?.code || "",
-          currency: "USD",
+          delivery_center_code: deliveryCentersData.items[0].code,
+          default_currency: "USD",
           internal_cost_rate: "",
           external_rate: "",
         },
@@ -179,8 +197,8 @@ export function RoleForm({
               <div>
                 <Label>Currency *</Label>
                 <Select
-                  value={rate.currency}
-                  onChange={(e) => updateRate(index, "currency", e.target.value)}
+                  value={rate.default_currency}
+                  onChange={(e) => updateRate(index, "default_currency", e.target.value)}
                   required
                 >
                   {CURRENCIES.map((c) => (

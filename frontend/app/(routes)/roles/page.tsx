@@ -37,7 +37,7 @@ export default function RolesPage() {
       const name = (role.role_name || "").toLowerCase();
       const status = (role.status || "").toLowerCase();
       const rates = role.role_rates?.map(r => 
-        `${r.delivery_center_code} ${r.currency} ${r.internal_cost_rate} ${r.external_rate}`
+        `${r.delivery_center_code} ${r.default_currency} ${r.internal_cost_rate} ${r.external_rate}`
       ).join(" ").toLowerCase() || "";
       return (
         name.includes(query) ||
@@ -152,9 +152,9 @@ export default function RolesPage() {
                             <td className="p-3">
                               <div className="space-y-1">
                                 {role.role_rates?.map((r) => (
-                                  <div key={`${r.delivery_center_code}-${r.currency}`} className="text-sm">
+                                  <div key={`${r.delivery_center_code}-${r.default_currency}`} className="text-sm">
                                     <span className="font-semibold">
-                                      {highlightText(`${r.delivery_center_code.replace("-", " ")} (${r.currency})`, searchQuery)}
+                                      {highlightText(`${r.delivery_center_code.replace("-", " ")} (${r.default_currency})`, searchQuery)}
                                     </span>
                                     : ICR ${r.internal_cost_rate.toFixed(2)} / Ext ${r.external_rate.toFixed(2)}
                                   </div>
@@ -226,9 +226,9 @@ export default function RolesPage() {
                                 </div>
                                 <div className="text-sm space-y-1">
                                   {role.role_rates?.map((r) => (
-                                    <div key={`${r.delivery_center_code}-${r.currency}`}>
+                                    <div key={`${r.delivery_center_code}-${r.default_currency}`}>
                                       <span className="font-semibold">
-                                        {r.delivery_center_code.replace("-", " ")} ({r.currency})
+                                        {r.delivery_center_code.replace("-", " ")} ({r.default_currency})
                                       </span>
                                       : ICR ${r.internal_cost_rate.toFixed(2)} / Ext ${r.external_rate.toFixed(2)}
                                     </div>
@@ -405,11 +405,11 @@ export default function RolesPage() {
                   .find((r) => r.id === viewingRole)
                   ?.role_rates?.map((rate) => (
                     <div
-                      key={`${rate.delivery_center_code}-${rate.currency}`}
+                      key={`${rate.delivery_center_code}-${rate.default_currency}`}
                       className="flex justify-between text-sm"
                     >
                       <span className="font-medium">
-                        {rate.delivery_center_code.replace("-", " ")} ({rate.currency})
+                        {rate.delivery_center_code.replace("-", " ")} ({rate.default_currency})
                       </span>
                       <span>
                         ICR ${rate.internal_cost_rate.toFixed(2)} / Ext ${rate.external_rate.toFixed(2)}

@@ -7,7 +7,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.base_service import BaseService
-from sqlalchemy import select
+from sqlalchemy import select, and_
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.role_repository import RoleRepository
@@ -47,10 +47,8 @@ class RoleService(BaseService):
     
     async def get_role_with_relationships(self, role_id: UUID) -> Optional[RoleResponse]:
         """Get role with related entities."""
-        role = await self.role_repo.get_with_relationships(role_id)
-        if not role:
-            return None
-        return RoleResponse.model_validate(role)
+        # Use _build_role_response which correctly extracts delivery_center_code from relationships
+        return await self._build_role_response(role_id)
     
     async def list_roles(
         self,
@@ -243,20 +241,70 @@ class RoleService(BaseService):
         rates: List[dict],
         replace_existing: bool = False,
     ) -> None:
-        """Create or replace role rates for a role."""
-        if replace_existing:
-            await self.role_rate_repo.delete_for_role(role_id)
-
+        """Create or update role rates for a role."""
+        # Load existing rates for this role with delivery center relationship
+        existing_rates_result = await self.session.execute(
+            select(RoleRate)
+            .options(selectinload(RoleRate.delivery_center))
+            .where(RoleRate.role_id == role_id)
+        )
+        existing_rates = list(existing_rates_result.scalars().all())
+        
+        # Create a map of existing rates by (delivery_center_code, default_currency)
+        existing_rate_map: dict[tuple[str, str], RoleRate] = {}
+        for rate in existing_rates:
+            dc_code = getattr(rate.delivery_center, "code", None) if rate.delivery_center else None
+            if dc_code:
+                key = (dc_code.lower(), rate.default_currency.upper())
+                existing_rate_map[key] = rate
+        
+        # Track which rates we've processed
+        processed_rate_ids: set[UUID] = set()
+        
+        # Process each new rate
         for rate_data in rates:
             delivery_center = await self._get_or_create_delivery_center(rate_data["delivery_center_code"])
-            role_rate = RoleRate(
-                role_id=role_id,
-                delivery_center_id=delivery_center.id,
-                default_currency=rate_data["default_currency"],
-                internal_cost_rate=rate_data["internal_cost_rate"],
-                external_rate=rate_data["external_rate"],
-            )
-            self.session.add(role_rate)
+            dc_code = delivery_center.code.lower()
+            currency = rate_data["default_currency"].upper()
+            key = (dc_code, currency)
+            
+            if key in existing_rate_map:
+                # Update existing rate
+                existing_rate = existing_rate_map[key]
+                existing_rate.internal_cost_rate = rate_data["internal_cost_rate"]
+                existing_rate.external_rate = rate_data["external_rate"]
+                processed_rate_ids.add(existing_rate.id)
+            else:
+                # Create new rate
+                role_rate = RoleRate(
+                    role_id=role_id,
+                    delivery_center_id=delivery_center.id,
+                    default_currency=rate_data["default_currency"],
+                    internal_cost_rate=rate_data["internal_cost_rate"],
+                    external_rate=rate_data["external_rate"],
+                )
+                self.session.add(role_rate)
+        
+        # Delete rates that are not in the new list (only if replace_existing is True)
+        # Note: Validation should have prevented deletion of rates in use
+        if replace_existing:
+            rates_to_delete = [r for r in existing_rates if r.id not in processed_rate_ids]
+            if rates_to_delete:
+                # Check which rates are in use by estimate_line_items
+                from app.models.estimate import EstimateLineItem
+                rate_ids_to_delete = [r.id for r in rates_to_delete]
+                in_use_result = await self.session.execute(
+                    select(EstimateLineItem.role_rates_id)
+                    .where(EstimateLineItem.role_rates_id.in_(rate_ids_to_delete))
+                    .distinct()
+                )
+                in_use_ids = set(in_use_result.scalars().all())
+                
+                # Only delete rates that are not in use
+                for rate_to_delete in rates_to_delete:
+                    if rate_to_delete.id not in in_use_ids:
+                        await self.session.delete(rate_to_delete)
+                    # If it is in use, skip deletion (validation should have caught this)
 
         await self.session.flush()
 

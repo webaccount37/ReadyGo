@@ -43,9 +43,6 @@ class RoleRepository(BaseRepository[Role]):
         result = await self.session.execute(
             select(Role)
             .options(
-                selectinload(Role.employees),
-                selectinload(Role.projects),
-                selectinload(Role.releases),
                 selectinload(Role.role_rates).selectinload(RoleRate.delivery_center),
             )
             .where(Role.id == role_id)

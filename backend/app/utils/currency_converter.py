@@ -54,6 +54,33 @@ def convert_to_usd(amount: float, from_currency: str) -> float:
     return amount / rate
 
 
+def convert_currency(amount: float, from_currency: str, to_currency: str) -> float:
+    """
+    Convert an amount from one currency to another.
+    
+    Args:
+        amount: Amount in the source currency
+        from_currency: Source currency code
+        to_currency: Target currency code
+        
+    Returns:
+        Amount in target currency
+    """
+    if from_currency.upper() == to_currency.upper():
+        return amount
+    
+    # Convert to USD first
+    usd_amount = convert_to_usd(amount, from_currency)
+    
+    # Convert from USD to target currency
+    if to_currency.upper() == "USD":
+        return usd_amount
+    
+    to_rate = get_conversion_rate_to_usd(to_currency)
+    # If rate is how many units = 1 USD, then USD amount * rate = target currency amount
+    return usd_amount * to_rate
+
+
 
 
 

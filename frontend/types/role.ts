@@ -7,7 +7,8 @@ export type RoleStatus = "active" | "inactive";
 export interface RoleRate {
   id?: string;
   delivery_center_code: string;
-  currency: string;
+  delivery_center_id?: string; // Included in backend response
+  default_currency: string;
   internal_cost_rate: number;
   external_rate: number;
 }

@@ -412,13 +412,56 @@ export function useAutoFillHours(
   >({
     mutationFn: ({ estimateId, lineItemId, data }) =>
       estimatesApi.autoFillHours(estimateId, lineItemId, data),
-    onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.detail(variables.estimateId),
-      });
-      queryClient.invalidateQueries({
-        queryKey: QUERY_KEYS.totals(variables.estimateId),
-      });
+    onSuccess: (data, variables) => {
+      console.log("Auto-fill success, response data:", data);
+      // Update the cache directly with the returned data (like useUpdateLineItem does)
+      if (data && data.length > 0) {
+        const updatedLineItem = data[0];
+        console.log("Updated line item:", updatedLineItem);
+        console.log("Weekly hours in response:", updatedLineItem.weekly_hours);
+        
+        // Update cache with the response data
+        queryClient.setQueryData<EstimateDetailResponse>(
+          QUERY_KEYS.detail(variables.estimateId, true),
+          (old) => {
+            if (!old) {
+              console.log("No old data in cache, invalidating instead");
+              return old;
+            }
+            const updated = {
+              ...old,
+              line_items: old.line_items?.map((item) =>
+                item.id === variables.lineItemId ? updatedLineItem : item
+              ) || [],
+            };
+            console.log("Updated cache with line items:", updated.line_items?.length);
+            const updatedItem = updated.line_items?.find(item => item.id === variables.lineItemId);
+            console.log("Updated item weekly_hours count:", updatedItem?.weekly_hours?.length);
+            console.log("Updated item weekly_hours sample:", updatedItem?.weekly_hours?.slice(0, 3));
+            return updated;
+          }
+        );
+        
+        // Invalidate and refetch to ensure UI updates immediately
+        // Use a small delay to batch updates if multiple mutations happen quickly
+        setTimeout(() => {
+          queryClient.invalidateQueries({
+            queryKey: QUERY_KEYS.detail(variables.estimateId, true),
+          });
+          queryClient.invalidateQueries({
+            queryKey: QUERY_KEYS.totals(variables.estimateId),
+          });
+        }, 100);
+      } else {
+        console.warn("No data returned from auto-fill mutation");
+        // If no data, invalidate everything and refetch
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.detail(variables.estimateId, true),
+        });
+        queryClient.invalidateQueries({
+          queryKey: QUERY_KEYS.totals(variables.estimateId),
+        });
+      }
     },
     ...options,
   });

@@ -82,7 +82,7 @@ class EstimateWeeklyHours(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     estimate_line_item_id = Column(UUID(as_uuid=True), ForeignKey("estimate_line_items.id", ondelete="CASCADE"), nullable=False, index=True)
-    week_start_date = Column(Date, nullable=False, index=True)  # Monday of the week
+    week_start_date = Column(Date, nullable=False, index=True)  # Sunday of the week
     hours = Column(Numeric(10, 2), nullable=False, default=0)
     
     # Relationships

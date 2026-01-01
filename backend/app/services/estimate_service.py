@@ -25,6 +25,7 @@ from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours
 from app.models.role_rate import RoleRate
 from app.models.role import Role
 from app.models.employee import Employee
+from app.utils.currency_converter import convert_to_usd, get_conversion_rate_to_usd, convert_currency
 from app.schemas.estimate import (
     EstimateCreate, EstimateUpdate, EstimateResponse, EstimateDetailResponse, EstimateListResponse,
     EstimateLineItemCreate, EstimateLineItemUpdate, EstimateLineItemResponse,
@@ -333,28 +334,63 @@ class EstimateService(BaseService):
         self,
         role_rates_id: UUID,
         employee_id: Optional[UUID] = None,
+        target_currency: Optional[str] = None,
     ) -> Tuple[Decimal, Decimal]:
         """Get default rate and cost from a role_rate.
         
         Priority:
-        1. Employee rates (if employee_id provided)
+        1. Employee rates (if employee_id provided) - only cost, NOT rate
         2. RoleRate rates
+        
+        Args:
+            role_rates_id: ID of the role_rate to use for rate lookup
+            employee_id: Optional employee ID - if provided, only cost is taken from employee
+            target_currency: Target currency for conversion (if different from employee/role_rate currency)
         
         Returns:
             Tuple of (rate, cost)
         """
-        # If employee is provided, use employee rates
+        # Get RoleRate first to get the rate
+        role_rate = await self.role_rate_repo.get(role_rates_id)
+        if not role_rate:
+            return Decimal("0"), Decimal("0")
+        
+        # Rate always comes from RoleRate (not employee)
+        rate = Decimal(str(role_rate.external_rate))
+        cost = Decimal(str(role_rate.internal_cost_rate))
+        rate_currency = role_rate.default_currency
+        
+        # If employee is provided, use employee cost (but NOT rate)
         if employee_id:
             employee = await self.employee_repo.get(employee_id)
             if employee:
-                return Decimal(str(employee.external_bill_rate)), Decimal(str(employee.internal_cost_rate))
+                employee_cost = Decimal(str(employee.internal_cost_rate))
+                employee_currency = employee.default_currency or "USD"
+                
+                # Convert employee cost to target currency if needed
+                if target_currency and employee_currency.upper() != target_currency.upper():
+                    employee_cost_decimal = convert_currency(
+                        float(employee_cost),
+                        employee_currency,
+                        target_currency
+                    )
+                    cost = Decimal(str(employee_cost_decimal))
+                else:
+                    # If no target currency or same currency, use employee cost as-is
+                    cost = employee_cost
+                    # But if target_currency is provided and different from employee_currency,
+                    # we already converted above
+                
+                # Rate stays from RoleRate (not updated from employee)
         
-        # Get RoleRate
-        role_rate = await self.role_rate_repo.get(role_rates_id)
-        if role_rate:
-            return Decimal(str(role_rate.external_rate)), Decimal(str(role_rate.internal_cost_rate))
+        # Convert rate to target currency if needed (only if we didn't already convert cost from employee)
+        if target_currency and rate_currency.upper() != target_currency.upper():
+            rate = Decimal(str(convert_currency(float(rate), rate_currency, target_currency)))
+            # Only convert cost if it came from role_rate (not employee)
+            if not employee_id:
+                cost = Decimal(str(convert_currency(float(cost), rate_currency, target_currency)))
         
-        return Decimal("0"), Decimal("0")
+        return rate, cost
     
     async def _get_active_estimate(self, engagement_id: UUID) -> Optional[Estimate]:
         """Get the active estimate for an engagement."""
@@ -419,6 +455,7 @@ class EstimateService(BaseService):
             default_rate, default_cost = await self._get_default_rates_from_role_rate(
                 role_rates_id,
                 line_item_data.employee_id,
+                target_currency=currency,  # Pass currency for conversion
             )
             if rate == 0:
                 rate = default_rate
@@ -493,34 +530,106 @@ class EstimateService(BaseService):
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
         
-        # Convert role_id + delivery_center_id to role_rates_id if provided
-        if "role_id" in update_dict and "delivery_center_id" in update_dict:
-            # Get currency from update_dict or existing line item or engagement
+        # Handle role_id updates - use Engagement Invoice Center (not Payable Center) for role_rate lookup
+        if "role_id" in update_dict:
+            # Get currency and engagement delivery center (Invoice Center) for role_rate lookup
             estimate = await self.estimate_repo.get(estimate_id)
             engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
             currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
             
+            # Use Engagement Invoice Center (delivery_center_id) for role_rate lookup, NOT Payable Center
+            engagement_delivery_center_id = engagement.delivery_center_id if engagement else None
+            if not engagement_delivery_center_id:
+                raise ValueError("Engagement Invoice Center (delivery_center_id) is required for role rate lookup")
+            
             role_rate = await self._get_or_create_role_rate(
                 update_dict["role_id"],
-                update_dict["delivery_center_id"],
+                engagement_delivery_center_id,  # Use Engagement Invoice Center, not Payable Center
                 currency
             )
             update_dict["role_rates_id"] = role_rate.id
-            # Remove role_id and delivery_center_id from update_dict as they're not in the model
+            # Remove role_id from update_dict as it's not in the model
             update_dict.pop("role_id", None)
+        
+        # Handle delivery_center_id (Payable Center) updates - this is independent and doesn't affect role_rate
+        # Note: delivery_center_id is not stored in EstimateLineItem model, it's derived from role_rate
+        # So updating Payable Center means we need to find/create a role_rate with the new delivery center
+        # BUT we should use the current role_id and Engagement Invoice Center for the lookup
+        if "delivery_center_id" in update_dict and "role_id" not in update_dict:
+            # Payable Center update - get current role_id from existing role_rate
+            if not line_item.role_rate or not line_item.role_rate.role:
+                raise ValueError("Cannot update Payable Center: role information not found")
+            
+            current_role_id = line_item.role_rate.role.id
+            # Get currency and engagement delivery center
+            estimate = await self.estimate_repo.get(estimate_id)
+            engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
+            currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
+            
+            # Create/find role_rate with: current role_id + new Payable Center + currency
+            # Note: This changes which role_rate is used, but the Role Rate lookup for Cost/Rate
+            # should still use Role ID + Engagement Invoice Center (not Payable Center)
+            role_rate = await self._get_or_create_role_rate(
+                current_role_id,
+                update_dict["delivery_center_id"],  # New Payable Center
+                currency
+            )
+            update_dict["role_rates_id"] = role_rate.id
+            # Remove delivery_center_id from update_dict as it's not in the model
             update_dict.pop("delivery_center_id", None)
-        elif "role_id" in update_dict or "delivery_center_id" in update_dict:
-            raise ValueError("Both role_id and delivery_center_id must be provided together")
         
         # Recalculate rates if role_rates_id/employee changed
-        if "role_rates_id" in update_dict or "employee_id" in update_dict:
-            new_role_rates_id = update_dict.get("role_rates_id", line_item.role_rates_id)
+        # BUT: Rate lookup should use Role ID + Engagement Invoice Center (not Payable Center from role_rate)
+        if "role_rates_id" in update_dict or "employee_id" in update_dict or "role_id" in update_dict:
+            # Get the role_id (either from update or existing)
+            if "role_id" in update_dict:
+                # role_id was already processed above and removed from update_dict
+                # Get it from the role_rate we just set
+                new_role_rates_id = update_dict.get("role_rates_id", line_item.role_rates_id)
+                role_rate_for_lookup = await self.role_rate_repo.get(new_role_rates_id)
+                new_role_id = role_rate_for_lookup.role_id if role_rate_for_lookup else None
+            else:
+                # Use existing role_id from current role_rate
+                if line_item.role_rate and line_item.role_rate.role:
+                    new_role_id = line_item.role_rate.role.id
+                else:
+                    new_role_id = None
+            
             new_employee_id = update_dict.get("employee_id", line_item.employee_id)
             
-            default_rate, default_cost = await self._get_default_rates_from_role_rate(
-                new_role_rates_id,
-                new_employee_id,
-            )
+            # For rate lookup, use Role ID + Engagement Invoice Center (not Payable Center)
+            if new_role_id:
+                estimate = await self.estimate_repo.get(estimate_id)
+                engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
+                engagement_delivery_center_id = engagement.delivery_center_id if engagement else None
+                currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
+                
+                if engagement_delivery_center_id:
+                    # Get role_rate using Role ID + Engagement Invoice Center for rate lookup
+                    role_rate_for_rates = await self._get_or_create_role_rate(
+                        new_role_id,
+                        engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookup
+                        currency
+                    )
+                    default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                        role_rate_for_rates.id,  # Use role_rate with Engagement Invoice Center
+                        new_employee_id,
+                        target_currency=currency,  # Pass currency for conversion
+                    )
+                else:
+                    # Fallback to using the role_rates_id directly if no engagement delivery center
+                    default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                        update_dict.get("role_rates_id", line_item.role_rates_id),
+                        new_employee_id,
+                        target_currency=currency,  # Pass currency for conversion
+                    )
+            else:
+                # Fallback to using the role_rates_id directly
+                default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                    update_dict.get("role_rates_id", line_item.role_rates_id),
+                    new_employee_id,
+                    target_currency=currency,  # Pass currency for conversion
+                )
             
             # Only update if rates weren't explicitly provided
             if "rate" not in update_dict:
@@ -593,20 +702,85 @@ class EstimateService(BaseService):
         elif auto_fill_data.pattern in [AutoFillPattern.RAMP_UP, AutoFillPattern.RAMP_DOWN]:
             start_hours = auto_fill_data.start_hours or Decimal("0")
             end_hours = auto_fill_data.end_hours or Decimal("0")
+            interval_hours = auto_fill_data.interval_hours or Decimal("5")
             num_weeks = len(weeks)
             
-            for i, week_start in enumerate(weeks):
-                if num_weeks == 1:
+            # If start and end are the same, no ramp needed
+            if start_hours == end_hours:
+                for week_start in weeks:
                     hours_by_week[week_start] = start_hours
+            else:
+                for i, week_start in enumerate(weeks):
+                    if num_weeks == 1:
+                        hours_by_week[week_start] = start_hours
+                    else:
+                        if auto_fill_data.pattern == AutoFillPattern.RAMP_UP:
+                            # Ramp up: add interval_hours for each week
+                            # Calculate how many intervals to apply
+                            calculated_hours = start_hours + (interval_hours * Decimal(str(i)))
+                            # Cap at end_hours (don't exceed target)
+                            hours_by_week[week_start] = min(calculated_hours, end_hours)
+                        else:  # RAMP_DOWN
+                            # Ramp down: subtract interval_hours for each week
+                            # Calculate how many intervals to apply
+                            calculated_hours = start_hours - (interval_hours * Decimal(str(i)))
+                            # Cap at end_hours (don't go below target)
+                            hours_by_week[week_start] = max(calculated_hours, end_hours)
+        
+        elif auto_fill_data.pattern == AutoFillPattern.RAMP_UP_DOWN:
+            start_hours = auto_fill_data.start_hours or Decimal("0")
+            end_hours = auto_fill_data.end_hours or Decimal("0")
+            interval_hours = auto_fill_data.interval_hours or Decimal("5")
+            num_weeks = len(weeks)
+            
+            # If start and end are the same, no ramp needed
+            if start_hours == end_hours:
+                for week_start in weeks:
+                    hours_by_week[week_start] = start_hours
+            else:
+                # Ramp Up & Down pattern:
+                # 1. Ramp Up: Start Date (first week) → ramps up from Start Hours to End Hours
+                # 2. Ramp Down: From peak → End Date (last week), ramps down to Start Hours
+                # End Date should have Start Hours (not End Hours)
+                
+                # Calculate how many intervals needed to go from start_hours to end_hours
+                hours_difference = end_hours - start_hours
+                if interval_hours > 0:
+                    intervals_to_peak = (hours_difference / interval_hours).quantize(Decimal('1'), rounding='ROUND_UP')
                 else:
-                    if auto_fill_data.pattern == AutoFillPattern.RAMP_UP:
-                        # Linear increase from start to end
-                        ratio = Decimal(str(i)) / Decimal(str(num_weeks - 1))
-                        hours_by_week[week_start] = start_hours + (end_hours - start_hours) * ratio
-                    else:  # RAMP_DOWN
-                        # Linear decrease from start to end
-                        ratio = Decimal(str(i)) / Decimal(str(num_weeks - 1))
-                        hours_by_week[week_start] = start_hours - (start_hours - end_hours) * ratio
+                    intervals_to_peak = Decimal("0")
+                
+                # Calculate how many intervals needed to go from end_hours back to start_hours (same)
+                intervals_to_end = intervals_to_peak
+                
+                # Find the peak week index (where we reach end_hours)
+                peak_index = min(int(intervals_to_peak), num_weeks - 1)
+                
+                # Calculate ramp down start index
+                # We need enough weeks from the end to ramp down from end_hours to start_hours
+                # If we don't have enough weeks, start ramping down earlier
+                ramp_down_start_index = max(peak_index, num_weeks - int(intervals_to_end) - 1)
+                
+                for i, week_start in enumerate(weeks):
+                    if num_weeks == 1:
+                        hours_by_week[week_start] = start_hours
+                    elif i <= ramp_down_start_index:
+                        # Ramp Up phase: from Start Date (i=0) going forward
+                        calculated_hours = start_hours + (interval_hours * Decimal(str(i)))
+                        # Cap at end_hours (don't exceed target)
+                        hours_by_week[week_start] = min(calculated_hours, end_hours)
+                    else:
+                        # Ramp Down phase: from peak towards End Date (last week)
+                        # Calculate position from the end (0-based from the last week)
+                        weeks_from_end = (num_weeks - 1) - i
+                        # Calculate how many intervals to subtract from end_hours
+                        # At End Date (weeks_from_end = 0), we want start_hours
+                        # So: end_hours - (intervals_to_end * interval_hours) = start_hours
+                        # For weeks_from_end = 0: calculated_hours = end_hours - (intervals_to_end * interval_hours) = start_hours ✓
+                        intervals_to_subtract = intervals_to_end - Decimal(str(weeks_from_end))
+                        calculated_hours = end_hours - (interval_hours * intervals_to_subtract)
+                        # Cap at start_hours (don't go below start)
+                        hours_by_week[week_start] = max(calculated_hours, start_hours)
         
         elif auto_fill_data.pattern == AutoFillPattern.CUSTOM:
             if auto_fill_data.custom_hours:
@@ -616,24 +790,49 @@ class EstimateService(BaseService):
         
         # Create or update weekly hours
         weekly_hours_list = []
+        logger.info(f"Creating/updating {len(hours_by_week)} weekly hours records for line_item_id={line_item_id}")
         for week_start, hours in hours_by_week.items():
+            logger.info(f"  Processing: week_start={week_start} (type={type(week_start)}, weekday={week_start.weekday()}), hours={hours}")
+            
+            # If this is a Sunday (weekday 6 in Python, where Monday=0), delete any duplicate Monday record
+            # Python's weekday(): Monday=0, Tuesday=1, ..., Sunday=6
+            if week_start.weekday() == 6:  # Sunday
+                deleted_count = await self.weekly_hours_repo.delete_duplicate_monday_for_sunday(
+                    line_item_id, week_start
+                )
+                if deleted_count > 0:
+                    logger.info(f"  Deleted {deleted_count} duplicate Monday record(s) for Sunday {week_start}")
+            
             weekly_hour = await self.weekly_hours_repo.create(
                 estimate_line_item_id=line_item_id,
                 week_start_date=week_start,
                 hours=hours,
             )
             weekly_hours_list.append(weekly_hour)
+            logger.info(f"  Created/updated weekly hour: week_start={weekly_hour.week_start_date}, hours={weekly_hour.hours}, id={weekly_hour.id}")
         
         await self.session.commit()
+        logger.info(f"Committed {len(weekly_hours_list)} weekly hours records to database")
+        
+        # Verify the data was actually saved
+        verify_line_item = await self.line_item_repo.get_with_weekly_hours(line_item_id)
+        if verify_line_item and verify_line_item.weekly_hours:
+            logger.info(f"Verification: Found {len(verify_line_item.weekly_hours)} weekly hours after commit")
+            for wh in verify_line_item.weekly_hours[:5]:  # Log first 5
+                logger.info(f"  Verified: week_start={wh.week_start_date}, hours={wh.hours}")
         
         # Reload and return the updated line item
         updated_line_item = await self.line_item_repo.get_with_weekly_hours(line_item_id)
         if updated_line_item:
-            return [self._line_item_to_response(updated_line_item)]
+            logger.info(f"Reloaded line item, weekly_hours count: {len(updated_line_item.weekly_hours) if updated_line_item.weekly_hours else 0}")
+            response = self._line_item_to_response(updated_line_item)
+            logger.info(f"Response weekly_hours count: {len(response.weekly_hours) if hasattr(response, 'weekly_hours') and response.weekly_hours else 0}")
+            return [response]
+        logger.warning("No updated line item found after auto-fill")
         return []
     
     def _generate_weeks(self, start_date: date, end_date: date) -> List[date]:
-        """Generate list of week start dates (Mondays) between start and end dates."""
+        """Generate list of week start dates (Sundays) between start and end dates."""
         weeks = []
         current = self._get_week_start(start_date)
         end_week_start = self._get_week_start(end_date)
@@ -645,9 +844,12 @@ class EstimateService(BaseService):
         return weeks
     
     def _get_week_start(self, d: date) -> date:
-        """Get the Monday (week start) for a given date."""
-        days_since_monday = d.weekday()
-        return d - timedelta(days=days_since_monday)
+        """Get the Sunday (week start) for a given date."""
+        # weekday() returns 0=Monday, 1=Tuesday, ..., 6=Sunday
+        # To get days since Sunday: (weekday() + 1) % 7
+        # Sunday (6) -> (6+1)%7 = 0, Monday (0) -> (0+1)%7 = 1, etc.
+        days_since_sunday = (d.weekday() + 1) % 7
+        return d - timedelta(days=days_since_sunday)
     
     async def calculate_totals(self, estimate_id: UUID) -> EstimateTotalsResponse:
         """Calculate totals for an estimate."""
@@ -974,19 +1176,26 @@ class EstimateService(BaseService):
             weekly_hours_attr = inspector.attrs.get("weekly_hours")
             if weekly_hours_attr and weekly_hours_attr.loaded_value is not None:
                 weekly_hours_list = weekly_hours_attr.loaded_value
-                if weekly_hours_list:
-                    # Build dicts directly, serializing dates as ISO strings (same as Engagement service)
-                    line_item_dict["weekly_hours"] = [
-                        {
-                            "id": wh.id,
-                            "week_start_date": wh.week_start_date.isoformat() if isinstance(wh.week_start_date, date) else str(wh.week_start_date).split("T")[0],
-                            "hours": wh.hours,
-                        }
-                        for wh in weekly_hours_list
-                        if isinstance(wh, EstimateWeeklyHours)
-                    ]
-        except (AttributeError, KeyError, TypeError):
-            pass
+                logger.info(f"Found {len(weekly_hours_list) if weekly_hours_list else 0} weekly hours in loaded_value")
+                # Build dicts directly, serializing dates as ISO strings (same as Engagement service)
+                line_item_dict["weekly_hours"] = [
+                    {
+                        "id": str(wh.id),
+                        "week_start_date": wh.week_start_date.isoformat() if isinstance(wh.week_start_date, date) else str(wh.week_start_date).split("T")[0],
+                        "hours": str(wh.hours),
+                    }
+                    for wh in weekly_hours_list
+                    if isinstance(wh, EstimateWeeklyHours)
+                ]
+                logger.info(f"Serialized {len(line_item_dict['weekly_hours'])} weekly hours")
+            else:
+                # If weekly_hours is not loaded or is None, set empty list
+                logger.warning("weekly_hours not loaded or is None")
+                line_item_dict["weekly_hours"] = []
+        except (AttributeError, KeyError, TypeError) as e:
+            logger.warning(f"Error serializing weekly_hours: {e}", exc_info=True)
+            # Set empty list as fallback
+            line_item_dict["weekly_hours"] = []
         
         logger.info(f"  === BEFORE PYDANTIC ===")
         logger.info(f"  Dict start_date = {line_item_dict.get('start_date')} (type: {type(line_item_dict.get('start_date'))})")

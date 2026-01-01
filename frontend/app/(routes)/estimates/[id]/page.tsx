@@ -255,7 +255,13 @@ export default function EstimateDetailPage() {
 
       <PhaseManagement estimateId={estimate.id} />
 
-      <EstimateSpreadsheet estimate={estimate} startDate={startDate} endDate={endDate} />
+      <EstimateSpreadsheet 
+        estimate={estimate} 
+        startDate={startDate} 
+        endDate={endDate}
+        engagementDeliveryCenterId={engagement?.delivery_center_id}
+        engagementCurrency={engagement?.default_currency}
+      />
     </div>
   );
 }

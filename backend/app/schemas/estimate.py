@@ -49,6 +49,7 @@ class AutoFillPattern(str, enum.Enum):
     UNIFORM = "uniform"
     RAMP_UP = "ramp_up"
     RAMP_DOWN = "ramp_down"
+    RAMP_UP_DOWN = "ramp_up_down"
     CUSTOM = "custom"
 
 
@@ -211,6 +212,7 @@ class AutoFillRequest(BaseModel):
     hours_per_week: Optional[Decimal] = Field(None, ge=0, description="For uniform pattern")
     start_hours: Optional[Decimal] = Field(None, ge=0, description="For ramp patterns")
     end_hours: Optional[Decimal] = Field(None, ge=0, description="For ramp patterns")
+    interval_hours: Optional[Decimal] = Field(None, ge=0, description="For ramp patterns: hours to increment/decrement per week")
     custom_hours: Optional[Dict[str, Decimal]] = Field(None, description="For custom pattern: {week_start_date: hours}")
 
 
