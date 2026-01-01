@@ -561,6 +561,19 @@ class ExcelExportService:
             
             # If no line item for this row, write empty row with formulas only
             if line_item is None:
+                # Apply number formatting to editable columns even if empty
+                # Cost (Column D) - currency format
+                cost_cell = ws.cell(row=row, column=4)
+                cost_cell.number_format = '#,##0.00'
+                
+                # Rate (Column E) - currency format
+                rate_cell = ws.cell(row=row, column=5)
+                rate_cell.number_format = '#,##0.00'
+                
+                # Billable % (Column I) - percentage format
+                billable_pct_cell = ws.cell(row=row, column=9)
+                billable_pct_cell.number_format = '0.00%'
+                
                 # Write formulas for empty rows so they're ready when user adds data
                 if write_formulas:
                     totals_start_col = week_col_start + len(weeks)

@@ -261,6 +261,7 @@ class EstimateExcelImportResponse(BaseModel):
     """Response schema for Excel import."""
     created: int
     updated: int
-    errors: List[str]
+    deleted: int = 0
+    errors: List[str] = []
 
 

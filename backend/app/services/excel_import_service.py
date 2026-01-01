@@ -25,6 +25,7 @@ from app.models.delivery_center import DeliveryCenter
 from app.models.employee import Employee
 from app.models.role import Role
 from app.models.role_rate import RoleRate
+from app.utils.currency_converter import convert_currency
 
 logger = logging.getLogger(__name__)
 
@@ -82,11 +83,13 @@ class ExcelImportService:
         actual_weeks = self._extract_week_columns(data_ws, len(expected_weeks))
         
         if len(actual_weeks) != len(expected_weeks):
-            raise ValueError(f"Week column count mismatch: expected {len(expected_weeks)}, found {len(actual_weeks)}")
+            raise ValueError(f"Week column count mismatch: expected {len(expected_weeks)}, found {len(actual_weeks)}. "
+                           f"Please ensure you're importing the correct template for this estimate.")
         
         for idx, (expected, actual) in enumerate(zip(expected_weeks, actual_weeks)):
             if expected != actual:
-                raise ValueError(f"Week column {idx + 1} mismatch: expected {expected}, found {actual}")
+                raise ValueError(f"Week column {idx + 1} mismatch: expected {expected.isoformat()}, found {actual.isoformat()}. "
+                               f"Please ensure you're importing the correct template for this estimate.")
         
         # Parse data rows
         line_items_data = self._parse_data_rows(
@@ -164,12 +167,12 @@ class ExcelImportService:
         return metadata
     
     def _extract_week_columns(self, ws, expected_count: int) -> List[date]:
-        """Extract week start dates from week header row (row 3)."""
+        """Extract week start dates from week header row (row 3 - column headers)."""
         weeks = []
-        col = 10  # Start after fixed columns
+        col = 10  # Start after fixed columns (Payable Center, Role, Employee, Cost, Rate, Start Date, End Date, Billable, Billable %)
         
         for idx in range(expected_count):
-            cell = ws[f"{self._get_column_letter(col + idx)}3"]
+            cell = ws[f"{self._get_column_letter(col + idx)}3"]  # Row 3 is now the header row with week dates
             if cell.value:
                 # Parse date from cell value
                 if isinstance(cell.value, datetime):
@@ -177,11 +180,15 @@ class ExcelImportService:
                 elif isinstance(cell.value, date):
                     week_date = cell.value
                 else:
-                    # Try parsing string
+                    # Try parsing string (format: MM/DD/YYYY)
                     try:
                         week_date = datetime.strptime(str(cell.value), "%m/%d/%Y").date()
                     except:
-                        week_date = None
+                        # Try other formats
+                        try:
+                            week_date = datetime.strptime(str(cell.value), "%Y-%m-%d").date()
+                        except:
+                            week_date = None
                 
                 if week_date:
                     weeks.append(week_date)
@@ -197,7 +204,7 @@ class ExcelImportService:
                         engagement_delivery_center_id: UUID, currency: str) -> List[Dict]:
         """Parse data rows from worksheet."""
         line_items = []
-        start_row = 5  # Data starts at row 5
+        start_row = 4  # Data starts at row 4 (row 3 is headers)
         
         # Find end of data (look for empty row or totals row)
         row = start_row
@@ -229,8 +236,12 @@ class ExcelImportService:
         """Parse a single line item row."""
         # Payable Center (Column A)
         payable_center_name = ws[f"A{row}"].value
-        if not payable_center_name:
+        if not payable_center_name or str(payable_center_name).strip() == "":
             return None  # Skip empty rows
+        
+        # Skip rows that are clearly not data (e.g., "TOTALS" label)
+        if str(payable_center_name).strip().upper() == "TOTALS":
+            return None
         
         delivery_centers = metadata.get("delivery_centers", {})
         delivery_center_id = delivery_centers.get(payable_center_name)
@@ -259,17 +270,25 @@ class ExcelImportService:
             if not employee_id:
                 raise ValueError(f"Row {row}: Invalid Employee '{employee_name}'")
         
-        # Cost (Column D)
+        # Cost (Column D) - optional, will use defaults if None
         cost_value = ws[f"D{row}"].value
-        if cost_value is None:
-            raise ValueError(f"Row {row}: Cost is required")
-        cost = Decimal(str(cost_value))
+        cost = None
+        if cost_value is not None:
+            try:
+                cost = Decimal(str(cost_value))
+            except (ValueError, TypeError):
+                # Invalid value, treat as None to use defaults
+                cost = None
         
-        # Rate (Column E)
+        # Rate (Column E) - optional, will use defaults if None
         rate_value = ws[f"E{row}"].value
-        if rate_value is None:
-            raise ValueError(f"Row {row}: Rate is required")
-        rate = Decimal(str(rate_value))
+        rate = None
+        if rate_value is not None:
+            try:
+                rate = Decimal(str(rate_value))
+            except (ValueError, TypeError):
+                # Invalid value, treat as None to use defaults
+                rate = None
         
         # Start Date (Column F)
         start_date_value = ws[f"F{row}"].value
@@ -309,13 +328,23 @@ class ExcelImportService:
             billable_str = str(billable_value).strip().lower()
             billable = billable_str in ["yes", "true", "1", "y"]
         
-        # Billable % (Column I)
+        # Billable % (Column I) - Excel stores percentages as 0-1 (e.g., 0.15 for 15%)
         billable_pct_value = ws[f"I{row}"].value
         billable_pct = Decimal("0")
         if billable_pct_value is not None:
-            billable_pct = Decimal(str(billable_pct_value))
-            if billable_pct < 0 or billable_pct > 100:
-                raise ValueError(f"Row {row}: Billable % must be between 0 and 100")
+            pct_decimal = Decimal(str(billable_pct_value))
+            # Excel percentage format stores 0-1, but user might enter 0-100
+            # Check if value is > 1, if so assume it's 0-100 format, otherwise 0-1 format
+            if pct_decimal > 1:
+                # Value is in 0-100 format, convert to 0-1 for storage
+                billable_pct = pct_decimal
+                if billable_pct > 100:
+                    raise ValueError(f"Row {row}: Billable % must be between 0 and 100")
+            else:
+                # Value is in 0-1 format (Excel percentage), convert to 0-100 for storage
+                billable_pct = pct_decimal * 100
+                if billable_pct < 0 or billable_pct > 100:
+                    raise ValueError(f"Row {row}: Billable % must be between 0 and 100")
         
         # Weekly hours (Columns J onwards)
         weekly_hours = {}
@@ -347,24 +376,48 @@ class ExcelImportService:
     
     async def _upsert_line_items(self, estimate_id: UUID, line_items_data: List[Dict], 
                                  weeks: List[date]) -> Dict:
-        """Upsert line items from parsed data."""
+        """Upsert line items from parsed data.
+        
+        Matching strategy:
+        1. Primary match: (delivery_center_id, role_id, employee_id, start_date)
+        2. Fallback match (if employee_id is None in Excel): (delivery_center_id, role_id, None, start_date)
+           - This handles cases where an employee is added to an existing record
+        3. If no match found, create new record
+        
+        This ensures:
+        - Rate changes update existing records
+        - Employee additions update existing records (if employee was None)
+        - Employee changes create new records (if employee changed from one to another)
+        - Weekly hours are always replaced with Excel values
+        """
         # Get existing line items
         existing_line_items = await self.line_item_repo.list_by_estimate(estimate_id)
-        existing_by_key = {}
+        existing_by_key = {}  # Primary key: (delivery_center_id, role_id, employee_id, start_date)
+        existing_by_key_no_employee = {}  # Fallback key: (delivery_center_id, role_id, None, start_date)
         
         for li in existing_line_items:
-            # Create key from Payable Center + Role + Employee + Start Date
-            key = (
-                str(li.role_rate.delivery_center_id) if li.role_rate else None,
-                str(li.role_rate.role_id) if li.role_rate and li.role_rate.role else None,
-                str(li.employee_id) if li.employee_id else None,
-                str(li.start_date),
-            )
+            delivery_center_id = str(li.role_rate.delivery_center_id) if li.role_rate else None
+            role_id = str(li.role_rate.role_id) if li.role_rate and li.role_rate.role else None
+            employee_id = str(li.employee_id) if li.employee_id else None
+            start_date = str(li.start_date)
+            
+            # Primary key with employee
+            key = (delivery_center_id, role_id, employee_id, start_date)
             existing_by_key[key] = li
+            
+            # Fallback key without employee (for matching when Excel has no employee)
+            if employee_id is None:
+                key_no_emp = (delivery_center_id, role_id, None, start_date)
+                existing_by_key_no_employee[key_no_emp] = li
         
         created_count = 0
         updated_count = 0
+        deleted_count = 0
         errors = []
+        
+        # Track which line items were matched during processing
+        # This includes both exact matches and fallback matches
+        matched_line_item_ids = set()
         
         # Get estimate for currency
         estimate = await self.estimate_repo.get(estimate_id)
@@ -378,18 +431,21 @@ class ExcelImportService:
         for idx, item_data in enumerate(line_items_data):
             try:
                 # Verify role has relationship with engagement delivery center
+                # Check if ANY role rate exists for this role + delivery center (currency doesn't matter for this check)
+                # Use first() instead of scalar_one_or_none() to handle multiple currencies gracefully
                 role_rate_result = await self.session.execute(
                     select(RoleRate).where(
                         RoleRate.role_id == item_data["role_id"],
                         RoleRate.delivery_center_id == engagement_delivery_center_id,
-                    )
+                    ).limit(1)
                 )
-                role_rate_for_lookup = role_rate_result.scalar_one_or_none()
+                role_rate_for_lookup = role_rate_result.scalars().first()
                 
                 if not role_rate_for_lookup:
-                    raise ValueError(f"Row {idx + 5}: Role does not have relationship with Engagement Invoice Center")
+                    raise ValueError(f"Row {idx + 4}: Role does not have relationship with Engagement Invoice Center")
                 
                 # Get or create role_rate for Payable Center
+                # This should be unique due to UniqueConstraint, but handle multiple rows gracefully
                 payable_role_rate_result = await self.session.execute(
                     select(RoleRate).where(
                         RoleRate.role_id == item_data["role_id"],
@@ -397,52 +453,114 @@ class ExcelImportService:
                         RoleRate.default_currency == item_data["currency"],
                     )
                 )
-                payable_role_rate = payable_role_rate_result.scalar_one_or_none()
+                # Use scalars().first() instead of scalar_one_or_none() to handle edge cases gracefully
+                # If multiple rows exist (shouldn't happen due to unique constraint), use first one
+                all_payable_rates = list(payable_role_rate_result.scalars().all())
+                if len(all_payable_rates) > 1:
+                    logger.warning(f"Found {len(all_payable_rates)} role rates for role_id={item_data['role_id']}, "
+                                 f"delivery_center_id={item_data['delivery_center_id']}, "
+                                 f"currency={item_data['currency']}. Using first match.")
+                payable_role_rate = all_payable_rates[0] if all_payable_rates else None
+                
+                # Calculate default rates if cost/rate are None
+                final_cost = item_data["cost"]
+                final_rate = item_data["rate"]
+                
+                if final_cost is None or final_rate is None:
+                    # Get default rates using the same logic as estimate_service
+                    # Pass the role_rate_id if it exists, otherwise None (will look up by role/delivery_center/currency)
+                    default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                        payable_role_rate.id if payable_role_rate else None,
+                        item_data["role_id"],
+                        item_data["delivery_center_id"],
+                        item_data["employee_id"],
+                        item_data["currency"],
+                    )
+                    
+                    if final_rate is None:
+                        final_rate = default_rate
+                    if final_cost is None:
+                        final_cost = default_cost
                 
                 if not payable_role_rate:
-                    # Create new role_rate
+                    # Create new role_rate using Excel values or defaults
+                    # If Excel didn't provide values, use defaults; otherwise use Excel values
                     payable_role_rate = RoleRate(
                         role_id=item_data["role_id"],
                         delivery_center_id=item_data["delivery_center_id"],
                         default_currency=item_data["currency"],
-                        internal_cost_rate=float(item_data["cost"]),
-                        external_rate=float(item_data["rate"]),
+                        internal_cost_rate=float(final_cost),
+                        external_rate=float(final_rate),
                     )
                     self.session.add(payable_role_rate)
                     await self.session.flush()
+                else:
+                    # Update role_rate if cost/rate changed (only if Excel provided explicit values)
+                    # Note: This updates the role_rate defaults, which may affect other line items
+                    # This is intentional - if user changes rates in Excel, they want to update the defaults
+                    # Only update if Excel provided explicit values (not defaults)
+                    if item_data["cost"] is not None and item_data["rate"] is not None:
+                        cost_changed = abs(float(payable_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
+                        rate_changed = abs(float(payable_role_rate.external_rate) - float(item_data["rate"])) > 0.01
+                        
+                        if cost_changed or rate_changed:
+                            logger.info(f"Updating role_rate {payable_role_rate.id} defaults: cost={item_data['cost']}, rate={item_data['rate']}")
+                            payable_role_rate.internal_cost_rate = float(item_data["cost"])
+                            payable_role_rate.external_rate = float(item_data["rate"])
+                            await self.session.flush()
+                    # If Excel values were None, we used defaults but don't update role_rate defaults
                 
-                # Create key for matching
-                key = (
-                    str(item_data["delivery_center_id"]),
-                    str(item_data["role_id"]),
-                    str(item_data["employee_id"]) if item_data["employee_id"] else None,
-                    str(item_data["start_date"]),
-                )
+                # Create keys for matching
+                employee_id_str = str(item_data["employee_id"]) if item_data["employee_id"] else None
+                delivery_center_id_str = str(item_data["delivery_center_id"])
+                role_id_str = str(item_data["role_id"])
+                start_date_str = str(item_data["start_date"])
                 
-                # Find or create line item
-                if key in existing_by_key:
-                    # Update existing
-                    line_item = existing_by_key[key]
+                # Primary key: exact match including employee
+                primary_key = (delivery_center_id_str, role_id_str, employee_id_str, start_date_str)
+                
+                # Fallback key: match without employee (for cases where employee is added)
+                fallback_key = (delivery_center_id_str, role_id_str, None, start_date_str)
+                
+                # Find existing line item
+                line_item = None
+                if primary_key in existing_by_key:
+                    # Exact match found
+                    line_item = existing_by_key[primary_key]
+                    logger.debug(f"Found exact match for row {idx + 4}: {primary_key}")
+                elif employee_id_str is None and fallback_key in existing_by_key_no_employee:
+                    # Fallback match: Excel has no employee, but DB record exists without employee
+                    line_item = existing_by_key_no_employee[fallback_key]
+                    logger.debug(f"Found fallback match (no employee) for row {idx + 4}: {fallback_key}")
+                elif employee_id_str and fallback_key in existing_by_key_no_employee:
+                    # Special case: Excel has employee, DB record has no employee - update existing
+                    line_item = existing_by_key_no_employee[fallback_key]
+                    logger.debug(f"Found fallback match (adding employee) for row {idx + 4}: {fallback_key}")
+                
+                if line_item:
+                    # Update existing line item - use Excel values or defaults
                     await self.line_item_repo.update(
                         line_item.id,
                         role_rates_id=payable_role_rate.id,
-                        employee_id=item_data["employee_id"],
-                        rate=item_data["rate"],
-                        cost=item_data["cost"],
-                        start_date=item_data["start_date"],
-                        end_date=item_data["end_date"],
-                        billable=item_data["billable"],
-                        billable_expense_percentage=item_data["billable_expense_percentage"],
+                        employee_id=item_data["employee_id"],  # Update employee (may be adding or changing)
+                        rate=final_rate,  # Use Excel value or default
+                        cost=final_cost,  # Use Excel value or default
+                        start_date=item_data["start_date"],  # Update start date
+                        end_date=item_data["end_date"],  # Update end date
+                        billable=item_data["billable"],  # Update billable flag
+                        billable_expense_percentage=item_data["billable_expense_percentage"],  # Update billable %
                     )
                     updated_count += 1
+                    matched_line_item_ids.add(line_item.id)  # Track as matched
+                    logger.info(f"Updated line item {line_item.id} from Excel row {idx + 4} (rate={final_rate}, cost={final_cost})")
                 else:
-                    # Create new
+                    # Create new line item - use Excel values or defaults
                     line_item = await self.line_item_repo.create(
                         estimate_id=estimate_id,
                         role_rates_id=payable_role_rate.id,
                         employee_id=item_data["employee_id"],
-                        rate=item_data["rate"],
-                        cost=item_data["cost"],
+                        rate=final_rate,  # Use Excel value or default
+                        cost=final_cost,  # Use Excel value or default
                         currency=item_data["currency"],
                         start_date=item_data["start_date"],
                         end_date=item_data["end_date"],
@@ -452,14 +570,17 @@ class ExcelImportService:
                     )
                     next_order += 1
                     created_count += 1
+                    matched_line_item_ids.add(line_item.id)  # Track as matched (newly created)
+                    logger.info(f"Created new line item {line_item.id} from Excel row {idx + 4} (rate={final_rate}, cost={final_cost})")
                 
                 await self.session.flush()
                 
-                # Update weekly hours
-                # Delete existing weekly hours
+                # Update weekly hours - always replace with Excel values
+                # Delete existing weekly hours for this line item
                 await self.weekly_hours_repo.delete_by_line_item(line_item.id)
                 
-                # Create new weekly hours
+                # Create new weekly hours from Excel data
+                # Only create entries for weeks with hours > 0
                 for week, hours in item_data["weekly_hours"].items():
                     if hours > 0:
                         await self.weekly_hours_repo.create(
@@ -468,16 +589,121 @@ class ExcelImportService:
                             hours=hours,
                         )
                 
+                logger.debug(f"Updated weekly hours for line item {line_item.id}: {len(item_data['weekly_hours'])} weeks")
+                
             except Exception as e:
-                error_msg = f"Row {idx + 5}: {str(e)}"
+                error_msg = f"Row {idx + 4}: {str(e)}"
                 errors.append(error_msg)
                 logger.error(error_msg, exc_info=True)
+        
+        # Delete line items that weren't matched (removed from Excel)
+        # Only delete if we successfully processed at least one row (to avoid accidental mass deletion)
+        if len(line_items_data) > 0:
+            all_existing_ids = {li.id for li in existing_line_items}
+            unmatched_ids = all_existing_ids - matched_line_item_ids
+            
+            if unmatched_ids:
+                logger.info(f"Found {len(unmatched_ids)} line items not present in Excel - will delete")
+                for line_item_id in unmatched_ids:
+                    try:
+                        # Delete weekly hours first (cascade should handle this, but be explicit)
+                        await self.weekly_hours_repo.delete_by_line_item(line_item_id)
+                        # Delete the line item
+                        await self.line_item_repo.delete(line_item_id)
+                        deleted_count += 1
+                        logger.info(f"Deleted line item {line_item_id} (not found in Excel)")
+                    except Exception as e:
+                        error_msg = f"Failed to delete line item {line_item_id}: {str(e)}"
+                        errors.append(error_msg)
+                        logger.error(error_msg, exc_info=True)
         
         await self.session.commit()
         
         return {
             "created": created_count,
             "updated": updated_count,
+            "deleted": deleted_count,
             "errors": errors,
         }
+    
+    async def _get_default_rates_from_role_rate(
+        self,
+        role_rates_id: Optional[UUID],
+        role_id: UUID,
+        delivery_center_id: UUID,
+        employee_id: Optional[UUID],
+        target_currency: str,
+    ) -> Tuple[Decimal, Decimal]:
+        """Get default rate and cost from a role_rate.
+        
+        Priority:
+        1. Employee rates (if employee_id provided) - only cost, NOT rate
+        2. RoleRate rates
+        
+        Args:
+            role_rates_id: ID of the role_rate to use for rate lookup (may be None)
+            role_id: Role ID (used if role_rates_id is None)
+            delivery_center_id: Delivery center ID (used if role_rates_id is None)
+            employee_id: Optional employee ID - if provided, only cost is taken from employee
+            target_currency: Target currency for conversion
+        
+        Returns:
+            Tuple of (rate, cost)
+        """
+        # Get RoleRate first to get the rate
+        role_rate = None
+        if role_rates_id:
+            role_rate = await self.role_rate_repo.get(role_rates_id)
+        else:
+            # Try to find role_rate by role_id, delivery_center_id, currency
+            result = await self.session.execute(
+                select(RoleRate).where(
+                    RoleRate.role_id == role_id,
+                    RoleRate.delivery_center_id == delivery_center_id,
+                    RoleRate.default_currency == target_currency,
+                ).limit(1)
+            )
+            role_rate = result.scalars().first()
+        
+        if not role_rate:
+            # Fallback to role defaults
+            role = await self.role_repo.get(role_id)
+            if role:
+                rate = Decimal(str(role.role_external_rate)) if role.role_external_rate else Decimal("0")
+                cost = Decimal(str(role.role_internal_cost_rate)) if role.role_internal_cost_rate else Decimal("0")
+                return rate, cost
+            return Decimal("0"), Decimal("0")
+        
+        # Rate always comes from RoleRate (not employee)
+        rate = Decimal(str(role_rate.external_rate))
+        cost = Decimal(str(role_rate.internal_cost_rate))
+        rate_currency = role_rate.default_currency
+        
+        # If employee is provided, use employee cost (but NOT rate)
+        if employee_id:
+            employee = await self.employee_repo.get(employee_id)
+            if employee:
+                employee_cost = Decimal(str(employee.internal_cost_rate))
+                employee_currency = employee.default_currency or "USD"
+                
+                # Convert employee cost to target currency if needed
+                if target_currency and employee_currency.upper() != target_currency.upper():
+                    employee_cost_decimal = await convert_currency(
+                        float(employee_cost),
+                        employee_currency,
+                        target_currency,
+                        self.session
+                    )
+                    cost = Decimal(str(employee_cost_decimal))
+                else:
+                    cost = employee_cost
+        
+        # Convert rate to target currency if needed (only if we didn't already convert cost from employee)
+        if target_currency and rate_currency.upper() != target_currency.upper():
+            rate = Decimal(str(await convert_currency(float(rate), rate_currency, target_currency, self.session)))
+            # Only convert cost if it came from role_rate (not employee)
+            if not employee_id:
+                cost = Decimal(str(await convert_currency(float(cost), rate_currency, target_currency, self.session)))
+        
+        return rate, cost
 

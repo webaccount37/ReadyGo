@@ -413,6 +413,7 @@ export function EstimateLineItemRow({
   const lastPopulatedRoleDataRef = useRef<string>("");
 
   // When Role is selected, update Cost and Rate based on Engagement Invoice Center & Role
+  // IMPORTANT: Only auto-populate when role/employee changes, NOT when lineItem updates
   useEffect(() => {
     // Skip if we're currently updating to prevent feedback loops
     if (isUpdatingRef.current) {
@@ -423,27 +424,29 @@ export function EstimateLineItemRow({
       return;
     }
 
+    // Only proceed if role actually changed (not just on every render)
+    const roleChanged = roleValue !== prevRoleRef.current;
+    if (!roleChanged) {
+      return; // Don't auto-populate if role didn't change
+    }
+
     // Need roleValue, engagement delivery center, and selectedRoleData to proceed
     if (!roleValue || !engagementDeliveryCenterId || !selectedRoleData) {
       // If role changed but data not loaded yet, update ref
-      if (roleValue !== prevRoleRef.current) {
-        prevRoleRef.current = roleValue;
-        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      }
+      prevRoleRef.current = roleValue;
+      lastPopulatedRoleDataRef.current = ""; // Reset when role changes
       return;
     }
 
     // Check if we've already populated for this role+engagement+currency combination
     const currentKey = `${roleValue}-${engagementDeliveryCenterId}-${currency}`;
-    const roleChanged = roleValue !== prevRoleRef.current;
     
-    // If role changed, reset the populated flag
-    if (roleChanged) {
-      lastPopulatedRoleDataRef.current = "";
-    }
+    // Reset the populated flag when role changes
+    lastPopulatedRoleDataRef.current = "";
     
     // Skip if we've already populated for this exact combination
     if (lastPopulatedRoleDataRef.current === currentKey) {
+      prevRoleRef.current = roleValue;
       return;
     }
 
@@ -474,7 +477,7 @@ export function EstimateLineItemRow({
       }
     }
 
-    // Update Rate always (Rate always comes from Role)
+    // Update Rate always (Rate always comes from Role) - but ONLY when role changes
     setRateValue(newRate);
     handleFieldUpdate("rate", newRate, lineItem.rate || "0");
 
@@ -487,7 +490,7 @@ export function EstimateLineItemRow({
 
     prevRoleRef.current = roleValue;
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [roleValue, employeeValue, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate]);
+  }, [roleValue, employeeValue, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate]);
 
   // When Employee is selected or cleared, update Cost accordingly
   useEffect(() => {
