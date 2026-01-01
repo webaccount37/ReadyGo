@@ -371,10 +371,11 @@ class EstimateService(BaseService):
                 
                 # Convert employee cost to target currency if needed
                 if target_currency and employee_currency.upper() != target_currency.upper():
-                    employee_cost_decimal = convert_currency(
+                    employee_cost_decimal = await convert_currency(
                         float(employee_cost),
                         employee_currency,
-                        target_currency
+                        target_currency,
+                        self.session
                     )
                     cost = Decimal(str(employee_cost_decimal))
                 else:
@@ -387,10 +388,10 @@ class EstimateService(BaseService):
         
         # Convert rate to target currency if needed (only if we didn't already convert cost from employee)
         if target_currency and rate_currency.upper() != target_currency.upper():
-            rate = Decimal(str(convert_currency(float(rate), rate_currency, target_currency)))
+            rate = Decimal(str(await convert_currency(float(rate), rate_currency, target_currency, self.session)))
             # Only convert cost if it came from role_rate (not employee)
             if not employee_id:
-                cost = Decimal(str(convert_currency(float(cost), rate_currency, target_currency)))
+                cost = Decimal(str(await convert_currency(float(cost), rate_currency, target_currency, self.session)))
         
         return rate, cost
     

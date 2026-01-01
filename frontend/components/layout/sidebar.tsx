@@ -17,6 +17,7 @@ import {
   Shield,
   Calendar,
   Network,
+  DollarSign,
 } from "lucide-react";
 
 interface NavItem {
@@ -58,6 +59,7 @@ const navGroups: NavGroup[] = [
       { title: "Employees", href: "/employees", icon: Users },
       { title: "Roles", href: "/roles", icon: Shield },
       { title: "Calendars", href: "/calendars", icon: Calendar },
+      { title: "Currency Rates", href: "/currency-rates", icon: DollarSign },
     ],
   },
   {

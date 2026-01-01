@@ -52,13 +52,13 @@ class OpportunityService(BaseService):
         """Check if status is a closing status (Won, Lost, Cancelled)."""
         return status in (OpportunityStatus.WON, OpportunityStatus.LOST, OpportunityStatus.CANCELLED)
     
-    def calculate_deal_value_usd(self, deal_value: Optional[Decimal], currency: str) -> Optional[Decimal]:
+    async def calculate_deal_value_usd(self, deal_value: Optional[Decimal], currency: str) -> Optional[Decimal]:
         """Calculate deal value in USD."""
         if deal_value is None:
             return None
         if currency.upper() == "USD":
             return deal_value
-        usd_value = convert_to_usd(float(deal_value), currency)
+        usd_value = await convert_to_usd(float(deal_value), currency, self.session)
         return Decimal(str(usd_value))
     
     def calculate_forecast_value(self, probability: Optional[float], deal_value: Optional[Decimal]) -> Optional[Decimal]:
@@ -105,7 +105,7 @@ class OpportunityService(BaseService):
         deal_value = opportunity_dict.get('deal_value')
         currency = opportunity_dict.get('default_currency', 'USD')
         if deal_value is not None:
-            opportunity_dict['deal_value_usd'] = self.calculate_deal_value_usd(deal_value, currency)
+            opportunity_dict['deal_value_usd'] = await self.calculate_deal_value_usd(deal_value, currency)
         
         # Calculate forecast values
         probability = opportunity_dict.get('probability')
@@ -250,7 +250,7 @@ class OpportunityService(BaseService):
         # Recalculate deal_value_usd if deal_value or currency changed
         if 'deal_value' in update_dict or 'default_currency' in update_dict:
             if current_deal_value is not None:
-                update_dict['deal_value_usd'] = self.calculate_deal_value_usd(current_deal_value, current_currency)
+                update_dict['deal_value_usd'] = await self.calculate_deal_value_usd(current_deal_value, current_currency)
             else:
                 update_dict['deal_value_usd'] = None
         

@@ -22,6 +22,7 @@ from app.models import (
     Account,
     Role,
     DeliveryCenter,
+    CurrencyRate,
 )
 
 # this is the Alembic Config object, which provides
