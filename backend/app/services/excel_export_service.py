@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from openpyxl import Workbook
-from openpyxl.styles import Font, Alignment, PatternFill, Protection
+from openpyxl.styles import Font, Alignment, PatternFill, Protection, NamedStyle
+from openpyxl.styles.numbers import FORMAT_CURRENCY_USD_SIMPLE, FORMAT_PERCENTAGE
 from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -153,6 +154,31 @@ class ExcelExportService:
         
         # No need to restore merged headers - we're using "visual merging" instead of actual merging
         # This avoids Excel repair warnings about merged cells conflicting with tables
+        
+        # Auto-size columns to fit content
+        try:
+            for col_idx in range(1, ws.max_column + 1):
+                col_letter = get_column_letter(col_idx)
+                max_length = 0
+                # Check header row and a few data rows to determine width
+                for row_idx in range(1, min(25, ws.max_row + 1)):  # Check first 25 rows
+                    cell = ws.cell(row=row_idx, column=col_idx)
+                    if cell.value:
+                        # Get display length (account for number formatting)
+                        cell_value = str(cell.value)
+                        # Add some padding for number formats
+                        if cell.number_format and ('0' in cell.number_format or '%' in cell.number_format):
+                            max_length = max(max_length, len(cell_value) + 3)
+                        else:
+                            max_length = max(max_length, len(cell_value))
+                
+                # Set column width (minimum 10, maximum 50, add 2 for padding)
+                if max_length > 0:
+                    ws.column_dimensions[col_letter].width = min(max(max_length + 2, 10), 50)
+                else:
+                    ws.column_dimensions[col_letter].width = 10
+        except Exception as e:
+            logger.warning(f"Could not auto-size columns: {e}")
         
         # Save to BytesIO
         output = io.BytesIO()
@@ -427,16 +453,7 @@ class ExcelExportService:
                 else:
                     cell.alignment = Alignment(horizontal="left", vertical="center")
         
-        # Row 3: Week headers
-        col = 10
-        for idx, week in enumerate(weeks):
-            cell = ws.cell(row=3, column=col + idx)
-            cell.value = week.strftime("%m/%d/%Y")
-            cell.font = Font(bold=True, size=9)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
-            cell.protection = Protection(locked=True)
-        
-        # Row 4: Column headers
+        # Row 3: Column headers (including week dates)
         headers = [
             "Payable Center",
             "Role",
@@ -450,19 +467,19 @@ class ExcelExportService:
         ]
         
         for idx, header in enumerate(headers):
-            cell = ws[f"{get_column_letter(idx + 1)}4"]
+            cell = ws[f"{get_column_letter(idx + 1)}3"]
             cell.value = header
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
         
-        # Week column headers
+        # Week column headers - use actual week dates instead of Hours1, Hours2, etc.
         # IMPORTANT: Excel Tables require unique column headers
-        # So we need to give each week column a unique header
+        # Week dates are unique, so they work perfectly as headers
+        col = 10  # Week columns start at column J
         for idx, week in enumerate(weeks):
-            cell = ws[f"{get_column_letter(col + idx)}4"]
-            # Use week date as part of header to make it unique
-            # Format: "Hours_MMDD" or just "Hours" with index for uniqueness
-            cell.value = f"Hours{idx+1}"  # Unique header: Hours1, Hours2, etc.
+            cell = ws[f"{get_column_letter(col + idx)}3"]
+            # Use week date as header (format: MM/DD/YYYY)
+            cell.value = week.strftime("%m/%d/%Y")
             cell.font = Font(bold=True, size=9)
             cell.alignment = Alignment(horizontal="center", vertical="center")
             cell.protection = Protection(locked=True)
@@ -480,7 +497,7 @@ class ExcelExportService:
         ]
         
         for idx, header in enumerate(total_headers):
-            cell = ws[f"{get_column_letter(totals_start_col + idx)}4"]
+            cell = ws[f"{get_column_letter(totals_start_col + idx)}3"]
             cell.value = header
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
@@ -497,10 +514,10 @@ class ExcelExportService:
             write_formulas: Whether to write calculated column formulas
             min_rows: Minimum number of data rows to create (default 20)
         """
-        start_row = 5  # After header rows
+        start_row = 4  # After header rows (row 3 is headers)
         week_col_start = 10  # Column J
         totals_start_col = week_col_start + len(weeks)
-        header_row = 4
+        header_row = 3
         
         # Ensure we write at least min_rows rows
         num_rows_to_write = max(len(line_items), min_rows)
@@ -526,10 +543,15 @@ class ExcelExportService:
             rate_ref = escape_col_name(rate_header)
             billable_pct_ref = escape_col_name(billable_pct_header)
             
-            # Build week sum reference
+            # Build week sum reference (using actual week date headers)
+            # Note: Excel will sanitize date headers, but we use regular cell references in formulas anyway
             week_col_refs = []
-            for week_idx in range(len(weeks)):
-                week_col_refs.append(f"[@Hours{week_idx+1}]")
+            for week_idx, week in enumerate(weeks):
+                # Excel will sanitize the date header, but structured references use the header as displayed
+                # For now, we'll use regular cell references in formulas, so this is just for reference
+                week_date_str = week.strftime("%m/%d/%Y")
+                # Excel may escape special characters, but we'll use the date as-is
+                week_col_refs.append(f"[@{week_date_str}]")
             week_sum_ref = "+".join(week_col_refs)
         
         # Write line items and empty rows (minimum min_rows rows total)
@@ -544,13 +566,41 @@ class ExcelExportService:
                     totals_start_col = week_col_start + len(weeks)
                     first_week_col = get_column_letter(week_col_start)
                     last_week_col = get_column_letter(week_col_start + len(weeks) - 1)
-                    ws.cell(row=row, column=totals_start_col).value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
-                    ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
-                    ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
-                    ws.cell(row=row, column=totals_start_col + 3).value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(9)}{row}/100"
-                    ws.cell(row=row, column=totals_start_col + 4).value = f"={get_column_letter(totals_start_col + 2)}{row}-{get_column_letter(totals_start_col + 1)}{row}"
-                    ws.cell(row=row, column=totals_start_col + 5).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,({get_column_letter(totals_start_col + 4)}{row}/{get_column_letter(totals_start_col + 2)}{row})*100)"
-                    ws.cell(row=row, column=totals_start_col + 6).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,(({get_column_letter(totals_start_col + 4)}{row}-{get_column_letter(totals_start_col + 3)}{row})/{get_column_letter(totals_start_col + 2)}{row})*100)"
+                    
+                    # Total Hours
+                    total_hours_cell = ws.cell(row=row, column=totals_start_col)
+                    total_hours_cell.value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
+                    total_hours_cell.number_format = '#,##0.00'
+                    
+                    # Total Cost (currency)
+                    total_cost_cell = ws.cell(row=row, column=totals_start_col + 1)
+                    total_cost_cell.value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
+                    total_cost_cell.number_format = '#,##0.00'
+                    
+                    # Total Revenue (currency)
+                    total_revenue_cell = ws.cell(row=row, column=totals_start_col + 2)
+                    total_revenue_cell.value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+                    total_revenue_cell.number_format = '#,##0.00'
+                    
+                    # Billable Expense Amount (currency) - Billable % is stored as 0-1 in Excel
+                    billable_expense_cell = ws.cell(row=row, column=totals_start_col + 3)
+                    billable_expense_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(9)}{row}"
+                    billable_expense_cell.number_format = '#,##0.00'
+                    
+                    # Margin Amount (currency)
+                    margin_amount_cell = ws.cell(row=row, column=totals_start_col + 4)
+                    margin_amount_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}-{get_column_letter(totals_start_col + 1)}{row}"
+                    margin_amount_cell.number_format = '#,##0.00'
+                    
+                    # Margin % Without Expenses (percentage)
+                    margin_pct_wo_cell = ws.cell(row=row, column=totals_start_col + 5)
+                    margin_pct_wo_cell.value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,({get_column_letter(totals_start_col + 4)}{row}/{get_column_letter(totals_start_col + 2)}{row}))"
+                    margin_pct_wo_cell.number_format = '0.00%'
+                    
+                    # Margin % With Expenses (percentage)
+                    margin_pct_w_cell = ws.cell(row=row, column=totals_start_col + 6)
+                    margin_pct_w_cell.value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,(({get_column_letter(totals_start_col + 4)}{row}-{get_column_letter(totals_start_col + 3)}{row})/{get_column_letter(totals_start_col + 2)}{row}))"
+                    margin_pct_w_cell.number_format = '0.00%'
                 continue
             
             # Write line item data
@@ -566,11 +616,15 @@ class ExcelExportService:
             if line_item.employee:
                 ws.cell(row=row, column=3).value = f"{line_item.employee.first_name} {line_item.employee.last_name}"
             
-            # Cost
-            ws.cell(row=row, column=4).value = float(line_item.cost)
+            # Cost (currency format)
+            cost_cell = ws.cell(row=row, column=4)
+            cost_cell.value = float(line_item.cost)
+            cost_cell.number_format = '#,##0.00'
             
-            # Rate
-            ws.cell(row=row, column=5).value = float(line_item.rate)
+            # Rate (currency format)
+            rate_cell = ws.cell(row=row, column=5)
+            rate_cell.value = float(line_item.rate)
+            rate_cell.number_format = '#,##0.00'
             
             # Start Date
             ws.cell(row=row, column=6).value = line_item.start_date
@@ -581,8 +635,10 @@ class ExcelExportService:
             # Billable
             ws.cell(row=row, column=8).value = "Yes" if line_item.billable else "No"
             
-            # Billable %
-            ws.cell(row=row, column=9).value = float(line_item.billable_expense_percentage)
+            # Billable % (percentage format)
+            billable_pct_cell = ws.cell(row=row, column=9)
+            billable_pct_cell.value = float(line_item.billable_expense_percentage) / 100  # Excel percentages are 0-1
+            billable_pct_cell.number_format = '0.00%'
             
             # Weekly hours
             weekly_hours_dict = {}
@@ -603,25 +659,39 @@ class ExcelExportService:
                 # Total Hours: SUM of all week columns using regular cell references
                 first_week_col = get_column_letter(week_col_start)
                 last_week_col = get_column_letter(week_col_start + len(weeks) - 1)
-                ws.cell(row=row, column=totals_start_col).value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
+                total_hours_cell = ws.cell(row=row, column=totals_start_col)
+                total_hours_cell.value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
+                total_hours_cell.number_format = '#,##0.00'
                 
-                # Total Cost: Total Hours * Cost
-                ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
+                # Total Cost: Total Hours * Cost (currency format)
+                total_cost_cell = ws.cell(row=row, column=totals_start_col + 1)
+                total_cost_cell.value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
+                total_cost_cell.number_format = '#,##0.00'
                 
-                # Total Revenue: Total Hours * Rate
-                ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+                # Total Revenue: Total Hours * Rate (currency format)
+                total_revenue_cell = ws.cell(row=row, column=totals_start_col + 2)
+                total_revenue_cell.value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+                total_revenue_cell.number_format = '#,##0.00'
                 
-                # Billable Expense Amount: Total Revenue * Billable % / 100
-                ws.cell(row=row, column=totals_start_col + 3).value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(9)}{row}/100"
+                # Billable Expense Amount: Total Revenue * Billable % (Billable % is stored as 0-1 in Excel)
+                billable_expense_cell = ws.cell(row=row, column=totals_start_col + 3)
+                billable_expense_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(9)}{row}"
+                billable_expense_cell.number_format = '#,##0.00'
                 
-                # Margin Amount: Total Revenue - Total Cost
-                ws.cell(row=row, column=totals_start_col + 4).value = f"={get_column_letter(totals_start_col + 2)}{row}-{get_column_letter(totals_start_col + 1)}{row}"
+                # Margin Amount: Total Revenue - Total Cost (currency format)
+                margin_amount_cell = ws.cell(row=row, column=totals_start_col + 4)
+                margin_amount_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}-{get_column_letter(totals_start_col + 1)}{row}"
+                margin_amount_cell.number_format = '#,##0.00'
                 
-                # Margin % Without Expenses
-                ws.cell(row=row, column=totals_start_col + 5).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,({get_column_letter(totals_start_col + 4)}{row}/{get_column_letter(totals_start_col + 2)}{row})*100)"
+                # Margin % Without Expenses (percentage format)
+                margin_pct_wo_cell = ws.cell(row=row, column=totals_start_col + 5)
+                margin_pct_wo_cell.value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,({get_column_letter(totals_start_col + 4)}{row}/{get_column_letter(totals_start_col + 2)}{row}))"
+                margin_pct_wo_cell.number_format = '0.00%'
                 
-                # Margin % With Expenses
-                ws.cell(row=row, column=totals_start_col + 6).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,(({get_column_letter(totals_start_col + 4)}{row}-{get_column_letter(totals_start_col + 3)}{row})/{get_column_letter(totals_start_col + 2)}{row})*100)"
+                # Margin % With Expenses (percentage format)
+                margin_pct_w_cell = ws.cell(row=row, column=totals_start_col + 6)
+                margin_pct_w_cell.value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,(({get_column_letter(totals_start_col + 4)}{row}-{get_column_letter(totals_start_col + 3)}{row})/{get_column_letter(totals_start_col + 2)}{row}))"
+                margin_pct_w_cell.number_format = '0.00%'
     
     def _escape_column_name(self, col_name: str) -> str:
         """Escape column name for use in structured references.
@@ -671,10 +741,13 @@ class ExcelExportService:
         logger.info(f"  Total Cost: '{total_cost_header}'")
         logger.info(f"  Total Revenue: '{total_revenue_header}'")
         
-        # Build structured reference for week columns
+        # Build structured reference for week columns (using actual week date headers)
+        # Note: Excel will sanitize date headers, but we use regular cell references in formulas anyway
         week_col_refs = []
-        for week_idx in range(len(weeks)):
-            week_col_refs.append(f"[@Hours{week_idx+1}]")
+        for week_idx, week in enumerate(weeks):
+            week_date_str = week.strftime("%m/%d/%Y")
+            # Excel may escape special characters, but we'll use the date as-is
+            week_col_refs.append(f"[@{week_date_str}]")
         week_sum_ref = "+".join(week_col_refs)
         
         # Build formulas using structured references
@@ -760,8 +833,8 @@ class ExcelExportService:
         if num_rows == 0:
             return
         
-        header_row = 4
-        start_row = 5
+        header_row = 3
+        start_row = 4
         end_row = start_row + num_rows - 1
         totals_row = end_row + 1  # After data rows (this will be INSIDE the table)
         
@@ -774,8 +847,8 @@ class ExcelExportService:
                                         roles: List[Role], employees: List[Employee],
                                         num_rows: int, num_weeks: int):
         """Apply data validation and cell protection."""
-        start_row = 5
-        end_row = 4 + num_rows
+        start_row = 4
+        end_row = start_row + num_rows - 1
         
         # Calculate max row for validation
         # Since we're using Excel Tables, validation will automatically extend when rows are inserted
@@ -866,9 +939,9 @@ class ExcelExportService:
         
         # NOW lock only specific cells that should be protected
         
-        # Lock header rows (rows 1-4) - users cannot modify headers
-        logger.info("Locking header rows 1-4")
-        for row in range(1, 5):
+        # Lock header rows (rows 1-3) - users cannot modify headers
+        logger.info("Locking header rows 1-3")
+        for row in range(1, 4):  # Rows 1, 2, 3
             for col in range(1, max_col + 1):
                 try:
                     cell = ws.cell(row=row, column=col)
@@ -881,7 +954,7 @@ class ExcelExportService:
         for week_idx in range(num_weeks):
             col = week_col_start + week_idx
             try:
-                cell = ws.cell(row=3, column=col)
+                cell = ws.cell(row=2, column=col)
                 cell.protection = locked_protection
             except Exception:
                 pass
@@ -999,8 +1072,8 @@ class ExcelExportService:
         if num_rows == 0:
             return
         
-        header_row = 4  # Column headers are in row 4
-        start_row = 5  # Data starts at row 5
+        header_row = 3  # Column headers are in row 3
+        start_row = 4  # Data starts at row 4
         end_row = start_row + num_rows - 1  # Last data row
         totals_row = end_row + 1  # Totals row (MUST be INSIDE the table)
         
@@ -1107,15 +1180,37 @@ class ExcelExportService:
                 cell.value = f"=SUBTOTAL(109,{col_letter}{start_row}:{col_letter}{end_row})"
                 cell.font = Font(bold=True)
             
-            # Totals for totals columns (sum of calculated totals from each row)
-            # Use SUBTOTAL with column ranges - Excel Tables recognize this as totals row formulas
+            # Totals for totals columns
+            # Most columns use SUBTOTAL (sum), but Margin % columns need special calculation
             for col_offset in range(7):  # 7 totals columns
                 col = totals_start_col + col_offset
                 col_letter = get_column_letter(col)
                 cell = ws.cell(row=totals_row, column=col)
-                # SUBTOTAL(109, ...) is SUM that ignores hidden rows and excludes totals row
-                # Reference the data rows only (start_row to end_row)
-                cell.value = f"=SUBTOTAL(109,{col_letter}{start_row}:{col_letter}{end_row})"
+                
+                if col_offset == 5:
+                    # Margin % Without Expenses: (Total Margin Amount / Total Revenue)
+                    margin_amount_col = get_column_letter(totals_start_col + 4)
+                    total_revenue_col = get_column_letter(totals_start_col + 2)
+                    cell.value = f"=IF({total_revenue_col}{totals_row}=0,0,({margin_amount_col}{totals_row}/{total_revenue_col}{totals_row}))"
+                    cell.number_format = '0.00%'
+                elif col_offset == 6:
+                    # Margin % With Expenses: ((Total Margin Amount - Total Billable Expense Amount) / Total Revenue)
+                    margin_amount_col = get_column_letter(totals_start_col + 4)
+                    billable_expense_col = get_column_letter(totals_start_col + 3)
+                    total_revenue_col = get_column_letter(totals_start_col + 2)
+                    cell.value = f"=IF({total_revenue_col}{totals_row}=0,0,(({margin_amount_col}{totals_row}-{billable_expense_col}{totals_row})/{total_revenue_col}{totals_row}))"
+                    cell.number_format = '0.00%'
+                else:
+                    # All other columns: Use SUBTOTAL (sum)
+                    # SUBTOTAL(109, ...) is SUM that ignores hidden rows and excludes totals row
+                    # Reference the data rows only (start_row to end_row)
+                    cell.value = f"=SUBTOTAL(109,{col_letter}{start_row}:{col_letter}{end_row})"
+                    # Apply currency format to currency columns (Total Cost, Total Revenue, Billable Expense, Margin Amount)
+                    if col_offset in [1, 2, 3, 4]:  # Total Cost, Total Revenue, Billable Expense Amount, Margin Amount
+                        cell.number_format = '#,##0.00'
+                    elif col_offset == 0:  # Total Hours
+                        cell.number_format = '#,##0.00'
+                
                 cell.font = Font(bold=True)
             
             logger.info(f"Created Excel Table 'EstimateData' with range {table_ref}")
