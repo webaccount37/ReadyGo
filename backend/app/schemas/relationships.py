@@ -17,7 +17,8 @@ class EngagementLinkData(BaseModel):
     start_date: date = Field(..., description="Start date for the association")
     end_date: date = Field(..., description="End date for the association")
     project_rate: float = Field(..., ge=0, description="Project rate")
-    delivery_center: str = Field(..., description="Delivery center code (e.g., 'north-america')")
+    project_cost: Optional[float] = Field(None, ge=0, description="Project cost (optional, auto-filled from role or employee)")
+    delivery_center: str = Field(..., description="Payable Center code (e.g., 'north-america') - reference only, not used for rate calculations")
 
 
 class LinkEmployeeToOpportunityRequest(BaseModel):
@@ -31,7 +32,8 @@ class LinkEmployeeToEngagementRequest(BaseModel):
     start_date: date = Field(..., description="Start date for the association")
     end_date: date = Field(..., description="End date for the association")
     project_rate: float = Field(..., ge=0, description="Project rate")
-    delivery_center: str = Field(..., description="Delivery center code (e.g., 'north-america')")
+    project_cost: Optional[float] = Field(None, ge=0, description="Project cost (optional, auto-filled from role or employee)")
+    delivery_center: str = Field(..., description="Payable Center code (e.g., 'north-america') - reference only, not used for rate calculations")
 
 
 class LinkEmployeesToOpportunityRequest(BaseModel):
@@ -47,7 +49,8 @@ class LinkEmployeesToEngagementRequest(BaseModel):
     start_date: date = Field(..., description="Start date for the association")
     end_date: date = Field(..., description="End date for the association")
     project_rate: float = Field(..., ge=0, description="Project rate")
-    delivery_center: str = Field(..., description="Delivery center code (e.g., 'north-america')")
+    project_cost: Optional[float] = Field(None, ge=0, description="Project cost (optional, auto-filled from role or employee)")
+    delivery_center: str = Field(..., description="Payable Center code (e.g., 'north-america') - reference only, not used for rate calculations")
 
 
 class LinkRolesToOpportunityRequest(BaseModel):

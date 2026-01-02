@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
@@ -11,12 +11,15 @@ import {
   useUnlinkEmployeeFromOpportunity,
   useLinkEmployeeToEngagement,
   useUnlinkEmployeeFromEngagement,
+  useEmployee,
 } from "@/hooks/useEmployees";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEngagements } from "@/hooks/useEngagements";
-import { useRoles } from "@/hooks/useRoles";
+import { useRoles, useRole } from "@/hooks/useRoles";
 import { useAccounts } from "@/hooks/useAccounts";
+import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { normalizeDateForInput } from "@/lib/utils";
+import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import type { Employee } from "@/types/employee";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 
@@ -32,6 +35,7 @@ interface EngagementFormData {
   start_date: string;
   end_date: string;
   project_rate: string;
+  project_cost: string;
   delivery_center: string;
 }
 
@@ -44,6 +48,7 @@ interface LinkEngagementFormData {
   start_date: string;
   end_date: string;
   project_rate: string;
+  project_cost: string;
   delivery_center: string;
 }
 
@@ -65,6 +70,7 @@ export function EmployeeRelationships({
     start_date: "",
     end_date: "",
     project_rate: employee.external_bill_rate?.toString() || "",
+    project_cost: employee.internal_cost_rate?.toString() || "",
     delivery_center: "",
   });
 
@@ -73,7 +79,40 @@ export function EmployeeRelationships({
   const { data: rolesData } = useRoles({ limit: 1000 });
   const { data: accountsData } = useAccounts({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
+  const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
+  
+  // Update currency rates cache when rates are fetched
+  useEffect(() => {
+    if (currencyRatesData?.items) {
+      const rates: Record<string, number> = {};
+      currencyRatesData.items.forEach((rate) => {
+        rates[rate.currency_code.toUpperCase()] = rate.rate_to_usd;
+      });
+      setCurrencyRates(rates);
+    }
+  }, [currencyRatesData]);
+  
+  // Get selected role and employee data for auto-fill (for direct engagement linking)
+  const { data: selectedRoleData } = useRole(
+    engagementFormData.role_id || "",
+    false,
+    {
+      enabled: !!engagementFormData.role_id && !!selectedEngagementId,
+    }
+  );
+  const { data: selectedEmployeeData } = useEmployee(
+    employee?.id || "",
+    false,
+    {
+      enabled: !!employee?.id,
+    }
+  );
+  const selectedEngagement = useMemo(() => {
+    return selectedEngagementId 
+      ? engagementsData?.items.find(e => e.id === selectedEngagementId)
+      : null;
+  }, [selectedEngagementId, engagementsData?.items]);
 
   const linkToOpportunity = useLinkEmployeeToOpportunity({
     onSuccess: async () => {
@@ -93,10 +132,187 @@ export function EmployeeRelationships({
     },
   });
 
-  const rolesForDeliveryCenter = (dc: string) =>
-    rolesData?.items.filter((role) =>
-      role.role_rates?.some((r) => r.delivery_center_code === dc)
+  // Get delivery center code from engagement's delivery_center_id (Invoice Center)
+  const getInvoiceCenterCodeForEngagement = (engagementId: string): string | null => {
+    if (!engagementId || !engagementsData?.items || !deliveryCentersData?.items) return null;
+    const engagement = engagementsData.items.find(e => e.id === engagementId);
+    if (!engagement?.delivery_center_id) return null;
+    const invoiceCenter = deliveryCentersData.items.find(dc => dc.id === engagement.delivery_center_id);
+    return invoiceCenter?.code || null;
+  };
+
+  const rolesForInvoiceCenter = (engagementId: string) => {
+    const invoiceCenterCode = getInvoiceCenterCodeForEngagement(engagementId);
+    if (!invoiceCenterCode) return [];
+    return rolesData?.items.filter((role) =>
+      role.role_rates?.some((r) => r.delivery_center_code === invoiceCenterCode)
     ) || [];
+  };
+
+  // Auto-fill Project Rate when Role changes (for direct engagement linking) - Rate always comes from Role
+  useEffect(() => {
+    if (!engagementFormData.role_id || !selectedEngagementId || !selectedEngagement) {
+      return;
+    }
+
+    if (!selectedEngagement.delivery_center_id) return;
+
+    // Wait for selectedRoleData to load - this is critical for the effect to work
+    if (!selectedRoleData) return;
+
+    // Find the role rate that matches engagement delivery center and currency
+    const matchingRate = selectedRoleData.role_rates?.find(
+      (rate) =>
+        String(rate.delivery_center_id) === String(selectedEngagement.delivery_center_id) &&
+        rate.default_currency === (selectedEngagement.default_currency || "USD")
+    );
+
+    let newRate: string;
+
+    if (matchingRate) {
+      newRate = String(matchingRate.external_rate || "0");
+    } else {
+      // Fallback to role default rate if no matching rate found
+      newRate = String(selectedRoleData.role_external_rate || "0");
+    }
+
+    // Update Project Rate only (Rate always comes from Role)
+    setEngagementFormData((prev) => ({
+      ...prev,
+      project_rate: newRate,
+    }));
+  }, [engagementFormData.role_id, selectedEngagementId, selectedRoleData, selectedEngagement]);
+
+  // Auto-fill Project Cost when Employee or Engagement changes (for direct engagement linking) - Cost always comes from Employee
+  useEffect(() => {
+    if (!employee?.id || !selectedEmployeeData || !selectedEngagement) {
+      return;
+    }
+
+    // Update Project Cost from employee's internal_cost_rate
+    if (selectedEmployeeData.internal_cost_rate !== undefined) {
+      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+      const engagementCurrency = selectedEngagement.default_currency || "USD";
+
+      // Convert to Engagement Invoice Center Currency if different (same logic as Estimation Spreadsheet and Opportunities)
+      if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
+        employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
+      }
+
+      setEngagementFormData((prev) => ({
+        ...prev,
+        project_cost: String(employeeCost),
+      }));
+    }
+  }, [employee?.id, selectedEmployeeData, selectedEngagement]);
+
+  // Auto-fill for Opportunity form engagements: Project Cost with currency conversion and default dates when engagement is added
+  useEffect(() => {
+    if (!selectedEmployeeData || !opportunityFormData.engagements.length || !engagementsData?.items) {
+      return;
+    }
+
+    const updated = opportunityFormData.engagements.map((engagementForm) => {
+      const engagement = engagementsData.items.find(e => e.id === engagementForm.engagement_id);
+      if (!engagement) return engagementForm;
+
+      // Apply currency conversion to project_cost if employee currency differs from engagement currency
+      let projectCost = engagementForm.project_cost;
+      if (selectedEmployeeData.internal_cost_rate !== undefined && (!projectCost || projectCost === employee.internal_cost_rate?.toString())) {
+        let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+        const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+        const engagementCurrency = engagement.default_currency || "USD";
+
+        if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
+          employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
+        }
+        projectCost = String(employeeCost);
+      }
+
+      // Default dates if not set
+      let startDate = engagementForm.start_date;
+      let endDate = engagementForm.end_date;
+      if (!startDate && engagement.start_date) {
+        startDate = normalizeDateForInput(engagement.start_date);
+      }
+      if (!endDate && engagement.end_date) {
+        endDate = normalizeDateForInput(engagement.end_date);
+      }
+
+      return {
+        ...engagementForm,
+        project_cost: projectCost,
+        start_date: startDate,
+        end_date: endDate,
+      };
+    });
+
+    // Only update if something changed
+    const hasChanges = updated.some((newForm, index) => {
+      const oldForm = opportunityFormData.engagements[index];
+      return newForm.project_cost !== oldForm.project_cost ||
+             newForm.start_date !== oldForm.start_date ||
+             newForm.end_date !== oldForm.end_date;
+    });
+
+    if (hasChanges) {
+      setOpportunityFormData({ engagements: updated });
+    }
+  }, [opportunityFormData.engagements.length, selectedEmployeeData, engagementsData?.items, employee?.internal_cost_rate]);
+
+  // Auto-fill Project Rate when Role changes in Opportunity form engagements
+  useEffect(() => {
+    if (!opportunityFormData.engagements.length || !engagementsData?.items || !rolesData?.items) {
+      return;
+    }
+
+    const updated = opportunityFormData.engagements.map((engagementForm) => {
+      if (!engagementForm.role_id || !engagementForm.engagement_id) {
+        return engagementForm;
+      }
+
+      const engagement = engagementsData.items.find(e => e.id === engagementForm.engagement_id);
+      if (!engagement || !engagement.delivery_center_id) {
+        return engagementForm;
+      }
+
+      const role = rolesData.items.find(r => r.id === engagementForm.role_id);
+      if (!role) {
+        return engagementForm;
+      }
+
+      // Find the role rate that matches engagement delivery center and currency
+      const matchingRate = role.role_rates?.find(
+        (rate) =>
+          String(rate.delivery_center_id) === String(engagement.delivery_center_id) &&
+          rate.default_currency === (engagement.default_currency || "USD")
+      );
+
+      const newRate = matchingRate 
+        ? String(matchingRate.external_rate || "0")
+        : String(role.role_external_rate || "0");
+
+      // Only update if rate changed
+      if (newRate !== engagementForm.project_rate) {
+        return {
+          ...engagementForm,
+          project_rate: newRate,
+        };
+      }
+
+      return engagementForm;
+    });
+
+    // Only update if something changed
+    const hasChanges = updated.some((newForm, index) => {
+      return newForm.project_rate !== opportunityFormData.engagements[index].project_rate;
+    });
+
+    if (hasChanges) {
+      setOpportunityFormData({ engagements: updated });
+    }
+  }, [opportunityFormData.engagements, engagementsData?.items, rolesData?.items]);
 
   const unlinkFromOpportunity = useUnlinkEmployeeFromOpportunity({
     onSuccess: async () => {
@@ -120,8 +336,9 @@ export function EmployeeRelationships({
         role_id: "",
         start_date: "",
         end_date: "",
-        project_rate: employee.external_bill_rate?.toString() || "",
-        delivery_center: "",
+    project_rate: employee.external_bill_rate?.toString() || "",
+    project_cost: employee.internal_cost_rate?.toString() || "",
+    delivery_center: "",
       });
       await new Promise(resolve => setTimeout(resolve, 100));
       await onUpdate();
@@ -161,7 +378,7 @@ export function EmployeeRelationships({
     // Validate all engagements have required fields
     for (const engagement of opportunityFormData.engagements) {
       if (!engagement.role_id || !engagement.start_date || !engagement.end_date || !engagement.project_rate || !engagement.delivery_center) {
-        alert(`Please fill in all required fields for engagement: Role, Start Date, End Date, Project Rate, and Delivery Center`);
+        alert(`Please fill in all required fields for engagement: Role, Start Date, End Date, Project Rate, and Payable Center`);
         return;
       }
       const projectRate = parseFloat(engagement.project_rate);
@@ -179,6 +396,7 @@ export function EmployeeRelationships({
         start_date: r.start_date,
         end_date: r.end_date,
         project_rate: parseFloat(r.project_rate),
+        project_cost: r.project_cost ? parseFloat(r.project_cost) : undefined,
         delivery_center: r.delivery_center,
       })),
     };
@@ -262,9 +480,10 @@ export function EmployeeRelationships({
       return;
     }
     if (!engagementFormData.role_id || !engagementFormData.start_date || !engagementFormData.end_date || !engagementFormData.project_rate || !engagementFormData.delivery_center) {
-      alert("Please fill in all required fields: Role, Start Date, End Date, Project Rate, and Delivery Center");
+      alert("Please fill in all required fields: Role, Start Date, End Date, Project Rate, and Payable Center");
       return;
     }
+    const projectCost = engagementFormData.project_cost ? parseFloat(engagementFormData.project_cost) : undefined;
     try {
       await linkToEngagement.mutateAsync({
         employeeId: employee.id,
@@ -274,6 +493,7 @@ export function EmployeeRelationships({
           start_date: engagementFormData.start_date,
           end_date: engagementFormData.end_date,
           project_rate: parseFloat(engagementFormData.project_rate),
+          project_cost: projectCost,
           delivery_center: engagementFormData.delivery_center,
         },
       });
@@ -417,7 +637,7 @@ export function EmployeeRelationships({
                                         <div><strong>Project Rate:</strong> ${engagementData.project_rate.toFixed(2)}</div>
                                       )}
                                       {engagementData.delivery_center && (
-                                        <div><strong>Delivery Center:</strong> {deliveryCentersData?.items.find(dc => dc.code === engagementData.delivery_center)?.name || engagementData.delivery_center}</div>
+                                        <div><strong>Payable Center:</strong> {deliveryCentersData?.items.find(dc => dc.code === engagementData.delivery_center)?.name || engagementData.delivery_center}</div>
                                       )}
                                     </div>
                                   )}
@@ -465,8 +685,9 @@ export function EmployeeRelationships({
                                   role_id: "",
                                   start_date: "",
                                   end_date: "",
-                                  project_rate: employee.external_bill_rate?.toString() || "",
-                                  delivery_center: "",
+    project_rate: employee.external_bill_rate?.toString() || "",
+    project_cost: employee.internal_cost_rate?.toString() || "",
+    delivery_center: "",
                                 });
                               }}
                               variant="outline"
@@ -483,8 +704,23 @@ export function EmployeeRelationships({
                                 onChange={(e) => {
                                   const value = e.target.value;
                                   setSelectedEngagementId(value);
+                                  // Default Start Date and End Date to Engagement dates when engagement is selected
                                   if (value) {
-                                    // Opportunity selection handled by selectedOpportunityId
+                                    const selectedEngagement = engagementsData?.items.find(e => e.id === value);
+                                    if (selectedEngagement) {
+                                      setEngagementFormData(prev => ({
+                                        ...prev,
+                                        start_date: normalizeDateForInput(selectedEngagement.start_date || ""),
+                                        end_date: normalizeDateForInput(selectedEngagement.end_date || ""),
+                                      }));
+                                    }
+                                  } else {
+                                    // Clear dates when engagement is cleared
+                                    setEngagementFormData(prev => ({
+                                      ...prev,
+                                      start_date: "",
+                                      end_date: "",
+                                    }));
                                   }
                                 }}
                                 className="w-full"
@@ -499,7 +735,7 @@ export function EmployeeRelationships({
                               
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
-                                  <Label htmlFor={`engagement-delivery-center-${opportunity.id}`}>Delivery Center *</Label>
+                                  <Label htmlFor={`engagement-delivery-center-${opportunity.id}`}>Payable Center *</Label>
                                   <Select
                                     id={`engagement-delivery-center-${opportunity.id}`}
                                     value={engagementFormData.delivery_center}
@@ -508,12 +744,12 @@ export function EmployeeRelationships({
                                       setEngagementFormData({
                                         ...engagementFormData,
                                         delivery_center: dc,
-                                        role_id: "",
+                                        // Do NOT clear role_id - Payable Center is reference only and doesn't affect Role
                                       });
                                     }}
                                     className="w-full"
                                   >
-                                    <option value="">Select delivery center</option>
+                                    <option value="">Select payable center</option>
                                     {deliveryCentersData?.items.map((dc) => (
                                       <option key={dc.code} value={dc.code}>
                                         {dc.name}
@@ -529,10 +765,10 @@ export function EmployeeRelationships({
                                     value={engagementFormData.role_id}
                                     onChange={(e) => setEngagementFormData({ ...engagementFormData, role_id: e.target.value })}
                                     className="w-full"
-                                    disabled={!engagementFormData.delivery_center}
+                                    disabled={!selectedEngagementId}
                                   >
                                     <option value="">Select role</option>
-                                    {rolesForDeliveryCenter(engagementFormData.delivery_center).map((role) => (
+                                    {rolesForInvoiceCenter(selectedEngagementId).map((role) => (
                                       <option key={role.id} value={role.id}>
                                         {role.role_name}
                                       </option>
@@ -562,7 +798,21 @@ export function EmployeeRelationships({
                                   />
                                 </div>
                                 
-                                <div className="sm:col-span-2">
+                                <div>
+                                  <Label htmlFor={`engagement-cost-${opportunity.id}`}>Project Cost</Label>
+                                  <Input
+                                    id={`engagement-cost-${opportunity.id}`}
+                                    type="number"
+                                    step="0.01"
+                                    min="0"
+                                    value={engagementFormData.project_cost}
+                                    onChange={(e) => setEngagementFormData({ ...engagementFormData, project_cost: e.target.value })}
+                                    className="w-full"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+
+                                <div>
                                   <Label htmlFor={`engagement-rate-${opportunity.id}`}>Project Rate *</Label>
                                   <Input
                                     id={`engagement-rate-${opportunity.id}`}
@@ -594,8 +844,9 @@ export function EmployeeRelationships({
                                       role_id: "",
                                       start_date: "",
                                       end_date: "",
-                                      project_rate: employee.external_bill_rate?.toString() || "",
-                                      delivery_center: "",
+    project_rate: employee.external_bill_rate?.toString() || "",
+    project_cost: employee.internal_cost_rate?.toString() || "",
+    delivery_center: "",
                                     });
                                   }}
                                   variant="outline"
@@ -703,15 +954,32 @@ export function EmployeeRelationships({
                                     size="sm"
                                     variant="outline"
                                     onClick={() => {
+                                      // Apply currency conversion and default dates when adding engagement
+                                      const engagementCurrency = engagement.default_currency || "USD";
+                                      const employeeCurrency = selectedEmployeeData?.default_currency || employee.default_currency || "USD";
+                                      let projectCost = selectedEmployeeData?.internal_cost_rate?.toString() || employee.internal_cost_rate?.toString() || "";
+                                      
+                                      // Apply currency conversion if employee currency differs from engagement currency
+                                      if (selectedEmployeeData?.internal_cost_rate !== undefined && 
+                                          employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
+                                        const convertedCost = convertCurrency(
+                                          selectedEmployeeData.internal_cost_rate,
+                                          employeeCurrency,
+                                          engagementCurrency
+                                        );
+                                        projectCost = String(convertedCost);
+                                      }
+
                                       setOpportunityFormData({
                                         engagements: [
                                           ...opportunityFormData.engagements,
                                           {
                                             engagement_id: engagement.id,
                                             role_id: "",
-                                            start_date: "",
-                                            end_date: "",
+                                            start_date: normalizeDateForInput(engagement.start_date || ""),
+                                            end_date: normalizeDateForInput(engagement.end_date || ""),
                                             project_rate: employee.external_bill_rate?.toString() || "",
+                                            project_cost: projectCost,
                                             delivery_center: "",
                                           },
                                         ],
@@ -726,20 +994,21 @@ export function EmployeeRelationships({
                               {engagementForm && (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
                                   <div>
-                                    <Label htmlFor={`engagement-delivery-center-${engagement.id}`}>Delivery Center *</Label>
+                                    <Label htmlFor={`engagement-delivery-center-${engagement.id}`}>Payable Center *</Label>
                                     <Select
                                       id={`engagement-delivery-center-${engagement.id}`}
                                       value={engagementForm.delivery_center}
                                       onChange={(e) => {
                                         const dc = e.target.value;
                                         const updated = [...opportunityFormData.engagements];
-                                        updated[engagementFormIndex] = { ...engagementForm, delivery_center: dc, role_id: "" };
+                                        updated[engagementFormIndex] = { ...engagementForm, delivery_center: dc };
+                                        // Do NOT clear role_id - Payable Center is reference only and doesn't affect Role
                                         setOpportunityFormData({ engagements: updated });
                                       }}
                                       className="w-full"
                                       required
                                     >
-                                      <option value="">Select delivery center</option>
+                                      <option value="">Select payable center</option>
                                       {deliveryCentersData?.items.map((dc) => (
                                         <option key={dc.code} value={dc.code}>
                                           {dc.name}
@@ -760,10 +1029,10 @@ export function EmployeeRelationships({
                                       }}
                                       className="w-full"
                                       required
-                                      disabled={!engagementForm.delivery_center}
+                                      disabled={!engagement.id}
                                     >
                                       <option value="">Select role</option>
-                                      {rolesForDeliveryCenter(engagementForm.delivery_center).map((role) => (
+                                      {rolesForInvoiceCenter(engagement.id).map((role) => (
                                         <option key={role.id} value={role.id}>
                                           {role.role_name}
                                         </option>
@@ -803,7 +1072,25 @@ export function EmployeeRelationships({
                                     />
                                   </div>
                                   
-                                  <div className="sm:col-span-2">
+                                  <div>
+                                    <Label htmlFor={`engagement-cost-${engagement.id}`}>Project Cost ($)</Label>
+                                    <Input
+                                      id={`engagement-cost-${engagement.id}`}
+                                      type="number"
+                                      step="0.01"
+                                      min="0"
+                                      value={engagementForm.project_cost}
+                                      onChange={(e) => {
+                                        const updated = [...opportunityFormData.engagements];
+                                        updated[engagementFormIndex] = { ...engagementForm, project_cost: e.target.value };
+                                        setOpportunityFormData({ engagements: updated });
+                                      }}
+                                      className="w-full"
+                                      placeholder="0.00"
+                                    />
+                                  </div>
+
+                                  <div>
                                     <Label htmlFor={`engagement-rate-${engagement.id}`}>Project Rate ($) *</Label>
                                     <Input
                                       id={`engagement-rate-${engagement.id}`}
@@ -868,3 +1155,4 @@ export function EmployeeRelationships({
     </div>
   );
 }
+

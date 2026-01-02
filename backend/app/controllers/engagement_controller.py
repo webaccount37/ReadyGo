@@ -21,6 +21,9 @@ class EngagementController(BaseController):
     
     async def create_engagement(self, engagement_data: EngagementCreate) -> EngagementResponse:
         """Create a new engagement."""
+        # Validate that delivery_center_id is provided (Invoice Center)
+        if not engagement_data.delivery_center_id:
+            raise ValueError("delivery_center_id (Invoice Center) is required for engagement creation")
         return await self.engagement_service.create_engagement(engagement_data)
     
     async def get_engagement(self, engagement_id: UUID, include_relationships: bool = False) -> Optional[EngagementResponse]:

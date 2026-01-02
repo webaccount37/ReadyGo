@@ -28,7 +28,7 @@ class EngagementBase(BaseModel):
 
 class EngagementCreate(EngagementBase):
     """Schema for creating an engagement."""
-    pass
+    delivery_center_id: UUID = Field(..., description="Delivery Center ID (Invoice Center) - required for engagement creation")
 
 
 class EngagementUpdate(BaseModel):

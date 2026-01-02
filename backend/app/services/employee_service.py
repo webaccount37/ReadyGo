@@ -474,27 +474,31 @@ class EmployeeService(BaseService):
                 if engagement.opportunity_id != opportunity_id:
                     raise ValueError(f"Engagement {engagement_data.engagement_id} does not belong to opportunity {opportunity_id}")
                 
+                # Validate that engagement has delivery_center_id (Invoice Center) - required for role rate lookup
+                if not engagement.delivery_center_id:
+                    raise ValueError(f"Engagement {engagement_data.engagement_id} must have delivery_center_id (Invoice Center) set before linking employees")
+                
                 # Verify role exists
                 role = await role_repo.get(engagement_data.role_id)
                 if not role:
                     raise ValueError(f"Role {engagement_data.role_id} does not exist")
                 
-                # Look up delivery center
-                delivery_center_result = await self.session.execute(
+                # Look up Payable Center by code (reference-only field)
+                payable_center_result = await self.session.execute(
                     select(DeliveryCenterModel).where(DeliveryCenterModel.code == engagement_data.delivery_center)
                 )
-                delivery_center = delivery_center_result.scalar_one_or_none()
-                if not delivery_center:
-                    raise ValueError(f"Delivery center with code '{engagement_data.delivery_center}' not found")
+                payable_center = payable_center_result.scalar_one_or_none()
+                if not payable_center:
+                    raise ValueError(f"Payable Center with code '{engagement_data.delivery_center}' not found")
                 
                 # Get or create active estimate for this engagement
                 estimate = await self._get_or_create_active_estimate(engagement_data.engagement_id, engagement.default_currency or "USD")
                 
-                # Get or create role rate
+                # Get or create role rate using Engagement Invoice Center (delivery_center_id), not Payable Center
                 currency = engagement.default_currency or "USD"
                 role_rate = await self._get_or_create_role_rate(
                     engagement_data.role_id,
-                    delivery_center.id,
+                    engagement.delivery_center_id,  # Use Engagement Invoice Center for rate lookup
                     currency
                 )
                 
@@ -520,9 +524,10 @@ class EmployeeService(BaseService):
                         logger.warning(f"Employee {emp_id} not found")
                         continue
                     
-                    # Get rates - use project_rate from request, or employee rates, or role_rate rates
+                    # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
                     rate = Decimal(str(engagement_data.project_rate)) if engagement_data.project_rate else Decimal(str(employee.external_bill_rate))
-                    cost = Decimal(str(employee.internal_cost_rate))
+                    # Use project_cost from request if provided, otherwise fall back to employee internal_cost_rate
+                    cost = Decimal(str(engagement_data.project_cost)) if engagement_data.project_cost is not None else Decimal(str(employee.internal_cost_rate))
                     
                     # Get max row_order
                     max_order_result = await self.session.execute(
@@ -535,6 +540,7 @@ class EmployeeService(BaseService):
                     line_item = EstimateLineItem(
                         estimate_id=estimate.id,
                         role_rates_id=role_rate.id,
+                        payable_center_id=payable_center.id,  # Payable Center (reference only)
                         employee_id=emp_id,
                         rate=rate,
                         cost=cost,
@@ -656,16 +662,20 @@ class EmployeeService(BaseService):
         if not engagement:
             return False
         
-        # Look up delivery center by code
-        delivery_center_result = await self.session.execute(
+        # Validate that engagement has delivery_center_id (Invoice Center) - required for role rate lookup
+        if not engagement.delivery_center_id:
+            raise ValueError(f"Engagement {engagement_id} must have delivery_center_id (Invoice Center) set before linking employees")
+        
+        # Look up Payable Center by code (reference-only field)
+        payable_center_result = await self.session.execute(
             select(DeliveryCenterModel).where(DeliveryCenterModel.code == request.delivery_center)
         )
-        delivery_center = delivery_center_result.scalar_one_or_none()
-        if not delivery_center:
+        payable_center = payable_center_result.scalar_one_or_none()
+        if not payable_center:
             all_dc_result = await self.session.execute(select(DeliveryCenterModel))
             all_dcs = list(all_dc_result.scalars())
             available_codes = [dc.code for dc in all_dcs]
-            raise ValueError(f"Delivery center with code '{request.delivery_center}' not found. Available codes: {available_codes}")
+            raise ValueError(f"Payable Center with code '{request.delivery_center}' not found. Available codes: {available_codes}")
         
         # Verify role exists
         role_repo = RoleRepository(self.session)
@@ -677,10 +687,10 @@ class EmployeeService(BaseService):
         currency = engagement.default_currency or "USD"
         estimate = await self._get_or_create_active_estimate(engagement_id, currency)
         
-        # Get or create role rate
+        # Get or create role rate using Engagement Invoice Center (delivery_center_id), not Payable Center
         role_rate = await self._get_or_create_role_rate(
             request.role_id,
-            delivery_center.id,
+            engagement.delivery_center_id,  # Use Engagement Invoice Center for rate lookup
             currency
         )
         
@@ -707,9 +717,10 @@ class EmployeeService(BaseService):
                 logger.warning(f"Employee {emp_id} not found")
                 continue
             
-            # Get rates - use project_rate from request, or employee rates, or role_rate rates
+            # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
             rate = Decimal(str(request.project_rate)) if request.project_rate else Decimal(str(employee.external_bill_rate))
-            cost = Decimal(str(employee.internal_cost_rate))
+            # Use project_cost from request if provided, otherwise fall back to employee internal_cost_rate
+            cost = Decimal(str(request.project_cost)) if request.project_cost is not None else Decimal(str(employee.internal_cost_rate))
             
             # Get max row_order
             max_order_result = await self.session.execute(
@@ -722,6 +733,7 @@ class EmployeeService(BaseService):
             line_item = EstimateLineItem(
                 estimate_id=estimate.id,
                 role_rates_id=role_rate.id,
+                payable_center_id=payable_center.id,  # Payable Center (reference only)
                 employee_id=emp_id,
                 rate=rate,
                 cost=cost,

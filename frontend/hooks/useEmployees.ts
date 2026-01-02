@@ -119,6 +119,7 @@ export function useLinkEmployeeToOpportunity(
       start_date: string;
       end_date: string;
       project_rate: number;
+      project_cost?: number;
       delivery_center: string;
     }>;
   } }>
@@ -132,6 +133,7 @@ export function useLinkEmployeeToOpportunity(
       start_date: string;
       end_date: string;
       project_rate: number;
+      project_cost?: number;
       delivery_center: string;
     }>;
   } }>({
@@ -183,6 +185,7 @@ export function useLinkEmployeeToEngagement(
     start_date: string;
     end_date: string;
     project_rate: number;
+    project_cost?: number;
     delivery_center: string;
   } }>
 ) {
@@ -193,6 +196,7 @@ export function useLinkEmployeeToEngagement(
     start_date: string;
     end_date: string;
     project_rate: number;
+    project_cost?: number;
     delivery_center: string;
   } }>({
     mutationFn: ({ employeeId, engagementId, linkData }) =>

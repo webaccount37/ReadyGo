@@ -188,15 +188,16 @@ export function EngagementForm({
           />
         </div>
         <div>
-          <Label htmlFor="delivery_center_id">Delivery Center</Label>
+          <Label htmlFor="delivery_center_id">Invoice Center *</Label>
           <Select
             id="delivery_center_id"
             value={formData.delivery_center_id || ""}
             onChange={(e) =>
               setFormData({ ...formData, delivery_center_id: e.target.value || undefined })
             }
+            required
           >
-            <option value="">Select delivery center</option>
+            <option value="">Select invoice center</option>
             {deliveryCentersData?.items.map((dc) => (
               <option key={dc.id} value={dc.id}>
                 {dc.name}
