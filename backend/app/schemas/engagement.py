@@ -50,6 +50,7 @@ class EngagementResponse(EngagementBase):
     """Schema for engagement response."""
     id: UUID
     opportunity_name: Optional[str] = None  # Opportunity name from opportunity relationship
+    account_name: Optional[str] = None  # Account name from opportunity's account relationship
     billing_term_name: Optional[str] = None  # Billing term name from billing_term relationship
     delivery_center_name: Optional[str] = None  # Delivery center name from delivery_center relationship
     employees: Optional[List[dict]] = None  # Employees linked to this engagement (when include_relationships=True)

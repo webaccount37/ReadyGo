@@ -22,6 +22,7 @@ export interface Engagement {
   name: string;
   opportunity_id: string;
   opportunity_name?: string;
+  account_name?: string;
   start_date?: string;
   end_date?: string;
   budget?: string;

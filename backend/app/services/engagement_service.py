@@ -199,8 +199,12 @@ class EngagementService(BaseService):
         import logging
         logger = logging.getLogger(__name__)
         opportunity_name = None
+        account_name = None
         if hasattr(engagement, 'opportunity') and engagement.opportunity:
             opportunity_name = engagement.opportunity.name
+            # Get account name from opportunity's account relationship
+            if hasattr(engagement.opportunity, 'account') and engagement.opportunity.account:
+                account_name = engagement.opportunity.account.company_name
         
         billing_term_name = None
         if hasattr(engagement, 'billing_term') and engagement.billing_term:
@@ -224,6 +228,7 @@ class EngagementService(BaseService):
             "delivery_center_id": engagement.delivery_center_id,
             "attributes": engagement.attributes,
             "opportunity_name": opportunity_name,
+            "account_name": account_name,
             "billing_term_name": billing_term_name,
             "delivery_center_name": delivery_center_name,
         }

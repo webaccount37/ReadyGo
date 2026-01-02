@@ -21,8 +21,10 @@ class EngagementRepository(BaseRepository[Engagement]):
     
     def _base_query(self):
         """Base query with eager loading of opportunity, billing_term, and delivery_center relationships."""
+        from app.models.opportunity import Opportunity
+        from app.models.account import Account
         return select(Engagement).options(
-            selectinload(Engagement.opportunity),
+            selectinload(Engagement.opportunity).selectinload(Opportunity.account),
             selectinload(Engagement.billing_term),
             selectinload(Engagement.delivery_center)
         )
@@ -96,10 +98,12 @@ class EngagementRepository(BaseRepository[Engagement]):
         """Get engagement with related entities."""
         # Note: Employees are now loaded from ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
         # This is handled in the service layer, not the repository
+        from app.models.opportunity import Opportunity
+        from app.models.account import Account
         result = await self.session.execute(
             select(Engagement)
             .options(
-                selectinload(Engagement.opportunity),
+                selectinload(Engagement.opportunity).selectinload(Opportunity.account),
                 selectinload(Engagement.billing_term),
                 selectinload(Engagement.delivery_center),
             )

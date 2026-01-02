@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueries } from "@tanstack/react-query";
 import {
   useEngagements,
   useCreateEngagement,
@@ -9,6 +10,7 @@ import {
   useDeleteEngagement,
 } from "@/hooks/useEngagements";
 import { estimatesApi } from "@/lib/api/estimates";
+import { engagementsApi } from "@/lib/api/engagements";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
@@ -22,6 +24,7 @@ import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEngagement } from "@/hooks/useEngagements";
 import { EngagementRelationships } from "@/components/engagements/engagement-relationships";
 import { Calculator } from "lucide-react";
+import Link from "next/link";
 
 function EngagementsPageContent() {
   const router = useRouter();
@@ -89,14 +92,41 @@ function EngagementsPageContent() {
     return data.items.filter((engagement) => {
       const name = (engagement.name || "").toLowerCase();
       const opportunity = (engagement.opportunity_name || engagement.opportunity_id || "").toLowerCase();
+      const account = (engagement.account_name || "").toLowerCase();
       const status = (engagement.status || "").toLowerCase();
       return (
         name.includes(query) ||
         opportunity.includes(query) ||
+        account.includes(query) ||
         status.includes(query)
       );
     });
   }, [data, searchQuery]);
+
+  // Fetch engagements with relationships for accurate employee counts (only for current page)
+  const engagementIdsForCounts = useMemo(() => filteredItems.map(eng => eng.id), [filteredItems]);
+  const engagementCountsQueries = useQueries({
+    queries: engagementIdsForCounts.map(id => ({
+      queryKey: ["engagements", "detail", id, true],
+      queryFn: () => engagementsApi.getEngagement(id, true),
+      enabled: !!id,
+      staleTime: 30000,
+    })),
+  });
+
+  // Calculate employee counts per engagement
+  const employeeCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    engagementCountsQueries.forEach((query) => {
+      if (query.data?.employees) {
+        const engId = query.data.id;
+        // Count unique employees
+        const uniqueEmployees = new Set(query.data.employees.map((emp: { id: string }) => emp.id));
+        counts[engId] = uniqueEmployees.size;
+      }
+    });
+    return counts;
+  }, [engagementCountsQueries]);
 
   const handleCreate = async (data: EngagementCreate | EngagementUpdate) => {
     try {
@@ -218,12 +248,15 @@ function EngagementsPageContent() {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Opportunity</th>
-                            <th className="text-left p-3 font-semibold">Name</th>
-                            <th className="text-left p-3 font-semibold">Status</th>
-                            <th className="text-left p-3 font-semibold">Start Date</th>
-                            <th className="text-left p-3 font-semibold">End Date</th>
-                            <th className="text-left p-3 font-semibold">Actions</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Opportunity</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Name</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Account</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Invoice Center</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Status</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Start Date</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">End Date</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Emp</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -233,9 +266,19 @@ function EngagementsPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingEngagement(engagement.id)}
                           >
-                            <td className="p-3">{highlightText(engagement.opportunity_name || engagement.opportunity_id, searchQuery)}</td>
-                            <td className="p-3 font-medium">{highlightText(engagement.name, searchQuery)}</td>
-                            <td className="p-3">
+                            <td className="p-2 text-sm max-w-[120px] truncate" title={engagement.opportunity_name || engagement.opportunity_id}>
+                              {highlightText(engagement.opportunity_name || engagement.opportunity_id, searchQuery)}
+                            </td>
+                            <td className="p-2 text-sm font-medium max-w-[150px] truncate" title={engagement.name}>
+                              {highlightText(engagement.name, searchQuery)}
+                            </td>
+                            <td className="p-2 text-sm max-w-[120px] truncate" title={engagement.account_name || "—"}>
+                              {highlightText(engagement.account_name || "—", searchQuery)}
+                            </td>
+                            <td className="p-2 text-sm max-w-[120px] truncate" title={getDeliveryCenterName(engagement.delivery_center_id)}>
+                              {getDeliveryCenterName(engagement.delivery_center_id)}
+                            </td>
+                            <td className="p-2">
                               <span
                                 className={`px-2 py-1 text-xs rounded ${
                                   engagement.status === "active"
@@ -250,19 +293,28 @@ function EngagementsPageContent() {
                                 {highlightText(engagement.status, searchQuery)}
                               </span>
                             </td>
-                            <td className="p-3">
+                            <td className="p-2 text-sm whitespace-nowrap">
                               {formatDate(engagement.start_date)}
                             </td>
-                            <td className="p-3">
+                            <td className="p-2 text-sm whitespace-nowrap">
                               {formatDate(engagement.end_date)}
                             </td>
-                            <td className="p-3">
+                            <td className="p-2" onClick={(e) => e.stopPropagation()}>
+                              <Link 
+                                href={`/employees?search=${encodeURIComponent(engagement.name)}`}
+                                className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                {employeeCounts[engagement.id] ?? 0}
+                              </Link>
+                            </td>
+                            <td className="p-2">
                               <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   title="Open Estimate"
                                   onClick={(e) => handleOpenEstimate(engagement.id, e)}
+                                  className="text-green-600 hover:text-green-700"
                                 >
                                   <Calculator className="w-4 h-4" />
                                 </Button>
@@ -318,6 +370,34 @@ function EngagementsPageContent() {
                                 </div>
                                 <div className="text-sm font-medium">{highlightText(engagement.name, searchQuery)}</div>
                               </div>
+                              {engagement.account_name && (
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                    Account
+                                  </div>
+                                  <div className="text-sm">{highlightText(engagement.account_name, searchQuery)}</div>
+                                </div>
+                              )}
+                              {engagement.delivery_center_id && (
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                    Invoice Center
+                                  </div>
+                                  <div className="text-sm">{getDeliveryCenterName(engagement.delivery_center_id)}</div>
+                                </div>
+                              )}
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                  Employee Count
+                                </div>
+                                <Link 
+                                  href={`/employees?search=${encodeURIComponent(engagement.name)}`}
+                                  className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                                  onClick={(e) => e.stopPropagation()}
+                                >
+                                  {employeeCounts[engagement.id] ?? 0}
+                                </Link>
+                              </div>
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                                   Status
@@ -364,6 +444,7 @@ function EngagementsPageContent() {
                                 variant="outline"
                                 title="Open Estimate"
                                 onClick={(e) => handleOpenEstimate(engagement.id, e)}
+                                className="text-green-600 hover:text-green-700"
                               >
                                 <Calculator className="w-4 h-4" />
                               </Button>

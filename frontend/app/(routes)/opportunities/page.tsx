@@ -302,23 +302,24 @@ export default function OpportunitiesPage() {
               {filteredItems.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full text-sm">
+                    <div className="hidden md:block">
+                      <table className="w-full text-xs">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Opportunity Name">Name</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Account">Account</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Parent Opportunity Name">Parent</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Status">Status</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Start Date">Start</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Deal Value">Deal Value</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Project Start Year">Year</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Project Start Month">Month</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Project Duration (Months)">Duration</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Engagement Count">Eng</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
-                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Actions">Actions</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Name">Name</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account">Account</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Parent Opportunity Name">Parent</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Status">Status</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Start Date">Start</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Deal Value (USD)">Deal $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Forecast Value (USD)">Forecast $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Start Year">Year</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Start Month">Mo</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Duration (Months)">Dur</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Engagement Count">Eng</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -328,12 +329,12 @@ export default function OpportunitiesPage() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingOpportunity(opportunity.id)}
                           >
-                            <td className="p-2 font-medium max-w-[150px] truncate" title={opportunity.name}>{highlightText(opportunity.name, searchQuery)}</td>
-                            <td className="p-2 max-w-[120px] truncate" title={getAccountName(opportunity.account_id)}>{highlightText(getAccountName(opportunity.account_id), searchQuery)}</td>
-                            <td className="p-2 max-w-[120px] truncate" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>{getParentOpportunityName(opportunity.parent_opportunity_id)}</td>
-                            <td className="p-2">
+                            <td className="p-1.5 font-medium max-w-[120px] truncate text-xs" title={opportunity.name}>{highlightText(opportunity.name, searchQuery)}</td>
+                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getAccountName(opportunity.account_id)}>{highlightText(getAccountName(opportunity.account_id), searchQuery)}</td>
+                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>{getParentOpportunityName(opportunity.parent_opportunity_id)}</td>
+                            <td className="p-1.5">
                               <span
-                                className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${
+                                className={`px-1 py-0.5 text-xs rounded whitespace-nowrap ${
                                   opportunity.status === "won"
                                     ? "bg-green-100 text-green-800"
                                     : opportunity.status === "lost"
@@ -352,21 +353,26 @@ export default function OpportunitiesPage() {
                                 {highlightText(opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1), searchQuery)}
                               </span>
                             </td>
-                            <td className="p-2 whitespace-nowrap" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
                               {opportunity.start_date
-                                ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+                                ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
                                 : "—"}
                             </td>
-                            <td className="p-2 max-w-[100px] truncate" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>{getDeliveryCenterName(opportunity.delivery_center_id)}</td>
-                            <td className="p-2 whitespace-nowrap" title={opportunity.deal_value ? formatCurrency(opportunity.deal_value, opportunity.default_currency) : "—"}>
-                              {opportunity.deal_value
-                                ? formatCurrency(opportunity.deal_value, opportunity.default_currency)
+                            <td className="p-1.5 max-w-[80px] truncate text-xs" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>{getDeliveryCenterName(opportunity.delivery_center_id)}</td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.deal_value_usd ? formatCurrency(opportunity.deal_value_usd, "USD") : "—"}>
+                              {opportunity.deal_value_usd
+                                ? formatCurrency(opportunity.deal_value_usd, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-2 whitespace-nowrap" title={opportunity.project_start_year ? String(opportunity.project_start_year) : "—"}>{opportunity.project_start_year || "—"}</td>
-                            <td className="p-2 whitespace-nowrap" title={opportunity.project_start_month ? formatMonth(opportunity.project_start_month) : "—"}>{opportunity.project_start_month ? formatMonth(opportunity.project_start_month).substring(0, 3) : "—"}</td>
-                            <td className="p-2 whitespace-nowrap" title={opportunity.project_duration_months ? `${opportunity.project_duration_months} months` : "—"}>{opportunity.project_duration_months || "—"}</td>
-                            <td className="p-2 whitespace-nowrap">
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.forecast_value_usd ? formatCurrency(opportunity.forecast_value_usd, "USD") : "—"}>
+                              {opportunity.forecast_value_usd
+                                ? formatCurrency(opportunity.forecast_value_usd, "USD")
+                                : "—"}
+                            </td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_start_year ? String(opportunity.project_start_year) : "—"}>{opportunity.project_start_year || "—"}</td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_start_month ? formatMonth(opportunity.project_start_month) : "—"}>{opportunity.project_start_month ? formatMonth(opportunity.project_start_month).substring(0, 3) : "—"}</td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_duration_months ? `${opportunity.project_duration_months} months` : "—"}>{opportunity.project_duration_months || "—"}</td>
+                            <td className="p-1.5 whitespace-nowrap text-xs">
                               <Link
                                 href={`/engagements?search=${encodeURIComponent(opportunity.name)}`}
                                 onClick={(e) => e.stopPropagation()}
@@ -375,7 +381,7 @@ export default function OpportunitiesPage() {
                                 {engagementCounts[opportunity.id] ?? "—"}
                               </Link>
                             </td>
-                            <td className="p-2 whitespace-nowrap">
+                            <td className="p-1.5 whitespace-nowrap text-xs">
                               <Link
                                 href={`/employees?search=${encodeURIComponent(opportunity.name)}`}
                                 onClick={(e) => e.stopPropagation()}
@@ -384,13 +390,13 @@ export default function OpportunitiesPage() {
                                 {employeeCounts[opportunity.id] ?? "—"}
                               </Link>
                             </td>
-                            <td className="p-2">
-                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-1.5">
+                              <div className="flex gap-0.5" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setViewingOpportunity(opportunity.id)}
-                                  className="h-7 px-2 text-xs"
+                                  className="h-6 px-1.5 text-xs"
                                 >
                                   View
                                 </Button>
@@ -398,7 +404,7 @@ export default function OpportunitiesPage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setEditingOpportunity(opportunity.id)}
-                                  className="h-7 px-2 text-xs"
+                                  className="h-6 px-1.5 text-xs"
                                 >
                                   Edit
                                 </Button>
@@ -406,7 +412,7 @@ export default function OpportunitiesPage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleDelete(opportunity.id)}
-                                  className="h-7 px-2 text-red-600 hover:text-red-700"
+                                  className="h-6 px-1.5 text-red-600 hover:text-red-700"
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </Button>
