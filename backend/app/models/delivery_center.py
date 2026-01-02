@@ -18,6 +18,7 @@ class DeliveryCenter(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name = Column(String(50), unique=True, nullable=False, index=True)
     code = Column(String(50), unique=True, nullable=False, index=True)  # e.g., "north-america"
+    default_currency = Column(String(3), default="USD", nullable=False)
     
     # Relationships
     opportunities = relationship("Opportunity", back_populates="delivery_center")

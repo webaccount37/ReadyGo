@@ -3,7 +3,6 @@
  */
 
 export type OpportunityStatus = "discovery" | "qualified" | "proposal" | "negotiation" | "won" | "lost" | "cancelled";
-export type OpportunityType = "implementation" | "consulting" | "support";
 export type WinProbability = "low" | "medium" | "high";
 export type Accountability = "full_ownership" | "mgmt_accountable" | "mgmt_advisory" | "staff_aug_limited";
 export type StrategicImportance = "critical" | "high" | "medium" | "low";
@@ -41,7 +40,6 @@ export interface Opportunity {
   end_date?: string;
   status: OpportunityStatus;
   billing_term_id: string;
-  opportunity_type: OpportunityType;
   description?: string;
   utilization?: number;
   margin?: number;
@@ -78,7 +76,6 @@ export interface OpportunityCreate {
   end_date?: string;
   status?: OpportunityStatus;
   billing_term_id: string;
-  opportunity_type?: OpportunityType;
   description?: string;
   utilization?: number;
   margin?: number;
@@ -106,7 +103,6 @@ export interface OpportunityUpdate {
   end_date?: string | null;
   status?: OpportunityStatus;
   billing_term_id?: string;
-  opportunity_type?: OpportunityType;
   description?: string;
   utilization?: number;
   margin?: number;

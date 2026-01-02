@@ -6,6 +6,7 @@ export interface DeliveryCenter {
   id: string;
   name: string;
   code: string;
+  default_currency: string;
 }
 
 export interface DeliveryCenterListResponse {

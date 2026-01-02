@@ -45,13 +45,6 @@ class StrategicImportance(str, enum.Enum):
     LOW = "low"
 
 
-class OpportunityType(str, enum.Enum):
-    """Opportunity type enumeration."""
-    IMPLEMENTATION = "implementation"
-    CONSULTING = "consulting"
-    SUPPORT = "support"
-
-
 class Opportunity(Base):
     """Opportunity model for quoting and staff planning."""
     
@@ -69,7 +62,6 @@ class Opportunity(Base):
         default=OpportunityStatus.DISCOVERY
     )
     billing_term_id = Column(UUID(as_uuid=True), ForeignKey("billing_terms.id"), nullable=False, index=True)
-    opportunity_type = Column(SQLEnum(OpportunityType), nullable=False, default=OpportunityType.IMPLEMENTATION)
     description = Column(String(2000), nullable=True)
     utilization = Column(Float, nullable=True)
     margin = Column(Float, nullable=True)
@@ -94,7 +86,7 @@ class Opportunity(Base):
     forecast_value_usd = Column(Numeric(15, 2), nullable=True)  # Calculated: probability * deal_value_usd
     project_start_month = Column(Integer, nullable=True)  # 1-12
     project_start_year = Column(Integer, nullable=True)  # 4-digit year
-    project_duration_months = Column(Integer, nullable=True)  # 1-12
+    project_duration_months = Column(Integer, nullable=True)  # 1-36
     
     # Relationships
     parent_opportunity = relationship("Opportunity", remote_side=[id], backref="child_opportunities")

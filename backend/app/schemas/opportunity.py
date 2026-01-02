@@ -9,7 +9,6 @@ from uuid import UUID
 
 from app.models.opportunity import (
     OpportunityStatus, 
-    OpportunityType, 
     WinProbability, 
     Accountability, 
     StrategicImportance
@@ -26,7 +25,6 @@ class OpportunityBase(BaseModel):
     end_date: Optional[date] = None
     status: OpportunityStatus = OpportunityStatus.DISCOVERY
     billing_term_id: UUID
-    opportunity_type: OpportunityType = OpportunityType.IMPLEMENTATION
     description: Optional[str] = Field(None, max_length=2000)
     utilization: Optional[float] = Field(None, ge=0, le=100)
     margin: Optional[float] = Field(None, ge=-100, le=100)
@@ -89,7 +87,6 @@ class OpportunityUpdate(BaseModel):
     end_date: Optional[date] = None
     status: Optional[OpportunityStatus] = None
     billing_term_id: Optional[UUID] = None
-    opportunity_type: Optional[OpportunityType] = None
     description: Optional[str] = Field(None, max_length=2000)
     utilization: Optional[float] = Field(None, ge=0, le=100)
     margin: Optional[float] = Field(None, ge=-100, le=100)
@@ -107,7 +104,7 @@ class OpportunityUpdate(BaseModel):
     deal_value: Optional[Decimal] = None  # Editable
     project_start_month: Optional[int] = Field(None, ge=1, le=12)  # 1-12
     project_start_year: Optional[int] = Field(None, ge=1000, le=9999)  # 4-digit year
-    project_duration_months: Optional[int] = Field(None, ge=1, le=12)  # 1-12
+    project_duration_months: Optional[int] = Field(None, ge=1, le=36)  # 1-36
     # Note: probability, deal_value_usd, close_date, deal_length, forecast_value, 
     # forecast_value_usd, deal_creation_date are read-only and calculated
     

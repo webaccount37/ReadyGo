@@ -477,7 +477,6 @@ class OpportunityService(BaseService):
             "end_date": opportunity.end_date.isoformat() if opportunity.end_date else None,
             "status": opportunity.status.value if hasattr(opportunity.status, 'value') else str(opportunity.status),
             "billing_term_id": str(opportunity.billing_term_id),
-            "opportunity_type": opportunity.opportunity_type.value if hasattr(opportunity.opportunity_type, 'value') else str(opportunity.opportunity_type),
             "description": opportunity.description,
             "utilization": float(opportunity.utilization) if opportunity.utilization else None,
             "margin": float(opportunity.margin) if opportunity.margin else None,

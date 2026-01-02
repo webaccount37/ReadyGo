@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,7 +10,9 @@ import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEmployees } from "@/hooks/useEmployees";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
+import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { CURRENCIES } from "@/types/currency";
+import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import type { OpportunityCreate, OpportunityUpdate, Opportunity } from "@/types/opportunity";
 
 interface OpportunityFormProps {
@@ -40,6 +42,7 @@ export function OpportunityForm({
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
+  const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
 
   const [formData, setFormData] = useState<OpportunityCreate>({
     name: initialData?.name || "",
@@ -49,7 +52,6 @@ export function OpportunityForm({
     end_date: initialData?.end_date || "",
     status: initialData?.status || "discovery",
     billing_term_id: initialData?.billing_term_id || "",
-    opportunity_type: initialData?.opportunity_type || "implementation",
     description: initialData?.description || "",
     utilization: initialData?.utilization,
     margin: initialData?.margin,
@@ -67,6 +69,61 @@ export function OpportunityForm({
     project_start_year: initialData?.project_start_year,
     project_duration_months: initialData?.project_duration_months,
   });
+
+  // State for calculated Deal Value (USD)
+  const [dealValueUsd, setDealValueUsd] = useState<string>(
+    initialData && 'deal_value_usd' in initialData ? (initialData as Opportunity).deal_value_usd || "" : ""
+  );
+
+  // Update currency rates cache when rates are fetched
+  useEffect(() => {
+    if (currencyRatesData?.items) {
+      const rates: Record<string, number> = {};
+      currencyRatesData.items.forEach((rate) => {
+        rates[rate.currency_code.toUpperCase()] = rate.rate_to_usd;
+      });
+      setCurrencyRates(rates);
+    }
+  }, [currencyRatesData]);
+
+  // Auto-default billing terms when account is selected
+  useEffect(() => {
+    if (formData.account_id && accountsData?.items && !formData.billing_term_id) {
+      const selectedAccount = accountsData.items.find(a => a.id === formData.account_id);
+      if (selectedAccount?.billing_term_id) {
+        setFormData(prev => ({ ...prev, billing_term_id: selectedAccount.billing_term_id }));
+      }
+    }
+  }, [formData.account_id, accountsData, formData.billing_term_id]);
+
+  // Auto-update default currency when delivery center changes
+  useEffect(() => {
+    if (formData.delivery_center_id && deliveryCentersData?.items) {
+      const selectedDeliveryCenter = deliveryCentersData.items.find(dc => dc.id === formData.delivery_center_id);
+      if (selectedDeliveryCenter?.default_currency) {
+        setFormData(prev => ({ ...prev, default_currency: selectedDeliveryCenter.default_currency }));
+      }
+    }
+  }, [formData.delivery_center_id, deliveryCentersData]);
+
+  // Auto-calculate Deal Value (USD) when Deal Value or Default Currency changes
+  useEffect(() => {
+    if (formData.deal_value && formData.default_currency) {
+      const dealValueNum = parseFloat(formData.deal_value);
+      if (!isNaN(dealValueNum) && dealValueNum > 0) {
+        if (formData.default_currency.toUpperCase() === "USD") {
+          setDealValueUsd(dealValueNum.toFixed(2));
+        } else {
+          const usdValue = convertCurrency(dealValueNum, formData.default_currency, "USD");
+          setDealValueUsd(usdValue.toFixed(2));
+        }
+      } else {
+        setDealValueUsd("");
+      }
+    } else {
+      setDealValueUsd("");
+    }
+  }, [formData.deal_value, formData.default_currency]);
   
   // Calculate probability from status
   const calculateProbability = (status: string): number => {
@@ -217,43 +274,75 @@ export function OpportunityForm({
         </div>
       </div>
 
+      <div>
+        <Label htmlFor="status">Status</Label>
+        <Select
+          id="status"
+          value={formData.status}
+          onChange={(e) =>
+            setFormData({
+              ...formData,
+              status: e.target.value as OpportunityCreate["status"],
+            })
+          }
+        >
+          <option value="discovery">Discovery</option>
+          <option value="qualified">Qualified</option>
+          <option value="proposal">Proposal</option>
+          <option value="negotiation">Negotiation</option>
+          <option value="won">Won</option>
+          <option value="lost">Lost</option>
+          <option value="cancelled">Cancelled</option>
+        </Select>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label htmlFor="status">Status</Label>
+          <Label htmlFor="delivery_center_id">Delivery Center *</Label>
           <Select
-            id="status"
-            value={formData.status}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                status: e.target.value as OpportunityCreate["status"],
-              })
-            }
+            id="delivery_center_id"
+            value={formData.delivery_center_id}
+            onChange={(e) => {
+              const selectedDc = deliveryCentersData?.items.find(dc => dc.id === e.target.value);
+              setFormData({ 
+                ...formData, 
+                delivery_center_id: e.target.value,
+                opportunity_owner_id: undefined, // Reset opportunity owner when delivery center changes
+                default_currency: selectedDc?.default_currency || formData.default_currency,
+              });
+              if (errors.delivery_center_id) setErrors({ ...errors, delivery_center_id: undefined });
+            }}
+            required
+            className={errors.delivery_center_id ? "border-red-500" : ""}
+            disabled={deliveryCentersData === undefined}
           >
-            <option value="discovery">Discovery</option>
-            <option value="qualified">Qualified</option>
-            <option value="proposal">Proposal</option>
-            <option value="negotiation">Negotiation</option>
-            <option value="won">Won</option>
-            <option value="lost">Lost</option>
-            <option value="cancelled">Cancelled</option>
+            <option value="">
+              {deliveryCentersData === undefined ? "Loading..." : "Select delivery center"}
+            </option>
+            {deliveryCentersData?.items.map((dc) => (
+              <option key={dc.id} value={dc.id}>
+                {dc.name}
+              </option>
+            ))}
           </Select>
+          {errors.delivery_center_id && (
+            <p className="text-red-500 text-sm mt-1">{errors.delivery_center_id}</p>
+          )}
         </div>
         <div>
-          <Label htmlFor="opportunity_type">Opportunity Type</Label>
+          <Label htmlFor="default_currency">Default Currency</Label>
           <Select
-            id="opportunity_type"
-            value={formData.opportunity_type}
+            id="default_currency"
+            value={formData.default_currency}
             onChange={(e) =>
-              setFormData({
-                ...formData,
-                opportunity_type: e.target.value as OpportunityCreate["opportunity_type"],
-              })
+              setFormData({ ...formData, default_currency: e.target.value })
             }
           >
-            <option value="implementation">Implementation</option>
-            <option value="consulting">Consulting</option>
-            <option value="support">Support</option>
+            {CURRENCIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
           </Select>
         </div>
       </div>
@@ -308,36 +397,6 @@ export function OpportunityForm({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label htmlFor="delivery_center_id">Delivery Center *</Label>
-          <Select
-            id="delivery_center_id"
-            value={formData.delivery_center_id}
-            onChange={(e) => {
-              setFormData({ 
-                ...formData, 
-                delivery_center_id: e.target.value,
-                opportunity_owner_id: undefined, // Reset opportunity owner when delivery center changes
-              });
-              if (errors.delivery_center_id) setErrors({ ...errors, delivery_center_id: undefined });
-            }}
-            required
-            className={errors.delivery_center_id ? "border-red-500" : ""}
-            disabled={deliveryCentersData === undefined}
-          >
-            <option value="">
-              {deliveryCentersData === undefined ? "Loading..." : "Select delivery center"}
-            </option>
-            {deliveryCentersData?.items.map((dc) => (
-              <option key={dc.id} value={dc.id}>
-                {dc.name}
-              </option>
-            ))}
-          </Select>
-          {errors.delivery_center_id && (
-            <p className="text-red-500 text-sm mt-1">{errors.delivery_center_id}</p>
-          )}
-        </div>
-        <div>
           <Label htmlFor="opportunity_owner_id">Opportunity Owner</Label>
           <Select
             id="opportunity_owner_id"
@@ -360,25 +419,6 @@ export function OpportunityForm({
             {filteredEmployees.map((emp) => (
               <option key={emp.id} value={emp.id}>
                 {emp.first_name} {emp.last_name}
-              </option>
-            ))}
-          </Select>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="default_currency">Default Currency</Label>
-          <Select
-            id="default_currency"
-            value={formData.default_currency}
-            onChange={(e) =>
-              setFormData({ ...formData, default_currency: e.target.value })
-            }
-          >
-            {CURRENCIES.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
               </option>
             ))}
           </Select>
@@ -530,7 +570,7 @@ export function OpportunityForm({
             />
           </div>
           <div>
-            <Label htmlFor="deal_value">Deal Value ({formData.default_currency})</Label>
+            <Label htmlFor="deal_value">Deal Value</Label>
             <Input
               id="deal_value"
               type="number"
@@ -553,7 +593,7 @@ export function OpportunityForm({
             <Input
               id="deal_value_usd"
               type="text"
-              value={initialData && 'deal_value_usd' in initialData ? (initialData as Opportunity).deal_value_usd || "" : ""}
+              value={dealValueUsd}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
@@ -582,7 +622,7 @@ export function OpportunityForm({
             />
           </div>
           <div>
-            <Label htmlFor="forecast_value">Forecast Value ({formData.default_currency})</Label>
+            <Label htmlFor="forecast_value">Forecast Value</Label>
             <Input
               id="forecast_value"
               type="text"
@@ -657,7 +697,7 @@ export function OpportunityForm({
               }
             >
               <option value="">Select...</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
+              {Array.from({ length: 36 }, (_, i) => i + 1).map((month) => (
                 <option key={month} value={month}>
                   {month}
                 </option>

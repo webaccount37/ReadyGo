@@ -69,12 +69,10 @@ export default function OpportunitiesPage() {
     return data.items.filter((opportunity) => {
       const name = (opportunity.name || "").toLowerCase();
       const account = (opportunity.account_name || opportunity.account_id || "").toLowerCase();
-      const type = (opportunity.opportunity_type || "").toLowerCase();
       const status = (opportunity.status || "").toLowerCase();
       return (
         name.includes(query) ||
         account.includes(query) ||
-        type.includes(query) ||
         status.includes(query)
       );
     });
@@ -445,14 +443,6 @@ export default function OpportunitiesPage() {
                             <div className="flex gap-2">
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Type
-                                </div>
-                                <span className="px-2 py-1 text-xs rounded bg-purple-100 text-purple-800">
-                                  {highlightText(opportunity.opportunity_type, searchQuery)}
-                                </span>
-                              </div>
-                              <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                                   Status
                                 </div>
                                 <span
@@ -608,10 +598,6 @@ export default function OpportunitiesPage() {
                 <div>
                   <p className="text-sm font-semibold text-gray-800">Status</p>
                   <p className="text-sm text-gray-700">{formatStatus(opportunityToView.status)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Opportunity Type</p>
-                  <p className="text-sm text-gray-700">{formatEnumValue(opportunityToView.opportunity_type)}</p>
                 </div>
               </div>
 

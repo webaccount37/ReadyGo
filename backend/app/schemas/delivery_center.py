@@ -11,6 +11,7 @@ class DeliveryCenterBase(BaseModel):
     """Base delivery center schema with common fields."""
     name: str = Field(..., min_length=1, max_length=50)
     code: str = Field(..., min_length=1, max_length=50)
+    default_currency: str = Field(default="USD", min_length=3, max_length=3)
 
 
 class DeliveryCenterResponse(DeliveryCenterBase):
