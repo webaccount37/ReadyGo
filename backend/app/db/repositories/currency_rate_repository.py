@@ -56,3 +56,4 @@ class CurrencyRateRepository(BaseRepository[CurrencyRate]):
         await self.session.flush()
         return result.rowcount > 0
 
+

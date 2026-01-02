@@ -134,3 +134,4 @@ async def delete_currency_rate(
             detail="Currency rate not found",
         )
 
+

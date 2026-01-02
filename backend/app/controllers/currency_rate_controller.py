@@ -72,3 +72,4 @@ class CurrencyRateController(BaseController):
         """Delete a currency rate."""
         return await self.currency_rate_service.delete_currency_rate(currency_rate_id)
 
+

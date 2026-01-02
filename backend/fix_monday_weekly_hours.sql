@@ -63,3 +63,4 @@ SELECT
     COUNT(*) as total_records
 FROM estimate_weekly_hours;
 
+

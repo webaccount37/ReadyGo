@@ -21,3 +21,4 @@ class CurrencyRate(Base):
     def __repr__(self):
         return f"<CurrencyRate(currency_code={self.currency_code}, rate_to_usd={self.rate_to_usd})>"
 
+

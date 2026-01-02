@@ -36,3 +36,4 @@ class CurrencyRateListResponse(BaseModel):
     items: List[CurrencyRateResponse]
     total: int
 
+

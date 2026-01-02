@@ -24,3 +24,4 @@ export interface CurrencyRateListResponse {
   total: number;
 }
 
+

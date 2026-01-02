@@ -40,3 +40,4 @@ class QuotePhaseRepository(BaseRepository[QuotePhase]):
 
 
 
+
