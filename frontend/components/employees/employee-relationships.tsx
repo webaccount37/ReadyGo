@@ -314,29 +314,21 @@ export function EmployeeRelationships({
     return grouped;
   }, [employee.engagements]);
 
-  // Get all unique opportunity IDs from engagements (since every engagement belongs to an opportunity)
-  const opportunityIdsFromEngagements = useMemo(() => {
+  // Get all unique opportunity IDs from opportunities (loaded from active estimates)
+  const allOpportunityIds = useMemo(() => {
     const ids = new Set<string>();
-    if (employee.engagements && Array.isArray(employee.engagements)) {
-      employee.engagements.forEach((engagement) => {
-        if (engagement && engagement.opportunity_id) {
-          ids.add(String(engagement.opportunity_id));
+    if (employee.opportunities && Array.isArray(employee.opportunities)) {
+      employee.opportunities.forEach((opp) => {
+        if (opp && opp.id) {
+          ids.add(String(opp.id));
         }
       });
     }
     return Array.from(ids);
-  }, [employee.engagements]);
+  }, [employee.opportunities]);
 
   const linkedOpportunityIds = new Set(employee.opportunities?.map((e) => String(e.id)) || []);
   const linkedEngagementIds = new Set(employee.engagements?.map((r) => String(r.id)) || []);
-  
-  // Combine opportunity IDs from both direct links and engagements
-  const allOpportunityIds = useMemo(() => {
-    const ids = new Set<string>();
-    employee.opportunities?.forEach(e => ids.add(String(e.id)));
-    opportunityIdsFromEngagements.forEach(id => ids.add(id));
-    return Array.from(ids);
-  }, [employee.opportunities, opportunityIdsFromEngagements]);
 
   const availableOpportunities =
     opportunitiesData?.items.filter((e) => {
@@ -360,7 +352,6 @@ export function EmployeeRelationships({
                 const opportunity = opportunitiesData?.items.find(e => String(e.id) === opportunityId);
                 if (!opportunity) return null;
                 
-                const isDirectlyLinked = linkedOpportunityIds.has(opportunityId);
                 const opportunityEngagements = engagementsByOpportunity[opportunityId] || [];
                 return (
                   <div
@@ -376,11 +367,9 @@ export function EmployeeRelationships({
                         >
                           {opportunity.name}
                         </span>
-                        {!isDirectlyLinked && (
-                          <span className="ml-2 text-xs text-gray-500">(via Engagement)</span>
-                        )}
+                        <span className="ml-2 text-xs text-gray-500">(via Active Estimates)</span>
                       </div>
-                      {!readOnly && isDirectlyLinked && (
+                      {!readOnly && (
                         <Button
                           size="sm"
                           variant="outline"

@@ -318,7 +318,7 @@ class EmployeeService(BaseService):
         if include_relationships:
             # Build opportunities and engagements from active estimate line items
             opportunities = await self._get_opportunities_from_active_estimates(employee.id)
-            engagements = await self._get_engagements_from_active_estimates(employee.id)
+            engagements = await self._get_releases_from_active_estimates(employee.id)
             base["opportunities"] = opportunities
             base["engagements"] = engagements
         else:
@@ -368,7 +368,37 @@ class EmployeeService(BaseService):
     
     async def _get_or_create_active_estimate(self, engagement_id: UUID, currency: str = "USD") -> Estimate:
         """Get or create an active estimate for an engagement."""
-        # Check if active estimate exists
+        # First check if an "INITIAL" estimate exists (created when engagement was created)
+        result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.engagement_id == engagement_id,
+                    Estimate.name == "INITIAL"
+                )
+            )
+        )
+        initial_estimate = result.scalar_one_or_none()
+        
+        if initial_estimate:
+            # If INITIAL exists but is not active, activate it and deactivate others
+            if not initial_estimate.active_version:
+                # Deactivate any other active estimates
+                await self.session.execute(
+                    update(Estimate)
+                    .where(
+                        and_(
+                            Estimate.engagement_id == engagement_id,
+                            Estimate.active_version == True
+                        )
+                    )
+                    .values(active_version=False)
+                )
+                # Activate the INITIAL estimate
+                initial_estimate.active_version = True
+                await self.session.flush()
+            return initial_estimate
+        
+        # Check if any active estimate exists
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
@@ -382,7 +412,7 @@ class EmployeeService(BaseService):
         if active_estimate:
             return active_estimate
         
-        # Create a new active estimate
+        # Create a new INITIAL estimate (shouldn't happen if engagement was created properly, but handle it)
         engagement = await self.engagement_repo.get(engagement_id)
         if not engagement:
             raise ValueError(f"Engagement {engagement_id} not found")
@@ -401,9 +431,7 @@ class EmployeeService(BaseService):
         
         estimate = Estimate(
             engagement_id=engagement_id,
-            name=f"Estimate for {engagement.name}",
-            currency=currency,
-            status="draft",
+            name="INITIAL",
             active_version=True
         )
         self.session.add(estimate)
