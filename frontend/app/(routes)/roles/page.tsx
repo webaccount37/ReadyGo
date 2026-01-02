@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { RoleForm } from "@/components/roles/role-form";
+import { Trash2 } from "lucide-react";
 import type { RoleCreate, RoleUpdate } from "@/types/role";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -190,10 +191,11 @@ export default function RolesPage() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                   onClick={() => handleDelete(role.id)}
+                                  className="text-red-600 hover:text-red-700"
                                 >
-                                  Delete
+                                  <Trash2 className="w-4 h-4" />
                                 </Button>
                               </div>
                             </td>
@@ -277,11 +279,11 @@ export default function RolesPage() {
                               </Button>
                               <Button
                                 size="sm"
-                                variant="destructive"
+                                variant="outline"
                                 onClick={() => handleDelete(role.id)}
-                                className="flex-1"
+                                className="flex-1 text-red-600 hover:text-red-700"
                               >
-                                Delete
+                                <Trash2 className="w-4 h-4" />
                               </Button>
                             </div>
                           </div>

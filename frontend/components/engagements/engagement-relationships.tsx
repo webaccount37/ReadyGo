@@ -368,7 +368,7 @@ export function EngagementRelationships({
                   + Link Employee
                 </Button>
               ) : (
-                <div className="space-y-3 p-3 bg-gray-50 border rounded-md">
+                <div className="space-y-3 p-3 bg-blue-50 border-2 border-blue-200 rounded-md">
                   <div className="text-sm font-medium mb-2">Link Employee</div>
                   
                   <div>

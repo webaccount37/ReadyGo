@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useEmployees,
   useCreateEmployee,
@@ -13,18 +14,28 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { EmployeeForm } from "@/components/employees/employee-form";
 import { EmployeeRelationships } from "@/components/employees/employee-relationships";
+import { Trash2 } from "lucide-react";
 import type { EmployeeCreate, EmployeeUpdate } from "@/types/employee";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
 import { useMemo } from "react";
 
-export default function EmployeesPage() {
+function EmployeesPageContent() {
+  const searchParams = useSearchParams();
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<string | null>(null);
   const [viewingEmployee, setViewingEmployee] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Initialize search query from URL parameter
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const { data, isLoading, error, refetch } = useEmployees({ skip, limit });
   const createEmployee = useCreateEmployee();
@@ -105,12 +116,19 @@ export default function EmployeesPage() {
       const type = (employee.employee_type || "").toLowerCase();
       const status = (employee.status || "").toLowerCase();
       const role = (employee.role_title || "").toLowerCase();
+      
+      // Also search by opportunity names if available
+      const opportunityNames = employee.opportunities?.map(opp => opp.name.toLowerCase()).join(" ") || "";
+      const engagementOpportunityNames = employee.engagements?.map(eng => eng.opportunity_name?.toLowerCase() || "").join(" ") || "";
+      
       return (
         name.includes(query) ||
         email.includes(query) ||
         type.includes(query) ||
         status.includes(query) ||
-        role.includes(query)
+        role.includes(query) ||
+        opportunityNames.includes(query) ||
+        engagementOpportunityNames.includes(query)
       );
     });
   }, [data, searchQuery]);
@@ -224,10 +242,11 @@ export default function EmployeesPage() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                   onClick={() => handleDelete(employee.id)}
+                                  className="text-red-600 hover:text-red-700"
                                 >
-                                  Delete
+                                  <Trash2 className="w-4 h-4" />
                                 </Button>
                               </div>
                             </td>
@@ -314,11 +333,11 @@ export default function EmployeesPage() {
                               </Button>
                               <Button
                                 size="sm"
-                                variant="destructive"
+                                variant="outline"
                                 onClick={() => handleDelete(employee.id)}
-                                className="flex-1"
+                                className="flex-1 text-red-600 hover:text-red-700"
                               >
-                                Delete
+                                <Trash2 className="w-4 h-4" />
                               </Button>
                             </div>
                           </div>
@@ -454,5 +473,13 @@ export default function EmployeesPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function EmployeesPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <EmployeesPageContent />
+    </Suspense>
   );
 }

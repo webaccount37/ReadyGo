@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useQueries } from "@tanstack/react-query";
 import {
   useOpportunities,
   useCreateOpportunity,
@@ -8,6 +9,7 @@ import {
   useDeleteOpportunity,
 } from "@/hooks/useOpportunities";
 import { Button } from "@/components/ui/button";
+import { Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { OpportunityForm } from "@/components/opportunities/opportunity-form";
@@ -20,6 +22,9 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useEmployees } from "@/hooks/useEmployees";
+import { useEngagements } from "@/hooks/useEngagements";
+import { opportunitiesApi } from "@/lib/api/opportunities";
+import Link from "next/link";
 
 export default function OpportunitiesPage() {
   const [skip, setSkip] = useState(0);
@@ -40,6 +45,8 @@ export default function OpportunitiesPage() {
   const { data: billingTermsData } = useBillingTerms();
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: allOpportunitiesData } = useOpportunities({ limit: 100 });
+  // Fetch all engagements to calculate counts
+  const { data: allEngagementsData } = useEngagements({ limit: 10000 });
   
   // Fetch opportunity with relationships for viewing/editing
   const { data: viewingOpportunityData, refetch: refetchViewingOpportunity } = useOpportunity(
@@ -72,6 +79,17 @@ export default function OpportunitiesPage() {
       );
     });
   }, [data, searchQuery]);
+
+  // Fetch opportunities with relationships for accurate counts (only for current page)
+  const opportunityIdsForCounts = useMemo(() => filteredItems.map(opp => opp.id), [filteredItems]);
+  const opportunityCountsQueries = useQueries({
+    queries: opportunityIdsForCounts.map(id => ({
+      queryKey: ["opportunities", "detail", id, true],
+      queryFn: () => opportunitiesApi.getOpportunity(id, true),
+      enabled: !!id,
+      staleTime: 30000,
+    })),
+  });
 
   const handleCreate = async (data: OpportunityCreate | OpportunityUpdate) => {
     try {
@@ -183,6 +201,64 @@ export default function OpportunitiesPage() {
     return parent?.name || parentId;
   };
 
+  // Calculate engagement and employee counts per opportunity
+  // Use opportunity data with relationships for accurate counts
+  const engagementCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    
+    // Use opportunity data with relationships if available (most accurate)
+    opportunityCountsQueries.forEach((query) => {
+      if (query.data?.engagements) {
+        const oppId = query.data.id;
+        counts[oppId] = query.data.engagements.length;
+      }
+    });
+    
+    // Fallback: use engagement list data for opportunities not yet loaded with relationships
+    if (allEngagementsData?.items) {
+      const fallbackCounts: Record<string, number> = {};
+      allEngagementsData.items.forEach((engagement) => {
+        if (engagement.opportunity_id) {
+          fallbackCounts[engagement.opportunity_id] = (fallbackCounts[engagement.opportunity_id] || 0) + 1;
+        }
+      });
+      // Only use fallback counts for opportunities we don't have relationship data for
+      Object.keys(fallbackCounts).forEach((oppId) => {
+        if (counts[oppId] === undefined) {
+          counts[oppId] = fallbackCounts[oppId];
+        }
+      });
+    }
+    
+    return counts;
+  }, [opportunityCountsQueries, allEngagementsData]);
+
+  const employeeCounts = useMemo(() => {
+    const counts: Record<string, Set<string>> = {};
+    
+    // Use opportunity data with relationships if available (most accurate)
+    opportunityCountsQueries.forEach((query) => {
+      if (query.data?.engagements) {
+        const oppId = query.data.id;
+        const employeeSet = new Set<string>();
+        query.data.engagements.forEach((engagement) => {
+          if (engagement.employees) {
+            engagement.employees.forEach((emp) => {
+              employeeSet.add(emp.id);
+            });
+          }
+        });
+        counts[oppId] = employeeSet;
+      }
+    });
+    
+    const result: Record<string, number> = {};
+    Object.keys(counts).forEach((oppId) => {
+      result[oppId] = counts[oppId].size;
+    });
+    return result;
+  }, [opportunityCountsQueries]);
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
@@ -229,15 +305,22 @@ export default function OpportunitiesPage() {
                   <>
                     {/* Desktop Table View */}
                     <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full">
+                      <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Name</th>
-                            <th className="text-left p-3 font-semibold">Account</th>
-                            <th className="text-left p-3 font-semibold">Type</th>
-                            <th className="text-left p-3 font-semibold">Status</th>
-                            <th className="text-left p-3 font-semibold">Start Date</th>
-                            <th className="text-left p-3 font-semibold">Actions</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Opportunity Name">Name</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Account">Account</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Parent Opportunity Name">Parent</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Status">Status</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Start Date">Start</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Deal Value">Deal Value</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Project Start Year">Year</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Project Start Month">Month</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Project Duration (Months)">Duration</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Engagement Count">Eng</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
+                            <th className="text-left p-2 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -247,16 +330,12 @@ export default function OpportunitiesPage() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingOpportunity(opportunity.id)}
                           >
-                            <td className="p-3 font-medium">{highlightText(opportunity.name, searchQuery)}</td>
-                            <td className="p-3">{highlightText(opportunity.account_name || opportunity.account_id, searchQuery)}</td>
-                            <td className="p-3">
-                              <span className="px-2 py-1 text-xs rounded bg-purple-100 text-purple-800">
-                                {highlightText(opportunity.opportunity_type, searchQuery)}
-                              </span>
-                            </td>
-                            <td className="p-3">
+                            <td className="p-2 font-medium max-w-[150px] truncate" title={opportunity.name}>{highlightText(opportunity.name, searchQuery)}</td>
+                            <td className="p-2 max-w-[120px] truncate" title={getAccountName(opportunity.account_id)}>{highlightText(getAccountName(opportunity.account_id), searchQuery)}</td>
+                            <td className="p-2 max-w-[120px] truncate" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>{getParentOpportunityName(opportunity.parent_opportunity_id)}</td>
+                            <td className="p-2">
                               <span
-                                className={`px-2 py-1 text-xs rounded ${
+                                className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${
                                   opportunity.status === "won"
                                     ? "bg-green-100 text-green-800"
                                     : opportunity.status === "lost"
@@ -275,17 +354,45 @@ export default function OpportunitiesPage() {
                                 {highlightText(opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1), searchQuery)}
                               </span>
                             </td>
-                            <td className="p-3">
+                            <td className="p-2 whitespace-nowrap" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
                               {opportunity.start_date
-                                ? new Date(opportunity.start_date).toLocaleDateString()
+                                ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
                                 : "—"}
                             </td>
-                            <td className="p-3">
-                              <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-2 max-w-[100px] truncate" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>{getDeliveryCenterName(opportunity.delivery_center_id)}</td>
+                            <td className="p-2 whitespace-nowrap" title={opportunity.deal_value ? formatCurrency(opportunity.deal_value, opportunity.default_currency) : "—"}>
+                              {opportunity.deal_value
+                                ? formatCurrency(opportunity.deal_value, opportunity.default_currency)
+                                : "—"}
+                            </td>
+                            <td className="p-2 whitespace-nowrap" title={opportunity.project_start_year ? String(opportunity.project_start_year) : "—"}>{opportunity.project_start_year || "—"}</td>
+                            <td className="p-2 whitespace-nowrap" title={opportunity.project_start_month ? formatMonth(opportunity.project_start_month) : "—"}>{opportunity.project_start_month ? formatMonth(opportunity.project_start_month).substring(0, 3) : "—"}</td>
+                            <td className="p-2 whitespace-nowrap" title={opportunity.project_duration_months ? `${opportunity.project_duration_months} months` : "—"}>{opportunity.project_duration_months || "—"}</td>
+                            <td className="p-2 whitespace-nowrap">
+                              <Link
+                                href={`/engagements?search=${encodeURIComponent(opportunity.name)}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                              >
+                                {engagementCounts[opportunity.id] ?? "—"}
+                              </Link>
+                            </td>
+                            <td className="p-2 whitespace-nowrap">
+                              <Link
+                                href={`/employees?search=${encodeURIComponent(opportunity.name)}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                              >
+                                {employeeCounts[opportunity.id] ?? "—"}
+                              </Link>
+                            </td>
+                            <td className="p-2">
+                              <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setViewingOpportunity(opportunity.id)}
+                                  className="h-7 px-2 text-xs"
                                 >
                                   View
                                 </Button>
@@ -293,15 +400,17 @@ export default function OpportunitiesPage() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setEditingOpportunity(opportunity.id)}
+                                  className="h-7 px-2 text-xs"
                                 >
                                   Edit
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                   onClick={() => handleDelete(opportunity.id)}
+                                  className="h-7 px-2 text-red-600 hover:text-red-700"
                                 >
-                                  Delete
+                                  <Trash2 className="w-3 h-3" />
                                 </Button>
                               </div>
                             </td>
@@ -396,11 +505,11 @@ export default function OpportunitiesPage() {
                               </Button>
                               <Button
                                 size="sm"
-                                variant="destructive"
+                                variant="outline"
                                 onClick={() => handleDelete(opportunity.id)}
-                                className="flex-1"
+                                className="flex-1 text-red-600 hover:text-red-700"
                               >
-                                Delete
+                                <Trash2 className="w-4 h-4" />
                               </Button>
                             </div>
                           </div>

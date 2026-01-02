@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   useEngagements,
   useCreateEngagement,
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { EngagementForm } from "@/components/engagements/engagement-form";
+import { Trash2 } from "lucide-react";
 import type { EngagementCreate, EngagementUpdate } from "@/types/engagement";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -22,14 +23,23 @@ import { useEngagement } from "@/hooks/useEngagements";
 import { EngagementRelationships } from "@/components/engagements/engagement-relationships";
 import { Calculator } from "lucide-react";
 
-export default function EngagementsPage() {
+function EngagementsPageContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingEngagement, setEditingEngagement] = useState<string | null>(null);
   const [viewingEngagement, setViewingEngagement] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Initialize search query from URL parameter
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const { data, isLoading, error, refetch } = useEngagements({ skip, limit });
   const createEngagement = useCreateEngagement();
@@ -272,10 +282,11 @@ export default function EngagementsPage() {
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                   onClick={() => handleDelete(engagement.id)}
+                                  className="text-red-600 hover:text-red-700"
                                 >
-                                  Delete
+                                  <Trash2 className="w-4 h-4" />
                                 </Button>
                               </div>
                             </td>
@@ -374,11 +385,11 @@ export default function EngagementsPage() {
                               </Button>
                               <Button
                                 size="sm"
-                                variant="destructive"
+                                variant="outline"
                                 onClick={() => handleDelete(engagement.id)}
-                                className="flex-1"
+                                className="flex-1 text-red-600 hover:text-red-700"
                               >
-                                Delete
+                                <Trash2 className="w-4 h-4" />
                               </Button>
                             </div>
                           </div>
@@ -576,4 +587,11 @@ export default function EngagementsPage() {
   );
 }
 
+export default function EngagementsPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <EngagementsPageContent />
+    </Suspense>
+  );
+}
 

@@ -735,7 +735,7 @@ export function EmployeeRelationships({
                               Link Engagement
                             </Button>
                           ) : (
-                            <div className="space-y-3 p-3 bg-white border rounded-md">
+                            <div className="space-y-3 p-3 bg-blue-50 border-2 border-blue-200 rounded-md">
                               <div className="text-sm font-medium mb-2">Link Engagement</div>
                               <Select
                                 value={selectedEngagementId}
@@ -969,7 +969,7 @@ export function EmployeeRelationships({
                           const engagementForm = engagementFormIndex >= 0 ? opportunityFormData.engagements[engagementFormIndex] : null;
                           
                           return (
-                            <div key={engagement.id} className="border rounded-lg p-4 bg-white space-y-3">
+                            <div key={engagement.id} className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50 space-y-3">
                               <div className="flex items-center justify-between">
                                 <div className="font-medium text-sm">{engagement.name}</div>
                                 {engagementForm ? (

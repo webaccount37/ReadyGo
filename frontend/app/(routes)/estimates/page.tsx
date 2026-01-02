@@ -13,6 +13,7 @@ import { highlightText } from "@/lib/utils/highlight";
 import { useEngagements } from "@/hooks/useEngagements";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Trash2 } from "lucide-react";
 import type { Estimate } from "@/types/estimate";
 import { EngagementKPIs } from "@/components/estimates/engagement-kpis";
 
@@ -264,9 +265,9 @@ export default function EstimatesPage() {
                                     variant="outline"
                                     size="sm"
                                     disabled={deleteEstimate.isPending}
-                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                    className="text-red-600 hover:text-red-700"
                                   >
-                                    {deleteEstimate.isPending ? "Deleting..." : "Delete"}
+                                    <Trash2 className="w-4 h-4" />
                                   </Button>
                                 </>
                               )}
