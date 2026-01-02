@@ -117,19 +117,16 @@ class RoleService(BaseService):
     async def _validate_role_rates_update(self, role_id: UUID, new_rates: list[dict]) -> None:
         """
         Ensure that updating role rates does not orphan existing assignments:
-        - All delivery centers currently used by this role in employee project/release links must remain present.
-        - Currency for those delivery centers must not change.
+        - Only prevent deletion/currency changes for RoleRates that are actually in use by EstimateLineItems.
+        - Allow deletion of RoleRates that are not in use, even if the delivery center has other RoleRates in use.
         """
-        # Gather used delivery center codes from assignments
-        used_dc_codes: set[str] = set()
-
-        # Query ESTIMATE_LINE_ITEMS where ACTIVE_VERSION = TRUE
+        # Query which SPECIFIC RoleRate IDs are in use by EstimateLineItems in active estimates
         from app.models.estimate import EstimateLineItem, Estimate
         from app.models.role_rate import RoleRate
         
-        ep_result = await self.session.execute(
-            select(DeliveryCenter.code)
-            .join(RoleRate, RoleRate.delivery_center_id == DeliveryCenter.id)
+        in_use_result = await self.session.execute(
+            select(RoleRate.id, DeliveryCenter.code, RoleRate.default_currency)
+            .join(DeliveryCenter, DeliveryCenter.id == RoleRate.delivery_center_id)
             .join(EstimateLineItem, EstimateLineItem.role_rates_id == RoleRate.id)
             .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
             .where(
@@ -140,9 +137,16 @@ class RoleService(BaseService):
             )
             .distinct()
         )
-        used_dc_codes.update([row[0] for row in ep_result.fetchall() if row[0]])
+        in_use_rates = {(row[0], row[1].lower(), row[2].upper()) for row in in_use_result.fetchall()}
+        # Create a map of (delivery_center_code, currency) -> RoleRate ID for rates in use
+        in_use_dc_currency: dict[tuple[str, str], UUID] = {
+            (dc_code.lower(), currency.upper()): role_rate_id
+            for role_rate_id, dc_code, currency in in_use_rates
+            if dc_code and currency
+        }
 
-        if not used_dc_codes:
+        if not in_use_dc_currency:
+            # No rates are in use, allow any changes
             return
 
         # Build maps from current and proposed rates
@@ -150,29 +154,54 @@ class RoleService(BaseService):
             select(Role).options(selectinload(Role.role_rates).selectinload(RoleRate.delivery_center)).where(Role.id == role_id)
         )
         role_obj = current_role.scalar_one()
-        current_rate_currency_by_dc: dict[str, str] = {}
+        
+        # Map current rates by (delivery_center_code, currency) -> RoleRate ID
+        current_rate_map: dict[tuple[str, str], UUID] = {}
         for r in role_obj.role_rates:
             dc_code = getattr(r.delivery_center, "code", None)
             if dc_code:
-                current_rate_currency_by_dc[dc_code] = r.default_currency
+                key = (dc_code.lower(), r.default_currency.upper())
+                current_rate_map[key] = r.id
 
-        proposed_currency_by_dc = {r["delivery_center_code"]: r["default_currency"] for r in new_rates if r.get("delivery_center_code")}
+        # Map proposed rates by (delivery_center_code, currency)
+        proposed_rate_keys: set[tuple[str, str]] = {
+            (r["delivery_center_code"].lower(), r["default_currency"].upper())
+            for r in new_rates
+            if r.get("delivery_center_code") and r.get("default_currency")
+        }
 
-        missing_dcs = [dc for dc in used_dc_codes if dc not in proposed_currency_by_dc]
-        if missing_dcs:
+        # Check for missing rates (rates that are in use but not in proposed list)
+        missing_rates = []
+        for (dc_code, currency), role_rate_id in in_use_dc_currency.items():
+            if (dc_code, currency) not in proposed_rate_keys:
+                missing_rates.append(f"{dc_code} ({currency})")
+        
+        if missing_rates:
             raise ValueError(
-                f"Cannot remove delivery center rates while role is in use. Missing rates for: {', '.join(missing_dcs)}"
+                f"Cannot remove role rates that are in use by active estimates. Missing rates for: {', '.join(missing_rates)}"
             )
 
+        # Check for currency changes (only for rates that are in use)
+        # A currency change occurs when an in-use rate (DC, Currency1) is removed
+        # but a different rate (DC, Currency2) is proposed for the same delivery center
         currency_changes = []
-        for dc in used_dc_codes:
-            old_curr = current_rate_currency_by_dc.get(dc)
-            new_curr = proposed_currency_by_dc.get(dc)
-            if old_curr and new_curr and old_curr != new_curr:
-                currency_changes.append(f"{dc} ({old_curr} -> {new_curr})")
+        for (dc_code, currency), role_rate_id in in_use_dc_currency.items():
+            # Check if this specific (dc_code, currency) combination is in proposed rates
+            if (dc_code, currency) not in proposed_rate_keys:
+                # The in-use rate is being removed - check if there's a different currency proposed for this DC
+                proposed_rate_for_dc = next(
+                    (r for r in new_rates 
+                     if r.get("delivery_center_code", "").lower() == dc_code),
+                    None
+                )
+                if proposed_rate_for_dc:
+                    proposed_currency = proposed_rate_for_dc.get("default_currency", "").upper()
+                    if proposed_currency != currency:
+                        currency_changes.append(f"{dc_code} ({currency} -> {proposed_currency})")
+        
         if currency_changes:
             raise ValueError(
-                "Cannot change currency for delivery centers already assigned to projects/releases: "
+                "Cannot change currency for role rates already assigned to active estimates: "
                 + "; ".join(currency_changes)
             )
 

@@ -86,7 +86,8 @@ class EstimateLineItemBase(BaseModel):
     # Accept either role_rates_id OR role_id + delivery_center_id (for backward compatibility)
     role_rates_id: Optional[UUID] = None
     role_id: Optional[UUID] = None  # For backward compatibility with frontend
-    delivery_center_id: Optional[UUID] = None  # For backward compatibility with frontend
+    delivery_center_id: Optional[UUID] = None  # Payable Center (reference only, not used for rate calculations)
+    payable_center_id: Optional[UUID] = None  # Payable Center (reference only, not used for rate calculations)
     employee_id: Optional[UUID] = None
     rate: Decimal = Field(..., ge=0)
     cost: Decimal = Field(..., ge=0)
@@ -116,7 +117,8 @@ class EstimateLineItemUpdate(BaseModel):
     """Update schema for estimate line item (all fields optional)."""
     role_rates_id: Optional[UUID] = None
     role_id: Optional[UUID] = None  # For backward compatibility with frontend
-    delivery_center_id: Optional[UUID] = None  # For backward compatibility with frontend
+    delivery_center_id: Optional[UUID] = None  # Payable Center (reference only, not used for rate calculations)
+    payable_center_id: Optional[UUID] = None  # Payable Center (reference only, not used for rate calculations)
     employee_id: Optional[UUID] = None
     rate: Optional[Decimal] = Field(None, ge=0)
     cost: Optional[Decimal] = Field(None, ge=0)
@@ -136,7 +138,8 @@ class EstimateLineItemResponse(BaseModel):
     estimate_id: UUID
     role_rates_id: UUID
     role_id: Optional[UUID] = None  # Included for backward compatibility with frontend
-    delivery_center_id: Optional[UUID] = None  # Included for backward compatibility with frontend
+    delivery_center_id: Optional[UUID] = None  # Payable Center (reference only, not used for rate calculations)
+    payable_center_id: Optional[UUID] = None  # Payable Center (reference only, not used for rate calculations)
     employee_id: Optional[UUID] = None
     rate: Decimal = Field(..., ge=0)
     cost: Decimal = Field(..., ge=0)
@@ -148,6 +151,7 @@ class EstimateLineItemResponse(BaseModel):
     billable_expense_percentage: Decimal = Field(default=0, ge=0, le=100)  # Billable expense percentage (0-100)
     role_name: Optional[str] = None
     delivery_center_name: Optional[str] = None
+    payable_center_name: Optional[str] = None  # Payable Center name
     employee_name: Optional[str] = None
     weekly_hours: Optional[List[EstimateWeeklyHoursResponse]] = None
     

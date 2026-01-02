@@ -56,6 +56,7 @@ class EstimateLineItem(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
     estimate_id = Column(UUID(as_uuid=True), ForeignKey("estimates.id", ondelete="CASCADE"), nullable=False, index=True)
     role_rates_id = Column(UUID(as_uuid=True), ForeignKey("role_rates.id"), nullable=False, index=True)
+    payable_center_id = Column(UUID(as_uuid=True), ForeignKey("delivery_centers.id"), nullable=True, index=True)  # Payable Center (reference only, not used for rate calculations)
     employee_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True, index=True)
     rate = Column(Numeric(15, 2), nullable=False)  # External bill rate
     cost = Column(Numeric(15, 2), nullable=False)  # Internal cost rate
@@ -69,6 +70,7 @@ class EstimateLineItem(Base):
     # Relationships
     estimate = relationship("Estimate", back_populates="line_items", foreign_keys=[estimate_id], primaryjoin="EstimateLineItem.estimate_id == Estimate.id")
     role_rate = relationship("RoleRate", back_populates="estimate_line_items")
+    payable_center = relationship("DeliveryCenter", foreign_keys=[payable_center_id])  # Payable Center relationship
     employee = relationship("Employee")
     weekly_hours = relationship("EstimateWeeklyHours", back_populates="line_item", cascade="all, delete-orphan", order_by="EstimateWeeklyHours.week_start_date")
 

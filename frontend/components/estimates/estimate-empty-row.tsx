@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useRoles, useRole } from "@/hooks/useRoles";
+import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { useCreateLineItem, useUpdateLineItem, useDeleteLineItem, useEstimateDetail } from "@/hooks/useEstimates";
@@ -32,7 +33,8 @@ export function EstimateEmptyRow({
   engagementDeliveryCenterId,
   onContextMenu,
 }: EstimateEmptyRowProps) {
-  const { data: rolesData } = useRoles();
+  // Only show roles that have RoleRate associations with Engagement Invoice Center
+  const { data: rolesData } = useRolesForDeliveryCenter(engagementDeliveryCenterId);
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: employeesData } = useEmployees({ limit: 100 });
   const createLineItem = useCreateLineItem();
@@ -547,10 +549,10 @@ export function EstimateEmptyRow({
       newRate = String(matchingRate.external_rate || "0");
     } else {
       // Fallback to role default rates if no matching rate found
-      const role = rolesData?.items?.find((r) => r.id === formData.role_id);
-      if (role) {
-        newCost = String(role.role_internal_cost_rate || "0");
-        newRate = String(role.role_external_rate || "0");
+      // Use selectedRoleData which has full role info including defaults
+      if (selectedRoleData) {
+        newCost = String(selectedRoleData.role_internal_cost_rate || "0");
+        newRate = String(selectedRoleData.role_external_rate || "0");
       } else {
         prevRoleIdRef.current = formData.role_id || "";
         return;
@@ -631,9 +633,9 @@ export function EstimateEmptyRow({
           newCost = String(matchingRate.internal_cost_rate || "0");
         } else {
           // Fallback to role default rates if no matching rate found
-          const role = rolesData?.items?.find((r) => r.id === formData.role_id);
-          if (role) {
-            newCost = String(role.role_internal_cost_rate || "0");
+          // Use selectedRoleData which has full role info including defaults
+          if (selectedRoleData) {
+            newCost = String(selectedRoleData.role_internal_cost_rate || "0");
           } else {
             prevEmployeeIdRef.current = currentEmployeeId;
             return;
@@ -864,7 +866,7 @@ export function EstimateEmptyRow({
           className="text-xs h-7 w-full"
         >
           <option value="">Select...</option>
-          {rolesData?.items?.map((role) => (
+          {rolesData?.map((role) => (
             <option key={role.id} value={role.id}>
               {role.role_name}
             </option>

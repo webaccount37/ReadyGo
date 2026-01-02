@@ -392,22 +392,23 @@ class ExcelImportService:
         """
         # Get existing line items
         existing_line_items = await self.line_item_repo.list_by_estimate(estimate_id)
-        existing_by_key = {}  # Primary key: (delivery_center_id, role_id, employee_id, start_date)
-        existing_by_key_no_employee = {}  # Fallback key: (delivery_center_id, role_id, None, start_date)
+        # Matching keys: (role_id, employee_id, start_date)
+        # Note: Payable Center is NOT used for matching since it's reference-only
+        existing_by_key = {}  # Primary key: (role_id, employee_id, start_date)
+        existing_by_key_no_employee = {}  # Fallback key: (role_id, None, start_date)
         
         for li in existing_line_items:
-            delivery_center_id = str(li.role_rate.delivery_center_id) if li.role_rate else None
             role_id = str(li.role_rate.role_id) if li.role_rate and li.role_rate.role else None
             employee_id = str(li.employee_id) if li.employee_id else None
             start_date = str(li.start_date)
             
             # Primary key with employee
-            key = (delivery_center_id, role_id, employee_id, start_date)
+            key = (role_id, employee_id, start_date)
             existing_by_key[key] = li
             
             # Fallback key without employee (for matching when Excel has no employee)
             if employee_id is None:
-                key_no_emp = (delivery_center_id, role_id, None, start_date)
+                key_no_emp = (role_id, None, start_date)
                 existing_by_key_no_employee[key_no_emp] = li
         
         created_count = 0
@@ -444,35 +445,39 @@ class ExcelImportService:
                 if not role_rate_for_lookup:
                     raise ValueError(f"Row {idx + 4}: Role does not have relationship with Engagement Invoice Center")
                 
-                # Get or create role_rate for Payable Center
-                # This should be unique due to UniqueConstraint, but handle multiple rows gracefully
-                payable_role_rate_result = await self.session.execute(
+                # IMPORTANT: Payable Center is reference-only and NOT used for rate determinations
+                # All rate lookups must use Engagement Invoice Center
+                
+                # Look up RoleRate for Engagement Invoice Center (for rate calculations)
+                engagement_role_rate_result = await self.session.execute(
                     select(RoleRate).where(
                         RoleRate.role_id == item_data["role_id"],
-                        RoleRate.delivery_center_id == item_data["delivery_center_id"],
+                        RoleRate.delivery_center_id == engagement_delivery_center_id,
                         RoleRate.default_currency == item_data["currency"],
-                    )
+                    ).limit(1)
                 )
-                # Use scalars().first() instead of scalar_one_or_none() to handle edge cases gracefully
-                # If multiple rows exist (shouldn't happen due to unique constraint), use first one
-                all_payable_rates = list(payable_role_rate_result.scalars().all())
-                if len(all_payable_rates) > 1:
-                    logger.warning(f"Found {len(all_payable_rates)} role rates for role_id={item_data['role_id']}, "
-                                 f"delivery_center_id={item_data['delivery_center_id']}, "
-                                 f"currency={item_data['currency']}. Using first match.")
-                payable_role_rate = all_payable_rates[0] if all_payable_rates else None
+                engagement_role_rate = engagement_role_rate_result.scalars().first()
+                
+                if not engagement_role_rate:
+                    # Estimates should NEVER create RoleRate records
+                    # If RoleRate doesn't exist for Engagement Invoice Center, raise an error
+                    raise ValueError(
+                        f"Row {idx + 4}: RoleRate not found for Role '{item_data['role_id']}', "
+                        f"Engagement Invoice Center '{engagement_delivery_center_id}', Currency '{item_data['currency']}'. "
+                        f"Please create the RoleRate association first before using it in Estimates."
+                    )
                 
                 # Calculate default rates if cost/rate are None
                 final_cost = item_data["cost"]
                 final_rate = item_data["rate"]
                 
                 if final_cost is None or final_rate is None:
-                    # Get default rates using the same logic as estimate_service
-                    # Pass the role_rate_id if it exists, otherwise None (will look up by role/delivery_center/currency)
+                    # Get default rates using Engagement Invoice Center RoleRate
+                    # This is the correct source for rate lookups per user requirements
                     default_rate, default_cost = await self._get_default_rates_from_role_rate(
-                        payable_role_rate.id if payable_role_rate else None,
+                        engagement_role_rate.id,
                         item_data["role_id"],
-                        item_data["delivery_center_id"],
+                        engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookups
                         item_data["employee_id"],
                         item_data["currency"],
                     )
@@ -482,45 +487,52 @@ class ExcelImportService:
                     if final_cost is None:
                         final_cost = default_cost
                 
-                if not payable_role_rate:
-                    # Create new role_rate using Excel values or defaults
-                    # If Excel didn't provide values, use defaults; otherwise use Excel values
-                    payable_role_rate = RoleRate(
-                        role_id=item_data["role_id"],
-                        delivery_center_id=item_data["delivery_center_id"],
-                        default_currency=item_data["currency"],
-                        internal_cost_rate=float(final_cost),
-                        external_rate=float(final_rate),
+                # Update Engagement Invoice Center RoleRate if cost/rate changed (only if Excel provided explicit values)
+                # Note: This updates the role_rate defaults, which may affect other line items
+                # This is intentional - if user changes rates in Excel, they want to update the defaults
+                # Only update if Excel provided explicit values (not defaults)
+                if item_data["cost"] is not None and item_data["rate"] is not None:
+                    cost_changed = abs(float(engagement_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
+                    rate_changed = abs(float(engagement_role_rate.external_rate) - float(item_data["rate"])) > 0.01
+                    
+                    if cost_changed or rate_changed:
+                        logger.info(f"Updating Engagement Invoice Center role_rate {engagement_role_rate.id} defaults: cost={item_data['cost']}, rate={item_data['rate']}")
+                        engagement_role_rate.internal_cost_rate = float(item_data["cost"])
+                        engagement_role_rate.external_rate = float(item_data["rate"])
+                        await self.session.flush()
+                # If Excel values were None, we used defaults but don't update role_rate defaults
+                
+                # Payable Center is stored separately for reference/export purposes
+                # We need to look it up to validate it exists, but we don't use it for rate calculations
+                payable_center_role_rate_result = await self.session.execute(
+                    select(RoleRate).where(
+                        RoleRate.role_id == item_data["role_id"],
+                        RoleRate.delivery_center_id == item_data["delivery_center_id"],  # Payable Center
+                        RoleRate.default_currency == item_data["currency"],
+                    ).limit(1)
+                )
+                payable_center_role_rate = payable_center_role_rate_result.scalars().first()
+                
+                # Note: We don't require Payable Center RoleRate to exist - it's just for reference
+                # But if it doesn't exist, we can't export it properly, so warn about it
+                if not payable_center_role_rate:
+                    logger.warning(
+                        f"Row {idx + 4}: Payable Center RoleRate not found for Role '{item_data['role_id']}', "
+                        f"Delivery Center '{item_data['delivery_center_id']}', Currency '{item_data['currency']}'. "
+                        f"Payable Center will not be exported correctly."
                     )
-                    self.session.add(payable_role_rate)
-                    await self.session.flush()
-                else:
-                    # Update role_rate if cost/rate changed (only if Excel provided explicit values)
-                    # Note: This updates the role_rate defaults, which may affect other line items
-                    # This is intentional - if user changes rates in Excel, they want to update the defaults
-                    # Only update if Excel provided explicit values (not defaults)
-                    if item_data["cost"] is not None and item_data["rate"] is not None:
-                        cost_changed = abs(float(payable_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
-                        rate_changed = abs(float(payable_role_rate.external_rate) - float(item_data["rate"])) > 0.01
-                        
-                        if cost_changed or rate_changed:
-                            logger.info(f"Updating role_rate {payable_role_rate.id} defaults: cost={item_data['cost']}, rate={item_data['rate']}")
-                            payable_role_rate.internal_cost_rate = float(item_data["cost"])
-                            payable_role_rate.external_rate = float(item_data["rate"])
-                            await self.session.flush()
-                    # If Excel values were None, we used defaults but don't update role_rate defaults
                 
                 # Create keys for matching
+                # Note: Payable Center is NOT used for matching since it's reference-only
                 employee_id_str = str(item_data["employee_id"]) if item_data["employee_id"] else None
-                delivery_center_id_str = str(item_data["delivery_center_id"])
                 role_id_str = str(item_data["role_id"])
                 start_date_str = str(item_data["start_date"])
                 
                 # Primary key: exact match including employee
-                primary_key = (delivery_center_id_str, role_id_str, employee_id_str, start_date_str)
+                primary_key = (role_id_str, employee_id_str, start_date_str)
                 
                 # Fallback key: match without employee (for cases where employee is added)
-                fallback_key = (delivery_center_id_str, role_id_str, None, start_date_str)
+                fallback_key = (role_id_str, None, start_date_str)
                 
                 # Find existing line item
                 line_item = None
@@ -539,9 +551,12 @@ class ExcelImportService:
                 
                 if line_item:
                     # Update existing line item - use Excel values or defaults
+                    # Store Engagement Invoice Center's RoleRate (for rate calculations)
+                    # Store Payable Center from Excel (for reference/export)
                     await self.line_item_repo.update(
                         line_item.id,
-                        role_rates_id=payable_role_rate.id,
+                        role_rates_id=engagement_role_rate.id,  # Use Engagement Invoice Center RoleRate
+                        payable_center_id=item_data["delivery_center_id"],  # Payable Center from Excel (reference only)
                         employee_id=item_data["employee_id"],  # Update employee (may be adding or changing)
                         rate=final_rate,  # Use Excel value or default
                         cost=final_cost,  # Use Excel value or default
@@ -555,9 +570,12 @@ class ExcelImportService:
                     logger.info(f"Updated line item {line_item.id} from Excel row {idx + 4} (rate={final_rate}, cost={final_cost})")
                 else:
                     # Create new line item - use Excel values or defaults
+                    # Store Engagement Invoice Center's RoleRate (for rate calculations)
+                    # Store Payable Center from Excel (for reference/export)
                     line_item = await self.line_item_repo.create(
                         estimate_id=estimate_id,
-                        role_rates_id=payable_role_rate.id,
+                        role_rates_id=engagement_role_rate.id,  # Use Engagement Invoice Center RoleRate
+                        payable_center_id=item_data["delivery_center_id"],  # Payable Center from Excel (reference only)
                         employee_id=item_data["employee_id"],
                         rate=final_rate,  # Use Excel value or default
                         cost=final_cost,  # Use Excel value or default
@@ -666,12 +684,9 @@ class ExcelImportService:
             role_rate = result.scalars().first()
         
         if not role_rate:
-            # Fallback to role defaults
-            role = await self.role_repo.get(role_id)
-            if role:
-                rate = Decimal(str(role.role_external_rate)) if role.role_external_rate else Decimal("0")
-                cost = Decimal(str(role.role_internal_cost_rate)) if role.role_internal_cost_rate else Decimal("0")
-                return rate, cost
+            # No RoleRate found - return zeros
+            # Note: Role model doesn't have rate attributes, so we can't fall back to role defaults
+            # If a RoleRate is required, the caller should check for this and raise an error
             return Decimal("0"), Decimal("0")
         
         # Rate always comes from RoleRate (not employee)

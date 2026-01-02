@@ -9,7 +9,7 @@ import {
   UseQueryOptions,
   UseMutationOptions,
 } from "@tanstack/react-query";
-import { estimatesApi } from "@/lib/api/estimates";
+import { estimatesApi, getRolesForDeliveryCenter } from "@/lib/api/estimates";
 import type {
   EstimateResponse,
   EstimateDetailResponse,
@@ -672,4 +672,18 @@ export function useImportEstimateExcel(
   });
 }
 
+/**
+ * Get roles filtered by delivery center (only roles with RoleRate associations).
+ */
+export function useRolesForDeliveryCenter(
+  deliveryCenterId: string | undefined,
+  options?: Omit<UseQueryOptions<Array<{ id: string; role_name: string }>>, "queryKey" | "queryFn">
+) {
+  return useQuery<Array<{ id: string; role_name: string }>>({
+    queryKey: ["estimates", "roles-for-delivery-center", deliveryCenterId],
+    queryFn: () => getRolesForDeliveryCenter(deliveryCenterId!),
+    enabled: !!deliveryCenterId,
+    ...options,
+  });
+}
 

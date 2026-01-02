@@ -35,6 +35,22 @@ from app.schemas.estimate import (
 router = APIRouter()
 
 
+@router.get("/roles-for-delivery-center/{delivery_center_id}", response_model=List[dict])
+async def get_roles_for_delivery_center(
+    delivery_center_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> List[dict]:
+    """Get roles that have role_rates for a given delivery center.
+    
+    This endpoint is used to filter roles in the Estimate spreadsheet
+    to only show roles that have RoleRate associations with the Engagement Invoice Center.
+    """
+    from app.services.estimate_service import EstimateService
+    service = EstimateService(db)
+    roles = await service.get_roles_for_delivery_center(delivery_center_id)
+    return [{"id": str(role.id), "role_name": role.role_name} for role in roles]
+
+
 @router.post("", response_model=EstimateResponse, status_code=status.HTTP_201_CREATED)
 async def create_estimate(
     estimate_data: EstimateCreate,

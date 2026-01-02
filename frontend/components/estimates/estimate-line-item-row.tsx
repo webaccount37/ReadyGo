@@ -8,6 +8,7 @@ import { useDeleteLineItem } from "@/hooks/useEstimates";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useRoles, useRole } from "@/hooks/useRoles";
+import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { convertCurrency } from "@/lib/utils/currency";
@@ -124,7 +125,8 @@ export function EstimateLineItemRow({
   );
   const hoursSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { data: rolesData } = useRoles();
+  // Only show roles that have RoleRate associations with Engagement Invoice Center
+  const { data: rolesData } = useRolesForDeliveryCenter(engagementDeliveryCenterId);
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: employeesData } = useEmployees({ limit: 100 });
 
@@ -467,10 +469,10 @@ export function EstimateLineItemRow({
       newRate = String(matchingRate.external_rate || "0");
     } else {
       // Fallback to role default rates if no matching rate found
-      const role = rolesData?.items?.find((r) => r.id === roleValue);
-      if (role) {
-        newCost = String(role.role_internal_cost_rate || "0");
-        newRate = String(role.role_external_rate || "0");
+      // Use selectedRoleData which has full role info including defaults
+      if (selectedRoleData) {
+        newCost = String(selectedRoleData.role_internal_cost_rate || "0");
+        newRate = String(selectedRoleData.role_external_rate || "0");
       } else {
         prevRoleRef.current = roleValue;
         return;
@@ -523,9 +525,9 @@ export function EstimateLineItemRow({
           newCost = String(matchingRate.internal_cost_rate || "0");
         } else {
           // Fallback to role default rates if no matching rate found
-          const role = rolesData?.items?.find((r) => r.id === roleValue);
-          if (role) {
-            newCost = String(role.role_internal_cost_rate || "0");
+          // Use selectedRoleData which has full role info including defaults
+          if (selectedRoleData) {
+            newCost = String(selectedRoleData.role_internal_cost_rate || "0");
           } else {
             prevEmployeeRef.current = employeeValue;
             return;
@@ -694,7 +696,7 @@ export function EstimateLineItemRow({
             className="text-xs h-7 w-full"
           >
             <option value="">Select...</option>
-            {rolesData?.items?.map((role: { id: string; role_name: string }) => (
+            {rolesData?.map((role: { id: string; role_name: string }) => (
               <option key={role.id} value={role.id}>
                 {role.role_name}
               </option>

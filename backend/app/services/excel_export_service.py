@@ -617,8 +617,10 @@ class ExcelExportService:
                 continue
             
             # Write line item data
-            # Payable Center
-            if line_item.role_rate and line_item.role_rate.delivery_center:
+            # Payable Center (use payable_center if available, otherwise fallback to role_rate.delivery_center for backward compatibility)
+            if hasattr(line_item, 'payable_center') and line_item.payable_center:
+                ws.cell(row=row, column=1).value = line_item.payable_center.name
+            elif line_item.role_rate and line_item.role_rate.delivery_center:
                 ws.cell(row=row, column=1).value = line_item.role_rate.delivery_center.name
             
             # Role

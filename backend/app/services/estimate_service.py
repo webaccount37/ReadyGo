@@ -436,19 +436,37 @@ class EstimateService(BaseService):
         if not engagement:
             raise ValueError("Engagement not found")
         
-        # Convert role_id + delivery_center_id to role_rates_id if needed
+        # Convert role_id to role_rates_id if needed
+        # IMPORTANT: Rate lookups use Engagement Invoice Center, NOT Payable Center
         role_rates_id = line_item_data.role_rates_id
-        if not role_rates_id and line_item_data.role_id and line_item_data.delivery_center_id:
-            # Get or create role rate - use currency from engagement
-            currency = line_item_data.currency or engagement.default_currency
-            role_rate = await self._get_or_create_role_rate(
+        currency = line_item_data.currency or engagement.default_currency
+        engagement_delivery_center_id = engagement.delivery_center_id
+        
+        if not role_rates_id and line_item_data.role_id:
+            # Get role rate using Engagement Invoice Center (not Payable Center)
+            # Estimates should NEVER create RoleRate records
+            role_rate = await self._get_role_rate(
                 line_item_data.role_id,
-                line_item_data.delivery_center_id,
+                engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookup
                 currency
             )
+            if not role_rate:
+                raise ValueError(
+                    f"RoleRate not found for Role '{line_item_data.role_id}', "
+                    f"Engagement Invoice Center '{engagement_delivery_center_id}', Currency '{currency}'. "
+                    f"Please create the RoleRate association first before using it in Estimates."
+                )
             role_rates_id = role_rate.id
         elif not role_rates_id:
-            raise ValueError("Either role_rates_id OR (role_id + delivery_center_id) must be provided")
+            raise ValueError("Either role_rates_id OR role_id must be provided")
+        
+        # Determine payable_center_id (Payable Center - reference only)
+        # Default to Engagement Invoice Center if not provided
+        payable_center_id = (
+            line_item_data.payable_center_id or 
+            line_item_data.delivery_center_id or  # Backward compatibility
+            engagement_delivery_center_id  # Default to Engagement Invoice Center
+        )
         
         # Get default rates if not provided
         rate = line_item_data.rate
@@ -472,10 +490,11 @@ class EstimateService(BaseService):
         line_item_dict = {
             "estimate_id": estimate_id,
             "role_rates_id": role_rates_id,
+            "payable_center_id": payable_center_id,  # Payable Center (reference only)
             "employee_id": line_item_data.employee_id,
             "rate": rate,
             "cost": cost,
-            "currency": line_item_data.currency or engagement.default_currency,
+            "currency": currency,
             "start_date": line_item_data.start_date,
             "end_date": line_item_data.end_date,
             "row_order": row_order,
@@ -493,8 +512,15 @@ class EstimateService(BaseService):
             raise ValueError("Failed to retrieve created line item")
         return self._line_item_to_response(line_item)
     
-    async def _get_or_create_role_rate(self, role_id: UUID, delivery_center_id: UUID, currency: str) -> RoleRate:
-        """Get or create a role rate for the given role, delivery center, and currency."""
+    async def _get_role_rate(self, role_id: UUID, delivery_center_id: UUID, currency: str) -> Optional[RoleRate]:
+        """Get a role rate for the given role, delivery center, and currency.
+        
+        Estimates should NEVER create RoleRate records. If a RoleRate doesn't exist,
+        it should be created through the Roles management interface first.
+        
+        Returns:
+            RoleRate if found, None otherwise
+        """
         result = await self.session.execute(
             select(RoleRate).where(
                 and_(
@@ -504,21 +530,7 @@ class EstimateService(BaseService):
                 )
             )
         )
-        role_rate = result.scalar_one_or_none()
-        if role_rate:
-            return role_rate
-        
-        # Create a new role rate with default values
-        role_rate = RoleRate(
-            role_id=role_id,
-            delivery_center_id=delivery_center_id,
-            default_currency=currency,
-            internal_cost_rate=0.0,
-            external_rate=0.0
-        )
-        self.session.add(role_rate)
-        await self.session.flush()
-        return role_rate
+        return result.scalar_one_or_none()
     
     
     async def update_line_item(
@@ -546,40 +558,32 @@ class EstimateService(BaseService):
             if not engagement_delivery_center_id:
                 raise ValueError("Engagement Invoice Center (delivery_center_id) is required for role rate lookup")
             
-            role_rate = await self._get_or_create_role_rate(
+            role_rate = await self._get_role_rate(
                 update_dict["role_id"],
                 engagement_delivery_center_id,  # Use Engagement Invoice Center, not Payable Center
                 currency
             )
+            if not role_rate:
+                raise ValueError(
+                    f"RoleRate not found for Role '{update_dict['role_id']}', "
+                    f"Delivery Center '{engagement_delivery_center_id}', Currency '{currency}'. "
+                    f"Please create the RoleRate association first before using it in Estimates."
+                )
             update_dict["role_rates_id"] = role_rate.id
             # Remove role_id from update_dict as it's not in the model
             update_dict.pop("role_id", None)
         
-        # Handle delivery_center_id (Payable Center) updates - this is independent and doesn't affect role_rate
-        # Note: delivery_center_id is not stored in EstimateLineItem model, it's derived from role_rate
-        # So updating Payable Center means we need to find/create a role_rate with the new delivery center
-        # BUT we should use the current role_id and Engagement Invoice Center for the lookup
+        # Handle payable_center_id (Payable Center) updates - this is reference-only and doesn't affect rate calculations
+        # Payable Center can be any delivery center, it's just stored for reference/export purposes
+        if "payable_center_id" in update_dict:
+            # Payable Center is stored directly - no need to look up RoleRate
+            # It's just a reference field for downstream use
+            pass  # payable_center_id will be saved directly to the model
+        
+        # Handle delivery_center_id (backward compatibility - treat as payable_center_id)
         if "delivery_center_id" in update_dict and "role_id" not in update_dict:
-            # Payable Center update - get current role_id from existing role_rate
-            if not line_item.role_rate or not line_item.role_rate.role:
-                raise ValueError("Cannot update Payable Center: role information not found")
-            
-            current_role_id = line_item.role_rate.role.id
-            # Get currency and engagement delivery center
-            estimate = await self.estimate_repo.get(estimate_id)
-            engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
-            currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
-            
-            # Create/find role_rate with: current role_id + new Payable Center + currency
-            # Note: This changes which role_rate is used, but the Role Rate lookup for Cost/Rate
-            # should still use Role ID + Engagement Invoice Center (not Payable Center)
-            role_rate = await self._get_or_create_role_rate(
-                current_role_id,
-                update_dict["delivery_center_id"],  # New Payable Center
-                currency
-            )
-            update_dict["role_rates_id"] = role_rate.id
-            # Remove delivery_center_id from update_dict as it's not in the model
+            # For backward compatibility, treat delivery_center_id as payable_center_id
+            update_dict["payable_center_id"] = update_dict["delivery_center_id"]
             update_dict.pop("delivery_center_id", None)
         
         # Recalculate rates if role_rates_id/employee changed
@@ -610,13 +614,19 @@ class EstimateService(BaseService):
                 
                 if engagement_delivery_center_id:
                     # Get role_rate using Role ID + Engagement Invoice Center for rate lookup
-                    role_rate_for_rates = await self._get_or_create_role_rate(
+                    role_rate_for_rates = await self._get_role_rate(
                         new_role_id,
                         engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookup
                         currency
                     )
-                    default_rate, default_cost = await self._get_default_rates_from_role_rate(
-                        role_rate_for_rates.id,  # Use role_rate with Engagement Invoice Center
+                    if not role_rate_for_rates:
+                        # If RoleRate doesn't exist, use role defaults or 0
+                        role = await self.role_repo.get(new_role_id)
+                        default_rate = Decimal(str(role.role_external_rate)) if role and role.role_external_rate else Decimal("0")
+                        default_cost = Decimal(str(role.role_internal_cost_rate)) if role and role.role_internal_cost_rate else Decimal("0")
+                    else:
+                        default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                            role_rate_for_rates.id,  # Use role_rate with Engagement Invoice Center
                         new_employee_id,
                         target_currency=currency,  # Pass currency for conversion
                     )
@@ -1156,12 +1166,25 @@ class EstimateService(BaseService):
             if line_item.role_rate.delivery_center:
                 delivery_center_id = line_item.role_rate.delivery_center.id
         
+        # Get payable_center_name from payable_center relationship
+        payable_center_name = None
+        try:
+            if inspector.attrs.payable_center.loaded_value is not None:
+                payable_center = inspector.attrs.payable_center.loaded_value
+                if payable_center:
+                    payable_center_name = payable_center.name
+        except (AttributeError, KeyError):
+            # If not loaded, try to get from line_item.payable_center if available
+            if hasattr(line_item, 'payable_center') and line_item.payable_center:
+                payable_center_name = line_item.payable_center.name
+        
         line_item_dict = {
             "id": line_item.id,
             "estimate_id": line_item.estimate_id,
             "role_rates_id": line_item.role_rates_id,
             "role_id": role_id,  # Included for backward compatibility
-            "delivery_center_id": delivery_center_id,  # Included for backward compatibility
+            "delivery_center_id": line_item.payable_center_id if hasattr(line_item, 'payable_center_id') else delivery_center_id,  # Payable Center (for backward compatibility, fallback to role_rate.delivery_center)
+            "payable_center_id": line_item.payable_center_id if hasattr(line_item, 'payable_center_id') else None,  # Payable Center
             "employee_id": line_item.employee_id,
             "rate": line_item.rate,
             "cost": line_item.cost,
@@ -1172,7 +1195,8 @@ class EstimateService(BaseService):
             "billable": line_item.billable,
             "billable_expense_percentage": line_item.billable_expense_percentage,
             "role_name": role_name,
-            "delivery_center_name": delivery_center_name,
+            "delivery_center_name": payable_center_name or delivery_center_name,  # Use payable_center_name if available, otherwise fallback
+            "payable_center_name": payable_center_name,  # Payable Center name
             "employee_name": employee_name,
         }
         
