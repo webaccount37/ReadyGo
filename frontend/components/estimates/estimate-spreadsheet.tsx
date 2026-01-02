@@ -247,7 +247,69 @@ export function EstimateSpreadsheet({
     };
   };
 
+  // Calculate summary totals for Estimate Summary section
+  const summaryTotals = useMemo(() => {
+    const parseLocalDate = (dateStr: string): Date => {
+      const datePart = dateStr.split("T")[0];
+      const [year, month, day] = datePart.split("-").map(Number);
+      return new Date(year, month - 1, day);
+    };
 
+    const formatDateKey = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+
+    let totalCost = 0;
+    let totalRevenue = 0;
+    let billableExpenseAmount = 0;
+
+    existingLineItems.forEach((item) => {
+      const itemHours = weeks.reduce((hoursSum, week) => {
+        const weekKey = formatDateKey(week);
+        const weekDate = week;
+        const startDate = parseLocalDate(item.start_date);
+        const endDate = parseLocalDate(item.end_date);
+        const weekEnd = new Date(weekDate);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+
+        if (weekDate <= endDate && weekEnd >= startDate) {
+          const weeklyHour = item.weekly_hours?.find((wh) => {
+            const whDate = parseLocalDate(wh.week_start_date);
+            return formatDateKey(whDate) === weekKey;
+          });
+          return hoursSum + parseFloat(weeklyHour?.hours || "0");
+        }
+        return hoursSum;
+      }, 0);
+
+      const itemCost = itemHours * parseFloat(item.cost || "0");
+      const itemRevenue = itemHours * parseFloat(item.rate || "0");
+      const billableExpensePercentage = parseFloat(item.billable_expense_percentage || "0");
+
+      totalCost += itemCost;
+      totalRevenue += itemRevenue;
+      billableExpenseAmount += (billableExpensePercentage / 100) * itemRevenue;
+    });
+
+    const marginAmount = totalRevenue - totalCost;
+    const marginPercentageWithoutExpenses = totalRevenue > 0 
+      ? (marginAmount / totalRevenue) * 100 
+      : 0;
+    const marginPercentageWithExpenses = (totalRevenue + billableExpenseAmount) > 0 
+      ? (marginAmount / (totalRevenue + billableExpenseAmount)) * 100 
+      : 0;
+
+    return {
+      totalCost,
+      totalRevenue,
+      marginAmount,
+      marginPercentageWithoutExpenses,
+      marginPercentageWithExpenses,
+    };
+  }, [existingLineItems, weeks]);
 
   return (
     <Card className="w-full max-w-full overflow-hidden">
@@ -298,6 +360,60 @@ export function EstimateSpreadsheet({
           </div>
         </div>
       </CardHeader>
+      {/* Estimate Summary Section */}
+      {existingLineItems.length > 0 && (
+        <CardContent className="px-6 pt-4 pb-4 border-b">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Total Cost Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">Total Cost</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {engagementCurrency || estimate.currency || "USD"} {summaryTotals.totalCost.toFixed(2)}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Total Revenue Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">Total Revenue</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {engagementCurrency || estimate.currency || "USD"} {summaryTotals.totalRevenue.toFixed(2)}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Margin Amount Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">Margin Amount</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {engagementCurrency || estimate.currency || "USD"} {summaryTotals.marginAmount.toFixed(2)}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Margin % Without Expenses Card */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-gray-600">Margin % (Without Expenses)</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {summaryTotals.marginPercentageWithoutExpenses.toFixed(1)}%
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </CardContent>
+      )}
       <CardContent className="p-0 overflow-hidden">
         <div 
           className="overflow-x-auto overflow-y-auto" 
@@ -313,7 +429,7 @@ export function EstimateSpreadsheet({
                 {/* Phase header row */}
                 {estimate.phases && estimate.phases.length > 0 && (
                   <tr>
-                    <th colSpan={9} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
+                    <th colSpan={10} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
                       Phases
                     </th>
                     {weeks.map((week: Date, weekIndex: number) => {
@@ -379,14 +495,14 @@ export function EstimateSpreadsheet({
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[100px]">
                     End Date
                   </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[70px]">
+                    Actions
+                  </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[80px]">
                     Billable
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[120px]">
                     Billable Expense %
-                  </th>
-                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[70px]">
-                    Actions
                   </th>
                   {weeks.map((week: Date, weekIndex: number) => {
                     const style = getWeekBackgroundStyle(weekIndex);

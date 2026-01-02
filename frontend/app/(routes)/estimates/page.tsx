@@ -14,6 +14,7 @@ import { useEngagements } from "@/hooks/useEngagements";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Estimate } from "@/types/estimate";
+import { EngagementKPIs } from "@/components/estimates/engagement-kpis";
 
 export default function EstimatesPage() {
   const [skip] = useState(0);
@@ -193,96 +194,106 @@ export default function EstimatesPage() {
       ) : (
         <div className="space-y-6">
           {Object.values(filteredGroups).map((group) => (
-            <Card key={group.engagement.id}>
-              <CardHeader>
-                <CardTitle className="text-xl">
-                  {highlightText(group.engagement.name, searchQuery)}
-                </CardTitle>
-                <div className="flex gap-4 text-sm text-gray-600 mt-2">
-                  {group.engagement.opportunity_name && (
-                    <span>
-                      <span className="font-semibold">Opportunity:</span>{" "}
-                      {group.engagement.opportunity_name}
-                    </span>
-                  )}
-                  {group.engagement.delivery_center_name && (
-                    <span>
-                      <span className="font-semibold">Delivery Center:</span>{" "}
-                      {group.engagement.delivery_center_name}
-                    </span>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {group.estimates.length === 0 ? (
-                    <p className="text-sm text-gray-500">No estimates found.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {group.estimates.map((estimate) => (
-                        <div
-                          key={estimate.id}
-                          className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                        >
-                          <div className="flex items-center gap-3 flex-1">
-                            <Link
-                              href={`/estimates/${estimate.id}`}
-                              className="text-blue-600 hover:underline font-medium"
-                            >
-                              {highlightText(estimate.name, searchQuery)}
-                            </Link>
-                            {estimate.active_version ? (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
-                                ACTIVE VERSION
-                              </span>
-                            ) : (
-                              <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs font-semibold">
-                                PENDING VERSION
-                              </span>
-                            )}
-                            {estimate.description && (
-                              <span className="text-sm text-gray-500">
-                                {estimate.description}
-                              </span>
-                            )}
+            <div key={group.engagement.id} className="flex gap-4">
+              <Card className="flex-1">
+                <CardHeader>
+                  <CardTitle className="text-xl">
+                    {highlightText(group.engagement.name, searchQuery)}
+                  </CardTitle>
+                  <div className="flex gap-4 text-sm text-gray-600 mt-2">
+                    {group.engagement.opportunity_name && (
+                      <span>
+                        <span className="font-semibold">Opportunity:</span>{" "}
+                        {group.engagement.opportunity_name}
+                      </span>
+                    )}
+                    {group.engagement.delivery_center_name && (
+                      <span>
+                        <span className="font-semibold">Delivery Center:</span>{" "}
+                        {group.engagement.delivery_center_name}
+                      </span>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {group.estimates.length === 0 ? (
+                      <p className="text-sm text-gray-500">No estimates found.</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {group.estimates.map((estimate) => (
+                          <div
+                            key={estimate.id}
+                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
+                          >
+                            <div className="flex items-center gap-3 flex-1">
+                              <Link
+                                href={`/estimates/${estimate.id}`}
+                                className="text-blue-600 hover:underline font-medium"
+                              >
+                                {highlightText(estimate.name, searchQuery)}
+                              </Link>
+                              {estimate.active_version ? (
+                                <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                  ACTIVE VERSION
+                                </span>
+                              ) : (
+                                <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs font-semibold">
+                                  PENDING VERSION
+                                </span>
+                              )}
+                              {estimate.description && (
+                                <span className="text-sm text-gray-500">
+                                  {estimate.description}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              {!estimate.active_version && (
+                                <>
+                                  <Button
+                                    onClick={() => handleSetActive(estimate.id)}
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={setActiveVersion.isPending}
+                                  >
+                                    Set Active
+                                  </Button>
+                                  <Button
+                                    onClick={() => handleDelete(estimate.id, estimate.name)}
+                                    variant="outline"
+                                    size="sm"
+                                    disabled={deleteEstimate.isPending}
+                                    className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                  >
+                                    {deleteEstimate.isPending ? "Deleting..." : "Delete"}
+                                  </Button>
+                                </>
+                              )}
+                              <Button
+                                onClick={() => router.push(`/estimates/${estimate.id}`)}
+                                variant="outline"
+                                size="sm"
+                              >
+                                Edit
+                              </Button>
+                            </div>
                           </div>
-                          <div className="flex gap-2">
-                            {!estimate.active_version && (
-                              <>
-                                <Button
-                                  onClick={() => handleSetActive(estimate.id)}
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={setActiveVersion.isPending}
-                                >
-                                  Set Active
-                                </Button>
-                                <Button
-                                  onClick={() => handleDelete(estimate.id, estimate.name)}
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={deleteEstimate.isPending}
-                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                                >
-                                  {deleteEstimate.isPending ? "Deleting..." : "Delete"}
-                                </Button>
-                              </>
-                            )}
-                            <Button
-                              onClick={() => router.push(`/estimates/${estimate.id}`)}
-                              variant="outline"
-                              size="sm"
-                            >
-                              Edit
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+              {/* KPIs Section */}
+              <div className="w-64 flex-shrink-0">
+                <Card className="h-full">
+                  <CardContent className="p-4">
+                    <EngagementKPIs estimates={group.estimates} />
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           ))}
         </div>
       )}

@@ -946,33 +946,6 @@ export function EstimateEmptyRow({
         />
       </td>
 
-      {/* Billable */}
-      <td className="border border-gray-300 px-2 py-1 text-center">
-        <input
-          type="checkbox"
-          checked={formData.billable ?? true}
-          onChange={(e) => setFormData({ ...formData, billable: e.target.checked })}
-          className="h-4 w-4"
-        />
-      </td>
-
-      {/* Billable Expense Percentage */}
-      <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
-        <div className="flex items-center gap-1">
-          <Input
-            type="number"
-            step="0.01"
-            min="0"
-            max="100"
-            value={formData.billable_expense_percentage || "0"}
-            onChange={(e) => setFormData({ ...formData, billable_expense_percentage: e.target.value })}
-            placeholder="0"
-            className="text-xs h-7 flex-1"
-          />
-          <span className="text-[10px] text-gray-500">%</span>
-        </div>
-      </td>
-
       {/* Actions */}
       <td className="border border-gray-300 px-2 py-1">
         <div className="flex gap-2 items-center">
@@ -1124,6 +1097,33 @@ export function EstimateEmptyRow({
             }}
           />
         )}
+      </td>
+
+      {/* Billable */}
+      <td className="border border-gray-300 px-2 py-1 text-center">
+        <input
+          type="checkbox"
+          checked={formData.billable ?? true}
+          onChange={(e) => setFormData({ ...formData, billable: e.target.checked })}
+          className="h-4 w-4"
+        />
+      </td>
+
+      {/* Billable Expense Percentage */}
+      <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
+        <div className="flex items-center gap-1">
+          <Input
+            type="number"
+            step="0.01"
+            min="0"
+            max="100"
+            value={formData.billable_expense_percentage || "0"}
+            onChange={(e) => setFormData({ ...formData, billable_expense_percentage: e.target.value })}
+            placeholder="0"
+            className="text-xs h-7 flex-1"
+          />
+          <span className="text-[10px] text-gray-500">%</span>
+        </div>
       </td>
 
       {/* Weekly Hours */}

@@ -795,40 +795,6 @@ export function EstimateLineItemRow({
           />
         </td>
 
-        {/* Billable */}
-        <td className="border border-gray-300 px-2 py-1 text-xs text-center">
-          <input
-            type="checkbox"
-            checked={billableValue}
-            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-              const newValue = e.target.checked;
-              setBillableValue(newValue);
-              handleFieldUpdate("billable", newValue ? "true" : "false", String(lineItem.billable ?? true));
-            }}
-            className="h-4 w-4"
-          />
-        </td>
-
-        {/* Billable Expense Percentage */}
-        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
-          <div className="flex items-center gap-1">
-            <Input
-              type="number"
-              step="0.01"
-              min="0"
-              max="100"
-              value={billableExpensePercentageValue}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                setBillableExpensePercentageValue(e.target.value);
-                handleFieldUpdate("billable_expense_percentage", e.target.value, lineItem.billable_expense_percentage || "0");
-              }}
-              placeholder="0"
-              className="text-xs h-7 flex-1"
-            />
-            <span className="text-[10px] text-gray-500">%</span>
-          </div>
-        </td>
-
         {/* Actions */}
         <td className="border border-gray-300 px-2 py-1" style={{ minWidth: '100px' }}>
           <div className="flex gap-2 items-center">
@@ -870,6 +836,40 @@ export function EstimateLineItemRow({
             >
               {deleteLineItemMutation.isPending ? "Deleting..." : "Delete"}
             </button>
+          </div>
+        </td>
+
+        {/* Billable */}
+        <td className="border border-gray-300 px-2 py-1 text-xs text-center">
+          <input
+            type="checkbox"
+            checked={billableValue}
+            onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+              const newValue = e.target.checked;
+              setBillableValue(newValue);
+              handleFieldUpdate("billable", newValue ? "true" : "false", String(lineItem.billable ?? true));
+            }}
+            className="h-4 w-4"
+          />
+        </td>
+
+        {/* Billable Expense Percentage */}
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              max="100"
+              value={billableExpensePercentageValue}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                setBillableExpensePercentageValue(e.target.value);
+                handleFieldUpdate("billable_expense_percentage", e.target.value, lineItem.billable_expense_percentage || "0");
+              }}
+              placeholder="0"
+              className="text-xs h-7 flex-1"
+            />
+            <span className="text-[10px] text-gray-500">%</span>
           </div>
         </td>
 
