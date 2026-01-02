@@ -281,23 +281,39 @@ export function OpportunityRelationships({
       return;
     }
 
-    // Update Project Cost from employee's internal_cost_rate
-    if (selectedEmployeeData.internal_cost_rate !== undefined) {
-      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
-      const engagementCurrency = selectedEngagement.default_currency || "USD";
+    // Get employee's delivery center ID from code
+    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
+      ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
+      : null;
+    
+    // Compare Engagement Invoice Center with Employee Delivery Center
+    const centersMatch = selectedEngagement.delivery_center_id && employeeDeliveryCenterId 
+      ? selectedEngagement.delivery_center_id === employeeDeliveryCenterId
+      : false;
 
-      // Convert to Engagement Invoice Center Currency if different (same logic as Estimation Spreadsheet)
+    // Determine which rate to use and whether to convert currency
+    let employeeCost: number;
+    const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    const engagementCurrency = selectedEngagement.default_currency || "USD";
+
+    if (centersMatch) {
+      // Centers match: use internal_cost_rate with NO currency conversion
+      employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+    } else {
+      // Centers don't match: use internal_bill_rate with currency conversion
+      employeeCost = selectedEmployeeData.internal_bill_rate || 0;
+      
+      // Convert to Engagement Invoice Center Currency if different
       if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
         employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
       }
-
-      setEmployeeFormData((prev) => ({
-        ...prev,
-        project_cost: String(employeeCost),
-      }));
     }
-  }, [employeeFormData.employee_id, selectedEmployeeData, selectedEngagement]);
+
+    setEmployeeFormData((prev) => ({
+      ...prev,
+      project_cost: String(employeeCost),
+    }));
+  }, [employeeFormData.employee_id, selectedEmployeeData, selectedEngagement, deliveryCentersData]);
 
   // Get employees linked to this opportunity (through opportunity associations)
   // Note: This would come from the opportunity data if include_relationships is true

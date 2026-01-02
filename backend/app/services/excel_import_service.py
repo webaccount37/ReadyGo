@@ -648,7 +648,7 @@ class ExcelImportService:
         self,
         role_rates_id: Optional[UUID],
         role_id: UUID,
-        delivery_center_id: UUID,
+        delivery_center_id: UUID,  # This is the engagement delivery center ID (Invoice Center)
         employee_id: Optional[UUID],
         target_currency: str,
     ) -> Tuple[Decimal, Decimal]:
@@ -661,7 +661,7 @@ class ExcelImportService:
         Args:
             role_rates_id: ID of the role_rate to use for rate lookup (may be None)
             role_id: Role ID (used if role_rates_id is None)
-            delivery_center_id: Delivery center ID (used if role_rates_id is None)
+            delivery_center_id: Engagement delivery center ID (Invoice Center) - used if role_rates_id is None, and for comparison with employee delivery center
             employee_id: Optional employee ID - if provided, only cost is taken from employee
             target_currency: Target currency for conversion
         
@@ -698,20 +698,29 @@ class ExcelImportService:
         if employee_id:
             employee = await self.employee_repo.get(employee_id)
             if employee:
-                employee_cost = Decimal(str(employee.internal_cost_rate))
-                employee_currency = employee.default_currency or "USD"
+                # Compare Engagement Invoice Center with Employee Delivery Center
+                centers_match = delivery_center_id == employee.delivery_center_id if (delivery_center_id and employee.delivery_center_id) else False
                 
-                # Convert employee cost to target currency if needed
-                if target_currency and employee_currency.upper() != target_currency.upper():
-                    employee_cost_decimal = await convert_currency(
-                        float(employee_cost),
-                        employee_currency,
-                        target_currency,
-                        self.session
-                    )
-                    cost = Decimal(str(employee_cost_decimal))
-                else:
+                if centers_match:
+                    # Centers match: use internal_cost_rate with NO currency conversion
+                    employee_cost = Decimal(str(employee.internal_cost_rate))
                     cost = employee_cost
+                else:
+                    # Centers don't match: use internal_bill_rate with currency conversion
+                    employee_cost = Decimal(str(employee.internal_bill_rate))
+                    employee_currency = employee.default_currency or "USD"
+                    
+                    # Convert employee cost to target currency if needed
+                    if target_currency and employee_currency.upper() != target_currency.upper():
+                        employee_cost_decimal = await convert_currency(
+                            float(employee_cost),
+                            employee_currency,
+                            target_currency,
+                            self.session
+                        )
+                        cost = Decimal(str(employee_cost_decimal))
+                    else:
+                        cost = employee_cost
         
         # Convert rate to target currency if needed (only if we didn't already convert cost from employee)
         if target_currency and rate_currency.upper() != target_currency.upper():

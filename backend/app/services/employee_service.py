@@ -22,6 +22,7 @@ from app.models.role_rate import RoleRate
 from sqlalchemy import select, and_, func, update
 from uuid import UUID
 from decimal import Decimal
+from app.utils.currency_converter import convert_currency
 
 
 class EmployeeService(BaseService):
@@ -526,8 +527,34 @@ class EmployeeService(BaseService):
                     
                     # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
                     rate = Decimal(str(engagement_data.project_rate)) if engagement_data.project_rate else Decimal(str(employee.external_bill_rate))
-                    # Use project_cost from request if provided, otherwise fall back to employee internal_cost_rate
-                    cost = Decimal(str(engagement_data.project_cost)) if engagement_data.project_cost is not None else Decimal(str(employee.internal_cost_rate))
+                    
+                    # Determine cost based on delivery center matching
+                    if engagement_data.project_cost is not None:
+                        # Use project_cost from request if provided
+                        cost = Decimal(str(engagement_data.project_cost))
+                    else:
+                        # Compare Engagement Invoice Center with Employee Delivery Center
+                        centers_match = engagement.delivery_center_id == employee.delivery_center_id if (engagement.delivery_center_id and employee.delivery_center_id) else False
+                        
+                        if centers_match:
+                            # Centers match: use internal_cost_rate with NO currency conversion
+                            cost = Decimal(str(employee.internal_cost_rate))
+                        else:
+                            # Centers don't match: use internal_bill_rate with currency conversion
+                            employee_cost = Decimal(str(employee.internal_bill_rate))
+                            employee_currency = employee.default_currency or "USD"
+                            
+                            # Convert to Engagement Invoice Center Currency if different
+                            if employee_currency.upper() != currency.upper():
+                                cost_decimal = await convert_currency(
+                                    float(employee_cost),
+                                    employee_currency,
+                                    currency,
+                                    self.session
+                                )
+                                cost = Decimal(str(cost_decimal))
+                            else:
+                                cost = employee_cost
                     
                     # Get max row_order
                     max_order_result = await self.session.execute(
@@ -719,8 +746,34 @@ class EmployeeService(BaseService):
             
             # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
             rate = Decimal(str(request.project_rate)) if request.project_rate else Decimal(str(employee.external_bill_rate))
-            # Use project_cost from request if provided, otherwise fall back to employee internal_cost_rate
-            cost = Decimal(str(request.project_cost)) if request.project_cost is not None else Decimal(str(employee.internal_cost_rate))
+            
+            # Determine cost based on delivery center matching
+            if request.project_cost is not None:
+                # Use project_cost from request if provided
+                cost = Decimal(str(request.project_cost))
+            else:
+                # Compare Engagement Invoice Center with Employee Delivery Center
+                centers_match = engagement.delivery_center_id == employee.delivery_center_id if (engagement.delivery_center_id and employee.delivery_center_id) else False
+                
+                if centers_match:
+                    # Centers match: use internal_cost_rate with NO currency conversion
+                    cost = Decimal(str(employee.internal_cost_rate))
+                else:
+                    # Centers don't match: use internal_bill_rate with currency conversion
+                    employee_cost = Decimal(str(employee.internal_bill_rate))
+                    employee_currency = employee.default_currency or "USD"
+                    
+                    # Convert to Engagement Invoice Center Currency if different
+                    if employee_currency.upper() != currency.upper():
+                        cost_decimal = await convert_currency(
+                            float(employee_cost),
+                            employee_currency,
+                            currency,
+                            self.session
+                        )
+                        cost = Decimal(str(cost_decimal))
+                    else:
+                        cost = employee_cost
             
             # Get max row_order
             max_order_result = await self.session.execute(

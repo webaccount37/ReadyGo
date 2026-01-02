@@ -543,20 +543,39 @@ export function EstimateLineItemRow({
       return;
     }
 
-    // Employee was selected - update cost from employee's internal_cost_rate
+    // Employee was selected - update cost from employee's rates based on delivery center matching
     if (!selectedEmployeeData) {
       // Employee data not loaded yet, wait for it
       prevEmployeeRef.current = employeeValue;
       return;
     }
 
-    // Update only cost from employee's internal_cost_rate
-    // Convert currency if Employee Cost Default Currency differs from Engagement Invoice Center Currency
-    if (selectedEmployeeData.internal_cost_rate !== undefined) {
-      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
-      
-      console.log("Employee effect (line item row) - converting currency", {
+    // Get employee's delivery center ID from code
+    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
+      ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
+      : null;
+    
+    // Compare Engagement Invoice Center with Employee Delivery Center
+    const centersMatch = engagementDeliveryCenterId && employeeDeliveryCenterId 
+      ? engagementDeliveryCenterId === employeeDeliveryCenterId
+      : false;
+
+    // Determine which rate to use and whether to convert currency
+    let employeeCost: number;
+    const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    
+    if (centersMatch) {
+      // Centers match: use internal_cost_rate with NO currency conversion
+      employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+      console.log("Employee effect (line item row) - centers match, using internal_cost_rate without conversion", {
+        originalCost: employeeCost,
+        employeeCurrency,
+        targetCurrency: currency,
+      });
+    } else {
+      // Centers don't match: use internal_bill_rate with currency conversion
+      employeeCost = selectedEmployeeData.internal_bill_rate || 0;
+      console.log("Employee effect (line item row) - centers don't match, using internal_bill_rate with conversion", {
         originalCost: employeeCost,
         employeeCurrency,
         targetCurrency: currency,
@@ -574,24 +593,26 @@ export function EstimateLineItemRow({
         });
         employeeCost = convertedCost;
       }
-      
-      const newCost = String(employeeCost);
-      console.log("Updating Cost from Employee (line item row):", {
-        originalCost: selectedEmployeeData.internal_cost_rate,
-        employeeCurrency,
-        convertedCost: employeeCost,
-        newCost,
-        currentCost: costValue,
-      });
-      
-      // Always update cost from employee (don't check if changed, as it should update when employee changes)
-      setCostValue(newCost);
-      // Trigger save - only cost, NOT rate (use original value from lineItem)
-      handleFieldUpdate("cost", newCost, lineItem.cost || "0");
     }
+    
+    const newCost = String(employeeCost);
+    console.log("Updating Cost from Employee (line item row):", {
+      centersMatch,
+      rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
+      originalCost: centersMatch ? selectedEmployeeData.internal_cost_rate : selectedEmployeeData.internal_bill_rate,
+      employeeCurrency,
+      convertedCost: employeeCost,
+      newCost,
+      currentCost: costValue,
+    });
+    
+    // Always update cost from employee (don't check if changed, as it should update when employee changes)
+    setCostValue(newCost);
+    // Trigger save - only cost, NOT rate (use original value from lineItem)
+    handleFieldUpdate("cost", newCost, lineItem.cost || "0");
 
     prevEmployeeRef.current = employeeValue;
-  }, [employeeValue, roleValue, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost]);
+  }, [employeeValue, roleValue, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Parse dates as local dates to avoid timezone conversion issues

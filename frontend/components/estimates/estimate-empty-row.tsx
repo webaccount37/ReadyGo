@@ -655,26 +655,46 @@ export function EstimateEmptyRow({
       return;
     }
 
-    // Employee was selected - update cost from employee's internal_cost_rate
+    // Employee was selected - update cost from employee's rates based on delivery center matching
     if (!selectedEmployeeData) {
       // Employee data not loaded yet, wait for it
       prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
 
-    console.log("Employee effect running - updating Cost", {
-      employee_id: currentEmployeeId,
-      selectedEmployeeData: !!selectedEmployeeData,
-      internal_cost_rate: selectedEmployeeData?.internal_cost_rate,
-      default_currency: selectedEmployeeData?.default_currency,
-      target_currency: currency,
-    });
+    // Get employee's delivery center ID from code
+    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
+      ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
+      : null;
+    
+    // Compare Engagement Invoice Center with Employee Delivery Center
+    const centersMatch = engagementDeliveryCenterId && employeeDeliveryCenterId 
+      ? engagementDeliveryCenterId === employeeDeliveryCenterId
+      : false;
 
-    // Update only cost from employee's internal_cost_rate
-    // Convert currency if Employee Cost Default Currency differs from Engagement Invoice Center Currency
-    if (selectedEmployeeData.internal_cost_rate !== undefined) {
-      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    // Determine which rate to use and whether to convert currency
+    let employeeCost: number;
+    const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    
+    if (centersMatch) {
+      // Centers match: use internal_cost_rate with NO currency conversion
+      employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+      console.log("Employee effect running - centers match, using internal_cost_rate without conversion", {
+        employee_id: currentEmployeeId,
+        originalCost: employeeCost,
+        employeeCurrency,
+        target_currency: currency,
+      });
+    } else {
+      // Centers don't match: use internal_bill_rate with currency conversion
+      employeeCost = selectedEmployeeData.internal_bill_rate || 0;
+      console.log("Employee effect running - centers don't match, using internal_bill_rate with conversion", {
+        employee_id: currentEmployeeId,
+        originalCost: employeeCost,
+        employeeCurrency,
+        target_currency: currency,
+        needsConversion: employeeCurrency.toUpperCase() !== currency.toUpperCase(),
+      });
       
       // Convert to Engagement Invoice Center Currency if different
       if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
@@ -689,29 +709,31 @@ export function EstimateEmptyRow({
         });
         employeeCost = convertedCost;
       }
-      
-      const newCost = String(employeeCost);
-      console.log("Updating Cost from Employee:", {
-        originalCost: selectedEmployeeData.internal_cost_rate,
-        employeeCurrency,
-        convertedCost: employeeCost,
-        newCost,
-        currentCost: formData.cost,
-      });
-      
-      // Always update cost from employee (don't check if changed, as it should update when employee changes)
-      setFormData((prev) => ({
-        ...prev,
-        cost: newCost,
-        // Rate is NOT updated - it stays based on Role
-      }));
-      
-      // Mark as populated
-      lastPopulatedEmployeeRef.current = currentEmployeeId;
     }
+    
+    const newCost = String(employeeCost);
+    console.log("Updating Cost from Employee:", {
+      centersMatch,
+      rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
+      originalCost: centersMatch ? selectedEmployeeData.internal_cost_rate : selectedEmployeeData.internal_bill_rate,
+      employeeCurrency,
+      convertedCost: employeeCost,
+      newCost,
+      currentCost: formData.cost,
+    });
+    
+    // Always update cost from employee (don't check if changed, as it should update when employee changes)
+    setFormData((prev) => ({
+      ...prev,
+      cost: newCost,
+      // Rate is NOT updated - it stays based on Role
+    }));
+    
+    // Mark as populated
+    lastPopulatedEmployeeRef.current = currentEmployeeId;
 
     prevEmployeeIdRef.current = currentEmployeeId;
-  }, [formData.employee_id, formData.role_id, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, isSaving, isCreatingRef]);
+  }, [formData.employee_id, formData.role_id, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Ensure we have required fields and create line item if needed

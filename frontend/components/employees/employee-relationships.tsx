@@ -189,23 +189,39 @@ export function EmployeeRelationships({
       return;
     }
 
-    // Update Project Cost from employee's internal_cost_rate
-    if (selectedEmployeeData.internal_cost_rate !== undefined) {
-      let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-      const employeeCurrency = selectedEmployeeData.default_currency || "USD";
-      const engagementCurrency = selectedEngagement.default_currency || "USD";
+    // Get employee's delivery center ID from code
+    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
+      ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
+      : null;
+    
+    // Compare Engagement Invoice Center with Employee Delivery Center
+    const centersMatch = selectedEngagement.delivery_center_id && employeeDeliveryCenterId 
+      ? selectedEngagement.delivery_center_id === employeeDeliveryCenterId
+      : false;
 
-      // Convert to Engagement Invoice Center Currency if different (same logic as Estimation Spreadsheet and Opportunities)
+    // Determine which rate to use and whether to convert currency
+    let employeeCost: number;
+    const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    const engagementCurrency = selectedEngagement.default_currency || "USD";
+
+    if (centersMatch) {
+      // Centers match: use internal_cost_rate with NO currency conversion
+      employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+    } else {
+      // Centers don't match: use internal_bill_rate with currency conversion
+      employeeCost = selectedEmployeeData.internal_bill_rate || 0;
+      
+      // Convert to Engagement Invoice Center Currency if different
       if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
         employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
       }
-
-      setEngagementFormData((prev) => ({
-        ...prev,
-        project_cost: String(employeeCost),
-      }));
     }
-  }, [employee?.id, selectedEmployeeData, selectedEngagement]);
+
+    setEngagementFormData((prev) => ({
+      ...prev,
+      project_cost: String(employeeCost),
+    }));
+  }, [employee?.id, selectedEmployeeData, selectedEngagement, deliveryCentersData]);
 
   // Auto-fill for Opportunity form engagements: Project Cost with currency conversion and default dates when engagement is added
   useEffect(() => {
@@ -213,19 +229,41 @@ export function EmployeeRelationships({
       return;
     }
 
+    // Get employee's delivery center ID from code
+    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
+      ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
+      : null;
+
     const updated = opportunityFormData.engagements.map((engagementForm) => {
       const engagement = engagementsData.items.find(e => e.id === engagementForm.engagement_id);
       if (!engagement) return engagementForm;
 
-      // Apply currency conversion to project_cost if employee currency differs from engagement currency
+      // Compare Engagement Invoice Center with Employee Delivery Center
+      const centersMatch = engagement.delivery_center_id && employeeDeliveryCenterId 
+        ? engagement.delivery_center_id === employeeDeliveryCenterId
+        : false;
+
+      // Apply cost calculation based on center matching
       let projectCost = engagementForm.project_cost;
-      if (selectedEmployeeData.internal_cost_rate !== undefined && (!projectCost || projectCost === employee.internal_cost_rate?.toString())) {
-        let employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+      const shouldUpdateCost = !projectCost || 
+        projectCost === employee.internal_cost_rate?.toString() || 
+        projectCost === employee.internal_bill_rate?.toString();
+      
+      if (shouldUpdateCost) {
+        let employeeCost: number;
         const employeeCurrency = selectedEmployeeData.default_currency || "USD";
         const engagementCurrency = engagement.default_currency || "USD";
 
-        if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
-          employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
+        if (centersMatch) {
+          // Centers match: use internal_cost_rate with NO currency conversion
+          employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+        } else {
+          // Centers don't match: use internal_bill_rate with currency conversion
+          employeeCost = selectedEmployeeData.internal_bill_rate || 0;
+          
+          if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
+            employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
+          }
         }
         projectCost = String(employeeCost);
       }
@@ -259,7 +297,7 @@ export function EmployeeRelationships({
     if (hasChanges) {
       setOpportunityFormData({ engagements: updated });
     }
-  }, [opportunityFormData.engagements.length, selectedEmployeeData, engagementsData?.items, employee?.internal_cost_rate]);
+  }, [opportunityFormData.engagements.length, selectedEmployeeData, engagementsData?.items, employee?.internal_cost_rate, employee?.internal_bill_rate, deliveryCentersData]);
 
   // Auto-fill Project Rate when Role changes in Opportunity form engagements
   useEffect(() => {
@@ -954,20 +992,34 @@ export function EmployeeRelationships({
                                     size="sm"
                                     variant="outline"
                                     onClick={() => {
-                                      // Apply currency conversion and default dates when adding engagement
+                                      // Get employee's delivery center ID from code
+                                      const employeeDeliveryCenterId = (selectedEmployeeData?.delivery_center || employee.delivery_center)
+                                        ? deliveryCentersData?.items.find(dc => dc.code === (selectedEmployeeData?.delivery_center || employee.delivery_center))?.id
+                                        : null;
+                                      
+                                      // Compare Engagement Invoice Center with Employee Delivery Center
+                                      const centersMatch = engagement.delivery_center_id && employeeDeliveryCenterId 
+                                        ? engagement.delivery_center_id === employeeDeliveryCenterId
+                                        : false;
+                                      
+                                      // Determine which rate to use and whether to convert currency
                                       const engagementCurrency = engagement.default_currency || "USD";
                                       const employeeCurrency = selectedEmployeeData?.default_currency || employee.default_currency || "USD";
-                                      let projectCost = selectedEmployeeData?.internal_cost_rate?.toString() || employee.internal_cost_rate?.toString() || "";
+                                      let projectCost: string;
                                       
-                                      // Apply currency conversion if employee currency differs from engagement currency
-                                      if (selectedEmployeeData?.internal_cost_rate !== undefined && 
-                                          employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
-                                        const convertedCost = convertCurrency(
-                                          selectedEmployeeData.internal_cost_rate,
-                                          employeeCurrency,
-                                          engagementCurrency
-                                        );
-                                        projectCost = String(convertedCost);
+                                      if (centersMatch) {
+                                        // Centers match: use internal_cost_rate with NO currency conversion
+                                        const employeeCost = selectedEmployeeData?.internal_cost_rate ?? employee.internal_cost_rate ?? 0;
+                                        projectCost = String(employeeCost);
+                                      } else {
+                                        // Centers don't match: use internal_bill_rate with currency conversion
+                                        let employeeCost = selectedEmployeeData?.internal_bill_rate ?? employee.internal_bill_rate ?? 0;
+                                        
+                                        // Convert to Engagement Invoice Center Currency if different
+                                        if (employeeCurrency.toUpperCase() !== engagementCurrency.toUpperCase()) {
+                                          employeeCost = convertCurrency(employeeCost, employeeCurrency, engagementCurrency);
+                                        }
+                                        projectCost = String(employeeCost);
                                       }
 
                                       setOpportunityFormData({

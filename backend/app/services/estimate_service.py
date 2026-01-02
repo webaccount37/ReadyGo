@@ -337,6 +337,7 @@ class EstimateService(BaseService):
         role_rates_id: UUID,
         employee_id: Optional[UUID] = None,
         target_currency: Optional[str] = None,
+        engagement_delivery_center_id: Optional[UUID] = None,
     ) -> Tuple[Decimal, Decimal]:
         """Get default rate and cost from a role_rate.
         
@@ -348,6 +349,7 @@ class EstimateService(BaseService):
             role_rates_id: ID of the role_rate to use for rate lookup
             employee_id: Optional employee ID - if provided, only cost is taken from employee
             target_currency: Target currency for conversion (if different from employee/role_rate currency)
+            engagement_delivery_center_id: Optional engagement delivery center ID (Invoice Center) for comparison
         
         Returns:
             Tuple of (rate, cost)
@@ -366,23 +368,30 @@ class EstimateService(BaseService):
         if employee_id:
             employee = await self.employee_repo.get(employee_id)
             if employee:
-                employee_cost = Decimal(str(employee.internal_cost_rate))
-                employee_currency = employee.default_currency or "USD"
+                # Compare Engagement Invoice Center with Employee Delivery Center
+                centers_match = engagement_delivery_center_id == employee.delivery_center_id if (engagement_delivery_center_id and employee.delivery_center_id) else False
                 
-                # Convert employee cost to target currency if needed
-                if target_currency and employee_currency.upper() != target_currency.upper():
-                    employee_cost_decimal = await convert_currency(
-                        float(employee_cost),
-                        employee_currency,
-                        target_currency,
-                        self.session
-                    )
-                    cost = Decimal(str(employee_cost_decimal))
-                else:
-                    # If no target currency or same currency, use employee cost as-is
+                if centers_match:
+                    # Centers match: use internal_cost_rate with NO currency conversion
+                    employee_cost = Decimal(str(employee.internal_cost_rate))
                     cost = employee_cost
-                    # But if target_currency is provided and different from employee_currency,
-                    # we already converted above
+                else:
+                    # Centers don't match: use internal_bill_rate with currency conversion
+                    employee_cost = Decimal(str(employee.internal_bill_rate))
+                    employee_currency = employee.default_currency or "USD"
+                    
+                    # Convert employee cost to target currency if needed
+                    if target_currency and employee_currency.upper() != target_currency.upper():
+                        employee_cost_decimal = await convert_currency(
+                            float(employee_cost),
+                            employee_currency,
+                            target_currency,
+                            self.session
+                        )
+                        cost = Decimal(str(employee_cost_decimal))
+                    else:
+                        # If no target currency or same currency, use employee cost as-is
+                        cost = employee_cost
                 
                 # Rate stays from RoleRate (not updated from employee)
         
@@ -477,6 +486,7 @@ class EstimateService(BaseService):
                 role_rates_id,
                 line_item_data.employee_id,
                 target_currency=currency,  # Pass currency for conversion
+                engagement_delivery_center_id=engagement_delivery_center_id,  # Pass engagement delivery center for comparison
             )
             if rate == 0:
                 rate = default_rate
@@ -627,22 +637,32 @@ class EstimateService(BaseService):
                     else:
                         default_rate, default_cost = await self._get_default_rates_from_role_rate(
                             role_rate_for_rates.id,  # Use role_rate with Engagement Invoice Center
-                        new_employee_id,
-                        target_currency=currency,  # Pass currency for conversion
-                    )
+                            new_employee_id,
+                            target_currency=currency,  # Pass currency for conversion
+                            engagement_delivery_center_id=engagement_delivery_center_id,  # Pass engagement delivery center for comparison
+                        )
                 else:
                     # Fallback to using the role_rates_id directly if no engagement delivery center
                     default_rate, default_cost = await self._get_default_rates_from_role_rate(
                         update_dict.get("role_rates_id", line_item.role_rates_id),
                         new_employee_id,
                         target_currency=currency,  # Pass currency for conversion
+                        engagement_delivery_center_id=engagement_delivery_center_id,  # Pass engagement delivery center for comparison (may be None)
                     )
             else:
                 # Fallback to using the role_rates_id directly
+                # Get engagement delivery center from line item's estimate
+                estimate = await self.estimate_repo.get(estimate_id)
+                fallback_engagement_delivery_center_id = None
+                if estimate:
+                    engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
+                    fallback_engagement_delivery_center_id = engagement.delivery_center_id if engagement else None
+                
                 default_rate, default_cost = await self._get_default_rates_from_role_rate(
                     update_dict.get("role_rates_id", line_item.role_rates_id),
                     new_employee_id,
                     target_currency=currency,  # Pass currency for conversion
+                    engagement_delivery_center_id=fallback_engagement_delivery_center_id,  # Pass engagement delivery center for comparison (may be None)
                 )
             
             # Only update if rates weren't explicitly provided
