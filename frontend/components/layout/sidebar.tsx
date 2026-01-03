@@ -19,6 +19,9 @@ import {
   Network,
   DollarSign,
   MapPin,
+  Clock,
+  Receipt,
+  UserCog,
 } from "lucide-react";
 
 interface NavItem {
@@ -51,7 +54,20 @@ const navGroups: NavGroup[] = [
       { title: "Engagements", href: "/engagements", icon: Package },
       { title: "Estimates", href: "/estimates", icon: Calculator },
       { title: "Quotes", href: "#", comingSoon: true, icon: FileCheck },
-      { title: "Forecasts", href: "#", comingSoon: true, icon: TrendingUp },
+    ],
+  },
+  {
+    title: "Time & Expenses",
+    items: [
+      { title: "Timesheet Management", href: "#", comingSoon: true, icon: Clock },
+      { title: "Expense Management", href: "#", comingSoon: true, icon: Receipt },
+    ],
+  },
+  {
+    title: "Intelligence",
+    items: [
+      { title: "Financial Forecasts", href: "#", comingSoon: true, icon: TrendingUp },
+      { title: "Staffing Forecasts", href: "#", comingSoon: true, icon: UserCog },
     ],
   },
   {
@@ -144,25 +160,25 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
                 {group.items.map((item) => {
                   const isActive = pathname === item.href;
                   const isComingSoon = item.comingSoon;
+                  const Icon = item.icon;
                   
                   if (isComingSoon) {
                     return (
                       <div
                         key={item.href}
                         className={cn(
-                          "block px-4 py-2 rounded-md text-sm relative",
+                          "flex items-center gap-3 px-4 py-2 rounded-md text-sm relative",
                           "text-gray-500 cursor-not-allowed"
                         )}
                       >
-                        {item.title}
-                        <span className="ml-2 text-xs text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">
+                        {Icon && <Icon className="w-5 h-5" />}
+                        <span>{item.title}</span>
+                        <span className="ml-auto text-xs text-gray-600 bg-gray-800 px-1.5 py-0.5 rounded">
                           Soon
                         </span>
                       </div>
                     );
                   }
-                  
-                  const Icon = item.icon;
                   
                   return (
                     <Link
