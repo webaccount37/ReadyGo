@@ -35,6 +35,8 @@ export interface Engagement {
   delivery_center_name?: string;
   employees?: EngagementEmployee[];
   attributes?: Record<string, unknown>;
+  has_active_quote?: boolean;
+  active_quote_id?: string;
 }
 
 export interface EngagementCreate {

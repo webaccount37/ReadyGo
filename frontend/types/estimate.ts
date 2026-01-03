@@ -57,6 +57,8 @@ export interface Estimate {
   created_by_name?: string;
   attributes?: Record<string, unknown>;
   line_items?: EstimateLineItem[];
+  is_locked?: boolean;
+  locked_by_quote_id?: string;
 }
 
 export interface EstimateCreate {

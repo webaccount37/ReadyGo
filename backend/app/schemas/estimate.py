@@ -196,6 +196,8 @@ class EstimateResponse(EstimateBase):
     created_by_name: Optional[str] = None
     line_items: Optional[List[EstimateLineItemResponse]] = None
     phases: Optional[List[EstimatePhaseResponse]] = None
+    is_locked: Optional[bool] = None  # Computed: whether estimate is locked by an active quote
+    locked_by_quote_id: Optional[UUID] = None  # ID of quote locking this estimate if exists
     
     class Config:
         from_attributes = True

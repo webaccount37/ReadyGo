@@ -8,10 +8,20 @@ import { Input } from "@/components/ui/input";
 
 interface PhaseManagementProps {
   estimateId: string;
+  readOnly?: boolean;
+  phases?: Array<{
+    id: string;
+    name: string;
+    start_date: string;
+    end_date: string;
+    color: string;
+    row_order: number;
+  }>;
 }
 
-export function PhaseManagement({ estimateId }: PhaseManagementProps) {
-  const { data: phases = [], isLoading } = usePhases(estimateId);
+export function PhaseManagement({ estimateId, readOnly = false, phases: providedPhases }: PhaseManagementProps) {
+  const { data: fetchedPhases = [], isLoading } = usePhases(estimateId, { enabled: !providedPhases });
+  const phases = providedPhases || fetchedPhases;
   const createPhase = useCreatePhase();
   const updatePhase = useUpdatePhase();
   const deletePhase = useDeletePhase();
@@ -102,7 +112,7 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
       <CardHeader>
         <div className="flex justify-between items-center">
           <CardTitle>Phases</CardTitle>
-          {!isAdding && !editingId && (
+          {!isAdding && !editingId && !readOnly && (
             <Button onClick={handleAdd} size="sm">
               + Add Phase
             </Button>
@@ -131,6 +141,7 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                       }
                       placeholder="Phase name"
                       className="flex-1 min-w-0"
+                      disabled={readOnly}
                     />
                   </div>
                   <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
@@ -141,6 +152,7 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                         setFormData({ ...formData, start_date: e.target.value })
                       }
                       className="w-full sm:w-40"
+                      disabled={readOnly}
                     />
                     <Input
                       type="date"
@@ -149,6 +161,7 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                         setFormData({ ...formData, end_date: e.target.value })
                       }
                       className="w-full sm:w-40"
+                      disabled={readOnly}
                     />
                     <Input
                       type="color"
@@ -158,10 +171,10 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                       }
                       className="w-16 h-10"
                     />
-                    <Button onClick={handleSave} size="sm" variant="outline" className="flex-shrink-0">
+                    <Button onClick={handleSave} size="sm" variant="outline" className="flex-shrink-0" disabled={readOnly}>
                       Save
                     </Button>
-                    <Button onClick={handleCancel} size="sm" variant="outline" className="flex-shrink-0">
+                    <Button onClick={handleCancel} size="sm" variant="outline" className="flex-shrink-0" disabled={readOnly}>
                       Cancel
                     </Button>
                   </div>
@@ -196,6 +209,7 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                       size="sm"
                       variant="outline"
                       className="flex-shrink-0"
+                      disabled={readOnly}
                     >
                       Edit
                     </Button>
@@ -204,6 +218,7 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                       size="sm"
                       variant="outline"
                       className="flex-shrink-0"
+                      disabled={readOnly}
                     >
                       Delete
                     </Button>
@@ -257,10 +272,10 @@ export function PhaseManagement({ estimateId }: PhaseManagementProps) {
                   }
                   className="w-16 h-10"
                 />
-                <Button onClick={handleSave} size="sm" variant="outline" className="flex-shrink-0">
+                <Button onClick={handleSave} size="sm" variant="outline" className="flex-shrink-0" disabled={readOnly}>
                   Save
                 </Button>
-                <Button onClick={handleCancel} size="sm" variant="outline" className="flex-shrink-0">
+                <Button onClick={handleCancel} size="sm" variant="outline" className="flex-shrink-0" disabled={readOnly}>
                   Cancel
                 </Button>
               </div>

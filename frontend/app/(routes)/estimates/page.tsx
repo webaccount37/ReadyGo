@@ -13,7 +13,7 @@ import { highlightText } from "@/lib/utils/highlight";
 import { useEngagements } from "@/hooks/useEngagements";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Trash2 } from "lucide-react";
+import { Trash2, Lock, FileCheck } from "lucide-react";
 import type { Estimate } from "@/types/estimate";
 import { EngagementKPIs } from "@/components/estimates/engagement-kpis";
 
@@ -243,6 +243,12 @@ export default function EstimatesPage() {
                                   PENDING VERSION
                                 </span>
                               )}
+                              {estimate.is_locked && (
+                                <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold">
+                                  <Lock className="w-3 h-3" />
+                                  LOCKED
+                                </span>
+                              )}
                               {estimate.description && (
                                 <span className="text-sm text-gray-500">
                                   {estimate.description}
@@ -256,7 +262,8 @@ export default function EstimatesPage() {
                                     onClick={() => handleSetActive(estimate.id)}
                                     variant="outline"
                                     size="sm"
-                                    disabled={setActiveVersion.isPending}
+                                    disabled={setActiveVersion.isPending || estimate.is_locked}
+                                    title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
                                   >
                                     Set Active
                                   </Button>
@@ -264,7 +271,8 @@ export default function EstimatesPage() {
                                     onClick={() => handleDelete(estimate.id, estimate.name)}
                                     variant="outline"
                                     size="sm"
-                                    disabled={deleteEstimate.isPending}
+                                    disabled={deleteEstimate.isPending || estimate.is_locked}
+                                    title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
                                     className="text-red-600 hover:text-red-700"
                                   >
                                     <Trash2 className="w-4 h-4" />
@@ -275,9 +283,23 @@ export default function EstimatesPage() {
                                 onClick={() => router.push(`/estimates/${estimate.id}`)}
                                 variant="outline"
                                 size="sm"
+                                disabled={estimate.is_locked}
+                                title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
                               >
                                 Edit
                               </Button>
+                              {estimate.is_locked && estimate.locked_by_quote_id && (
+                                <Link href={`/quotes/${estimate.locked_by_quote_id}`}>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    title="View Quote"
+                                    className="text-blue-600 hover:text-blue-700"
+                                  >
+                                    <FileCheck className="w-4 h-4" />
+                                  </Button>
+                                </Link>
+                              )}
                             </div>
                           </div>
                         ))}

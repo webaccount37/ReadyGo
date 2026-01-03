@@ -15,6 +15,7 @@ interface EstimateSpreadsheetProps {
   endDate?: string;
   engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
   engagementCurrency?: string; // Engagement default_currency
+  readOnly?: boolean;
 }
 
 export function EstimateSpreadsheet({ 
@@ -22,7 +23,8 @@ export function EstimateSpreadsheet({
   startDate, 
   endDate,
   engagementDeliveryCenterId,
-  engagementCurrency 
+  engagementCurrency,
+  readOnly = false
 }: EstimateSpreadsheetProps) {
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
   const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count
@@ -77,7 +79,7 @@ export function EstimateSpreadsheet({
   } | null>(null);
   
   // Always show at least the specified number of empty rows
-  const existingLineItems = estimate.line_items || [];
+  const existingLineItems = useMemo(() => estimate.line_items || [], [estimate.line_items]);
   // Calculate empty rows needed - maintain a minimum number of empty rows
   // When items are created, we don't want to immediately add a new empty row
   // So we show empty rows based on the initial count, not dynamically adding more
@@ -319,20 +321,22 @@ export function EstimateSpreadsheet({
           <div className="flex gap-2 items-center">
             <Button
               onClick={handleExportClick}
-              disabled={exportExcel.isPending}
+              disabled={exportExcel.isPending || readOnly}
               variant="outline"
               size="sm"
             >
               {exportExcel.isPending ? "Exporting..." : "Export to Excel"}
             </Button>
-            <Button
-              onClick={handleImportClick}
-              disabled={importExcel.isPending}
-              variant="outline"
-              size="sm"
-            >
-              {importExcel.isPending ? "Importing..." : "Import from Excel"}
-            </Button>
+            {!readOnly && (
+              <Button
+                onClick={handleImportClick}
+                disabled={importExcel.isPending}
+                variant="outline"
+                size="sm"
+              >
+                {importExcel.isPending ? "Importing..." : "Import from Excel"}
+              </Button>
+            )}
             <input
               ref={fileInputRef}
               type="file"
@@ -564,6 +568,7 @@ export function EstimateSpreadsheet({
                     estimateId={estimate.id}
                     engagementDeliveryCenterId={engagementDeliveryCenterId}
                     onContextMenu={(e) => handleContextMenu(e, index)}
+                    readOnly={readOnly}
                   />
                 ))}
                 {Array.from({ length: emptyRowsNeeded }).map((_, index) => {

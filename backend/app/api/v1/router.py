@@ -18,6 +18,7 @@ from app.api.v1.endpoints import (
     delivery_centers,
     estimates,
     currency_rates,
+    quotes,
 )
 
 api_router = APIRouter()
@@ -35,5 +36,6 @@ api_router.include_router(billing_terms.router, prefix="/billing-terms", tags=["
 api_router.include_router(delivery_centers.router, prefix="/delivery-centers", tags=["delivery-centers"])
 api_router.include_router(estimates.router, prefix="/estimates", tags=["estimates"])
 api_router.include_router(currency_rates.router, prefix="/currency-rates", tags=["currency-rates"])
+api_router.include_router(quotes.router, prefix="/quotes", tags=["quotes"])
 
 

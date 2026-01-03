@@ -53,7 +53,7 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Engagements", href: "/engagements", icon: Package },
       { title: "Estimates", href: "/estimates", icon: Calculator },
-      { title: "Quotes", href: "#", comingSoon: true, icon: FileCheck },
+      { title: "Quotes", href: "/quotes", icon: FileCheck },
     ],
   },
   {

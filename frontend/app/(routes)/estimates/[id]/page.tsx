@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { useState, useEffect } from "react";
+import { Lock } from "lucide-react";
 
 export default function EstimateDetailPage() {
   const params = useParams();
@@ -183,17 +184,31 @@ export default function EstimateDetailPage() {
               PENDING VERSION
             </span>
           )}
-          <Button onClick={handleNew} variant="outline" disabled={isCreating}>
+          {estimate.is_locked && (
+            <span className="flex items-center gap-1 px-3 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-semibold">
+              <Lock className="w-4 h-4" />
+              LOCKED
+            </span>
+          )}
+          {estimate.is_locked && estimate.locked_by_quote_id && (
+            <Link href={`/quotes/${estimate.locked_by_quote_id}`}>
+              <Button variant="outline" size="sm">
+                View Quote
+              </Button>
+            </Link>
+          )}
+          <Button onClick={handleNew} variant="outline" disabled={isCreating || estimate.is_locked} title={estimate.is_locked ? "Estimate is locked by active quote" : ""}>
             {isCreating ? "Creating..." : "NEW"}
           </Button>
-          <Button onClick={handleDuplicate} variant="outline" disabled={isCloning}>
+          <Button onClick={handleDuplicate} variant="outline" disabled={isCloning || estimate.is_locked} title={estimate.is_locked ? "Estimate is locked by active quote" : ""}>
             {isCloning ? "Duplicating..." : "DUPLICATE"}
           </Button>
           {!estimate.active_version && (
             <Button 
               onClick={handleDelete} 
               variant="outline" 
-              disabled={deleteEstimate.isPending}
+              disabled={deleteEstimate.isPending || estimate.is_locked}
+              title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
               className="text-red-600 hover:text-red-700 hover:bg-red-50"
             >
               {deleteEstimate.isPending ? "Deleting..." : "DELETE"}
@@ -201,6 +216,25 @@ export default function EstimateDetailPage() {
           )}
         </div>
       </div>
+
+      {estimate.is_locked && (
+        <Card className="mb-6 border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-yellow-800">
+              <Lock className="w-5 h-5" />
+              <div>
+                <p className="font-semibold">This estimate is locked by an active quote.</p>
+                <p className="text-sm">
+                  The estimate cannot be edited until the quote is deactivated.
+                  {estimate.locked_by_quote_id && (
+                    <> <Link href={`/quotes/${estimate.locked_by_quote_id}`} className="underline">View quote</Link> to unlock.</>
+                  )}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="mb-6">
         <CardHeader>
@@ -233,6 +267,7 @@ export default function EstimateDetailPage() {
                 value={startDate}
                 onChange={(e) => handleDateChange("start_date", e.target.value)}
                 className="text-sm"
+                disabled={estimate.is_locked}
               />
             </div>
             <div>
@@ -242,6 +277,7 @@ export default function EstimateDetailPage() {
                 value={endDate}
                 onChange={(e) => handleDateChange("end_date", e.target.value)}
                 className="text-sm"
+                disabled={estimate.is_locked}
               />
             </div>
             {estimate.description && (
@@ -253,7 +289,7 @@ export default function EstimateDetailPage() {
         </CardContent>
       </Card>
 
-      <PhaseManagement estimateId={estimate.id} />
+      <PhaseManagement estimateId={estimate.id} readOnly={estimate.is_locked || false} />
 
       <EstimateSpreadsheet 
         estimate={estimate} 
@@ -261,6 +297,7 @@ export default function EstimateDetailPage() {
         endDate={endDate}
         engagementDeliveryCenterId={engagement?.delivery_center_id}
         engagementCurrency={engagement?.default_currency}
+        readOnly={estimate.is_locked || false}
       />
     </div>
   );

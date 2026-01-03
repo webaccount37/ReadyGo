@@ -22,6 +22,7 @@ interface EstimateLineItemRowProps {
   estimateId: string;
   engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
   onContextMenu?: (e: React.MouseEvent) => void;
+  readOnly?: boolean;
 }
 
 export function EstimateLineItemRow({
@@ -31,6 +32,7 @@ export function EstimateLineItemRow({
   estimateId,
   engagementDeliveryCenterId,
   onContextMenu,
+  readOnly = false,
 }: EstimateLineItemRowProps) {
   const [isAutoFillOpen, setIsAutoFillOpen] = useState(false);
   const queryClient = useQueryClient();
@@ -249,6 +251,7 @@ export function EstimateLineItemRow({
   }, [
     lineItem.id,
     // Use JSON.stringify to create a stable dependency that detects any changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(lineItem.weekly_hours?.map(wh => ({
       week_start_date: wh.week_start_date,
       hours: wh.hours
@@ -324,6 +327,9 @@ export function EstimateLineItemRow({
     value: string | undefined,
     originalValue: string
   ) => {
+    if (readOnly) {
+      return; // Don't allow updates when read-only
+    }
     if (value === originalValue) {
       return;
     }
@@ -395,7 +401,7 @@ export function EstimateLineItemRow({
         else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");
       }
     }, 500); // 500ms debounce
-  }, [estimateId, lineItem.id, updateLineItem]);
+  }, [estimateId, lineItem.id, updateLineItem, readOnly]);
   
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -492,7 +498,7 @@ export function EstimateLineItemRow({
 
     prevRoleRef.current = roleValue;
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [roleValue, employeeValue, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate]);
+  }, [roleValue, employeeValue, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate]);
 
   // When Employee is selected or cleared, update Cost accordingly
   useEffect(() => {
@@ -612,9 +618,12 @@ export function EstimateLineItemRow({
     handleFieldUpdate("cost", newCost, lineItem.cost || "0");
 
     prevEmployeeRef.current = employeeValue;
-  }, [employeeValue, roleValue, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost]);
+  }, [employeeValue, roleValue, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
+    if (readOnly) {
+      return; // Don't allow updates when read-only
+    }
     // Parse dates as local dates to avoid timezone conversion issues
     const parseLocalDate = (dateStr: string): Date => {
       const [year, month, day] = dateStr.split("T")[0].split("-").map(Number);
@@ -655,7 +664,7 @@ export function EstimateLineItemRow({
         });
         
         // Refetch to get fresh data from database
-        const refetchResult = await queryClient.refetchQueries({
+        await queryClient.refetchQueries({
           queryKey: ["estimates", "detail", estimateId, true],
         });
         
@@ -851,9 +860,9 @@ export function EstimateLineItemRow({
                   console.log("User cancelled deletion");
                 }
               }}
-              disabled={deleteLineItemMutation.isPending}
+              disabled={deleteLineItemMutation.isPending || readOnly}
               className="text-xs text-red-600 hover:underline cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-              title="Delete line item and weekly hours"
+              title={readOnly ? "Estimate is locked by active quote" : "Delete line item and weekly hours"}
             >
               {deleteLineItemMutation.isPending ? "Deleting..." : "Delete"}
             </button>
@@ -941,7 +950,7 @@ export function EstimateLineItemRow({
                   handleWeeklyHoursUpdate(weekKey, newHours);
                 }}
                 placeholder="0"
-                disabled={!isInRange}
+                disabled={!isInRange || readOnly}
                 className="text-xs h-7 w-full text-center"
               />
             </td>

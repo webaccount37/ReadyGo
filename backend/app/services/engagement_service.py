@@ -13,6 +13,7 @@ from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
+from app.db.repositories.quote_repository import QuoteRepository
 from app.schemas.engagement import EngagementCreate, EngagementUpdate, EngagementResponse
 from sqlalchemy import select, and_
 from app.models.estimate import Estimate, EstimateLineItem
@@ -28,6 +29,7 @@ class EngagementService(BaseService):
         self.role_repo = RoleRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.line_item_repo = EstimateLineItemRepository(session)
+        self.quote_repo = QuoteRepository(session)
     
     async def create_engagement(self, engagement_data: EngagementCreate) -> EngagementResponse:
         """Create a new engagement."""
@@ -118,6 +120,11 @@ class EngagementService(BaseService):
         engagement = await self.engagement_repo.get(engagement_id)
         if not engagement:
             return None
+        
+        # Check if engagement has active quote (lock check)
+        active_quote = await self.quote_repo.get_active_quote_by_engagement(engagement_id)
+        if active_quote:
+            raise ValueError(f"Engagement is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         update_dict = engagement_data.model_dump(exclude_unset=True)
         updated = await self.engagement_repo.update(engagement_id, **update_dict)
@@ -214,6 +221,11 @@ class EngagementService(BaseService):
         if hasattr(engagement, 'delivery_center') and engagement.delivery_center:
             delivery_center_name = engagement.delivery_center.name
         
+        # Check for active quote
+        active_quote = await self.quote_repo.get_active_quote_by_engagement(engagement.id)
+        has_active_quote = active_quote is not None
+        active_quote_id = active_quote.id if active_quote else None
+        
         engagement_dict = {
             "id": engagement.id,
             "name": engagement.name,
@@ -231,6 +243,8 @@ class EngagementService(BaseService):
             "account_name": account_name,
             "billing_term_name": billing_term_name,
             "delivery_center_name": delivery_center_name,
+            "has_active_quote": has_active_quote,
+            "active_quote_id": active_quote_id,
         }
         
         # Include employees if relationships are requested

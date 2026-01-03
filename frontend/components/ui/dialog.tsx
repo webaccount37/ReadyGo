@@ -44,6 +44,14 @@ export function DialogTitle({ children, className }: { children: React.ReactNode
   );
 }
 
+export function DialogDescription({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <p className={cn("text-sm text-gray-500", className)}>
+      {children}
+    </p>
+  );
+}
+
 export function DialogContent({ children, className }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("p-4 sm:p-6 pt-0", className)}>

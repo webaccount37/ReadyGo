@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { EngagementForm } from "@/components/engagements/engagement-form";
-import { Trash2 } from "lucide-react";
+import { Trash2, Lock, FileCheck } from "lucide-react";
 import type { EngagementCreate, EngagementUpdate } from "@/types/engagement";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -248,8 +248,8 @@ function EngagementsPageContent() {
                       <table className="w-full">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Opportunity</th>
                             <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Name</th>
+                            <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Opportunity</th>
                             <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Account</th>
                             <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Invoice Center</th>
                             <th className="text-left p-2 text-xs font-semibold whitespace-nowrap">Status</th>
@@ -266,11 +266,11 @@ function EngagementsPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingEngagement(engagement.id)}
                           >
-                            <td className="p-2 text-sm max-w-[120px] truncate" title={engagement.opportunity_name || engagement.opportunity_id}>
-                              {highlightText(engagement.opportunity_name || engagement.opportunity_id, searchQuery)}
-                            </td>
                             <td className="p-2 text-sm font-medium max-w-[150px] truncate" title={engagement.name}>
                               {highlightText(engagement.name, searchQuery)}
+                            </td>
+                            <td className="p-2 text-sm max-w-[120px] truncate" title={engagement.opportunity_name || engagement.opportunity_id}>
+                              {highlightText(engagement.opportunity_name || engagement.opportunity_id, searchQuery)}
                             </td>
                             <td className="p-2 text-sm max-w-[120px] truncate" title={engagement.account_name || "—"}>
                               {highlightText(engagement.account_name || "—", searchQuery)}
@@ -315,20 +315,40 @@ function EngagementsPageContent() {
                                   title="Open Estimate"
                                   onClick={(e) => handleOpenEstimate(engagement.id, e)}
                                   className="text-green-600 hover:text-green-700"
+                                  disabled={engagement.has_active_quote}
                                 >
                                   <Calculator className="w-4 h-4" />
                                 </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setViewingEngagement(engagement.id)}
-                                >
-                                  View
-                                </Button>
+                                {!engagement.has_active_quote && (
+                                  <Link href={`/quotes/create?engagement_id=${engagement.id}`}>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      title="Create Quote"
+                                      className="text-blue-600 hover:text-blue-700"
+                                    >
+                                      <FileCheck className="w-4 h-4" />
+                                    </Button>
+                                  </Link>
+                                )}
+                                {engagement.has_active_quote && engagement.active_quote_id && (
+                                  <Link href={`/quotes/${engagement.active_quote_id}`}>
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      title="View Active Quote"
+                                      className="text-blue-600 hover:text-blue-700"
+                                    >
+                                      <FileCheck className="w-4 h-4" />
+                                    </Button>
+                                  </Link>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setEditingEngagement(engagement.id)}
+                                  disabled={engagement.has_active_quote}
+                                  title={engagement.has_active_quote ? "Engagement is locked by active quote" : ""}
                                 >
                                   Edit
                                 </Button>
@@ -337,9 +357,17 @@ function EngagementsPageContent() {
                                   variant="outline"
                                   onClick={() => handleDelete(engagement.id)}
                                   className="text-red-600 hover:text-red-700"
+                                  disabled={engagement.has_active_quote}
+                                  title={engagement.has_active_quote ? "Engagement is locked by active quote" : ""}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>
+                                {engagement.has_active_quote && (
+                                  <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
+                                    <Lock className="w-3 h-3" />
+                                    Locked
+                                  </span>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -438,6 +466,14 @@ function EngagementsPageContent() {
                                 </div>
                               )}
                             </div>
+                            {engagement.has_active_quote && (
+                              <div className="pt-2">
+                                <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
+                                  <Lock className="w-3 h-3" />
+                                  Locked by active quote
+                                </span>
+                              </div>
+                            )}
                             <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
@@ -445,22 +481,41 @@ function EngagementsPageContent() {
                                 title="Open Estimate"
                                 onClick={(e) => handleOpenEstimate(engagement.id, e)}
                                 className="text-green-600 hover:text-green-700"
+                                disabled={engagement.has_active_quote}
                               >
                                 <Calculator className="w-4 h-4" />
                               </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => setViewingEngagement(engagement.id)}
-                                className="flex-1"
-                              >
-                                View
-                              </Button>
+                              {!engagement.has_active_quote && (
+                                <Link href={`/quotes/create?engagement_id=${engagement.id}`} className="flex-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    title="Create Quote"
+                                    className="text-blue-600 hover:text-blue-700 w-full"
+                                  >
+                                    <FileCheck className="w-4 h-4" />
+                                  </Button>
+                                </Link>
+                              )}
+                              {engagement.has_active_quote && engagement.active_quote_id && (
+                                <Link href={`/quotes/${engagement.active_quote_id}`} className="flex-1">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    title="View Active Quote"
+                                    className="text-blue-600 hover:text-blue-700 w-full"
+                                  >
+                                    <FileCheck className="w-4 h-4" />
+                                  </Button>
+                                </Link>
+                              )}
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setEditingEngagement(engagement.id)}
                                 className="flex-1"
+                                disabled={engagement.has_active_quote}
+                                title={engagement.has_active_quote ? "Engagement is locked by active quote" : ""}
                               >
                                 Edit
                               </Button>
@@ -469,9 +524,17 @@ function EngagementsPageContent() {
                                 variant="outline"
                                 onClick={() => handleDelete(engagement.id)}
                                 className="flex-1 text-red-600 hover:text-red-700"
+                                disabled={engagement.has_active_quote}
+                                title={engagement.has_active_quote ? "Engagement is locked by active quote" : ""}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>
+                              {engagement.has_active_quote && (
+                                <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
+                                  <Lock className="w-3 h-3" />
+                                  Locked
+                                </span>
+                              )}
                             </div>
                           </div>
                         </CardContent>
@@ -646,6 +709,7 @@ function EngagementsPageContent() {
               onSubmit={handleUpdate}
               onCancel={() => setEditingEngagement(null)}
               isLoading={updateEngagement.isPending}
+              readOnly={engagementToEdit?.has_active_quote || false}
             />
             
             {/* Relationships Section */}

@@ -18,6 +18,7 @@ import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { normalizeDateForInput } from "@/lib/utils";
 import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import type { Opportunity } from "@/types/opportunity";
+import type { Engagement, EngagementEmployee } from "@/types/engagement";
 
 interface OpportunityRelationshipsProps {
   opportunity: Opportunity;
@@ -130,7 +131,7 @@ export function OpportunityRelationships({
         name: e.name,
         opportunity_id: e.opportunity_id,
         opportunity_id_matches: e.opportunity_id === opportunity.id,
-        employees_count: (e as any).employees?.length || 0,
+        employees_count: (e as Engagement).employees?.length || 0,
       })),
     });
     
@@ -150,7 +151,7 @@ export function OpportunityRelationships({
   }, [opportunity, engagementsData]);
   
   const createEngagement = useCreateEngagement({
-    onSuccess: async (newEngagement) => {
+    onSuccess: async (_newEngagement) => {
       // After creating engagement, reset form and close
       setEngagementFormData({
         engagement_id: undefined,
@@ -486,9 +487,9 @@ export function OpportunityRelationships({
                 // If engagement comes from opportunity.engagements, it has employees embedded
                 // IMPORTANT: Filter employees to ensure they're actually linked to THIS engagement
                 const engagementFromOpportunity = opportunity.engagements?.find(e => e.id === engagement.id && e.opportunity_id === opportunity.id);
-                let engagementEmployees: any[] = [];
+                let engagementEmployees: EngagementEmployee[] = [];
                 if (engagementFromOpportunity && 'employees' in engagementFromOpportunity) {
-                  engagementEmployees = (engagementFromOpportunity.employees || []).filter((emp: any) => {
+                  engagementEmployees = (engagementFromOpportunity.employees || []).filter((_emp) => {
                     // Additional safety: verify employee is actually linked to this engagement
                     // We can't verify this directly from the frontend, but we trust the backend
                     // The backend safety checks should have filtered this already

@@ -16,6 +16,7 @@ interface EngagementFormProps {
   onSubmit: (data: EngagementCreate | EngagementUpdate) => Promise<void>;
   onCancel: () => void;
   isLoading?: boolean;
+  readOnly?: boolean;
 }
 
 export function EngagementForm({
@@ -23,6 +24,7 @@ export function EngagementForm({
   onSubmit,
   onCancel,
   isLoading = false,
+  readOnly = false,
 }: EngagementFormProps) {
   const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
@@ -73,6 +75,11 @@ export function EngagementForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {readOnly && (
+        <div className="p-3 bg-yellow-50 border border-yellow-200 rounded text-sm text-yellow-800">
+          This engagement is locked by an active quote and cannot be edited.
+        </div>
+      )}
       <div>
         <Label htmlFor="name">Engagement Name *</Label>
         <Input
@@ -80,6 +87,7 @@ export function EngagementForm({
           value={formData.name}
           onChange={(e) => setFormData({ ...formData, name: e.target.value })}
           required
+          disabled={readOnly}
         />
       </div>
 
@@ -92,6 +100,7 @@ export function EngagementForm({
             setFormData({ ...formData, opportunity_id: e.target.value })
           }
           required
+          disabled={readOnly}
         >
           <option value="">Select an opportunity</option>
           {opportunitiesData?.items.map((opportunity) => (
@@ -114,6 +123,7 @@ export function EngagementForm({
                 status: e.target.value as EngagementCreate["status"],
               })
             }
+            disabled={readOnly}
           >
             <option value="planning">Planning</option>
             <option value="active">Active</option>
@@ -129,6 +139,7 @@ export function EngagementForm({
             onChange={(e) =>
               setFormData({ ...formData, default_currency: e.target.value })
             }
+            disabled={readOnly}
           >
             {CURRENCIES.map((c) => (
               <option key={c.value} value={c.value}>
@@ -149,6 +160,7 @@ export function EngagementForm({
             onChange={(e) =>
               setFormData({ ...formData, start_date: e.target.value || undefined })
             }
+            disabled={readOnly}
           />
         </div>
         <div>
@@ -160,6 +172,7 @@ export function EngagementForm({
             onChange={(e) =>
               setFormData({ ...formData, end_date: e.target.value || undefined })
             }
+            disabled={readOnly}
           />
         </div>
       </div>
@@ -172,6 +185,7 @@ export function EngagementForm({
           onChange={(e) =>
             setFormData({ ...formData, description: e.target.value })
           }
+          disabled={readOnly}
           className="flex min-h-[80px] w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm ring-offset-white placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         />
       </div>
@@ -185,6 +199,7 @@ export function EngagementForm({
             onChange={(e) =>
               setFormData({ ...formData, budget: e.target.value })
             }
+            disabled={readOnly}
           />
         </div>
         <div>
@@ -196,6 +211,7 @@ export function EngagementForm({
               setFormData({ ...formData, delivery_center_id: e.target.value || undefined })
             }
             required
+            disabled={readOnly}
           >
             <option value="">Select invoice center</option>
             {deliveryCentersData?.items.map((dc) => (
@@ -213,7 +229,7 @@ export function EngagementForm({
             onChange={(e) =>
               setFormData({ ...formData, billing_term_id: e.target.value || undefined })
             }
-            disabled={billingTermsLoading}
+            disabled={readOnly || billingTermsLoading}
           >
             <option value="">
               {billingTermsLoading ? "Loading..." : "Select billing terms"}
@@ -231,7 +247,7 @@ export function EngagementForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading}>
+        <Button type="submit" disabled={isLoading || readOnly}>
           {isLoading ? "Saving..." : initialData ? "Update" : "Create"}
         </Button>
       </div>

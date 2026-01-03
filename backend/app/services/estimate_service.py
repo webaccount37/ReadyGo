@@ -21,6 +21,7 @@ from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.quote_repository import QuoteRepository
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours
 from app.models.role_rate import RoleRate
 from app.models.role import Role
@@ -48,6 +49,7 @@ class EstimateService(BaseService):
         self.role_repo = RoleRepository(session)
         self.employee_repo = EmployeeRepository(session)
         self.engagement_repo = EngagementRepository(session)
+        self.quote_repo = QuoteRepository(session)
     
     async def create_estimate(self, estimate_data: EstimateCreate) -> EstimateResponse:
         """Create a new estimate."""
@@ -159,7 +161,7 @@ class EstimateService(BaseService):
             for li in estimate.line_items:
                 logger.info(f"  Line item {li.id}: employee_id={li.employee_id}, role_rates_id={li.role_rates_id}")
         
-        response = self._to_response(estimate, include_line_items=True)
+        response = await self._to_response(estimate, include_line_items=True)
         logger.info(f"Response has {len(response.line_items) if response.line_items else 0} line items")
         return response
     
@@ -168,14 +170,14 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             return None
-        return self._to_response(estimate, include_line_items=False)
+        return await self._to_response(estimate, include_line_items=False)
     
     async def get_estimate_detail(self, estimate_id: UUID) -> Optional[EstimateDetailResponse]:
         """Get estimate with all line items and weekly hours."""
         estimate = await self.estimate_repo.get_with_line_items(estimate_id)
         if not estimate:
             return None
-        return self._to_detail_response(estimate)
+        return await self._to_detail_response(estimate)
     
     async def list_estimates(
         self,
@@ -191,7 +193,10 @@ class EstimateService(BaseService):
         estimates = await self.estimate_repo.list(skip=skip, limit=limit, **filters)
         total = await self.estimate_repo.count(**filters)
         
-        return [self._to_response(e, include_line_items=False) for e in estimates], total
+        responses = []
+        for e in estimates:
+            responses.append(await self._to_response(e, include_line_items=False))
+        return responses, total
     
     async def update_estimate(
         self,
@@ -202,6 +207,11 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             return None
+        
+        # Check if estimate is locked by active quote
+        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        if active_quote:
+            raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         update_dict = estimate_data.model_dump(exclude_unset=True)
         
@@ -239,7 +249,7 @@ class EstimateService(BaseService):
         updated = await self.estimate_repo.get(estimate_id)
         if not updated:
             return None
-        return self._to_response(updated, include_line_items=False)
+        return await self._to_response(updated, include_line_items=False)
     
     async def clone_estimate(self, estimate_id: UUID, new_name: Optional[str] = None) -> EstimateResponse:
         """Clone an estimate to create a variation."""
@@ -330,7 +340,7 @@ class EstimateService(BaseService):
         new_estimate = await self.estimate_repo.get_with_line_items(new_estimate.id)
         if not new_estimate:
             raise ValueError("Failed to retrieve cloned estimate")
-        return self._to_detail_response(new_estimate)
+        return await self._to_detail_response(new_estimate)
     
     async def _get_default_rates_from_role_rate(
         self,
@@ -439,6 +449,11 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             raise ValueError("Estimate not found")
+        
+        # Check if estimate is locked by active quote
+        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        if active_quote:
+            raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         # Get engagement to get currency
         engagement = await self.engagement_repo.get(estimate.engagement_id)
@@ -553,6 +568,13 @@ class EstimateService(BaseService):
         line_item = await self.line_item_repo.get(line_item_id)
         if not line_item or line_item.estimate_id != estimate_id:
             return None
+        
+        # Check if estimate is locked by active quote
+        estimate = await self.estimate_repo.get(estimate_id)
+        if estimate:
+            active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+            if active_quote:
+                raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
         
@@ -693,6 +715,13 @@ class EstimateService(BaseService):
         if line_item.estimate_id != estimate_id:
             logger.warning(f"Line item {line_item_id} belongs to estimate {line_item.estimate_id}, not {estimate_id}")
             return False
+        
+        # Check if estimate is locked by active quote
+        estimate = await self.estimate_repo.get(estimate_id)
+        if estimate:
+            active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+            if active_quote:
+                raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         logger.info(f"Line item found, deleting weekly hours first")
         # Explicitly delete weekly hours first (cascade should handle this, but being explicit)
@@ -1017,7 +1046,7 @@ class EstimateService(BaseService):
             overall_total_revenue=overall_total_revenue,
         )
     
-    def _to_response(self, estimate: Estimate, include_line_items: bool = False) -> EstimateResponse:
+    async def _to_response(self, estimate: Estimate, include_line_items: bool = False) -> EstimateResponse:
         """Convert estimate model to response schema."""
         from sqlalchemy import inspect
         
@@ -1063,6 +1092,17 @@ class EstimateService(BaseService):
         except (AttributeError, KeyError, TypeError):
             pass
         
+        # Check if estimate is locked by active quote
+        is_locked = False
+        locked_by_quote_id = None
+        try:
+            active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+            if active_quote:
+                is_locked = True
+                locked_by_quote_id = active_quote.id
+        except Exception:
+            pass  # If check fails, assume not locked
+        
         estimate_dict = {
             "id": estimate.id,
             "engagement_id": estimate.engagement_id,
@@ -1077,6 +1117,8 @@ class EstimateService(BaseService):
             "opportunity_name": opportunity_name,
             "created_by": estimate.created_by,
             "created_by_name": created_by_name,
+            "is_locked": is_locked,
+            "locked_by_quote_id": locked_by_quote_id,
         }
         
         if include_line_items:
@@ -1099,9 +1141,10 @@ class EstimateService(BaseService):
         
         return EstimateResponse.model_validate(estimate_dict)
     
-    def _to_detail_response(self, estimate: Estimate) -> EstimateDetailResponse:
+    async def _to_detail_response(self, estimate: Estimate) -> EstimateDetailResponse:
         """Convert estimate model to detailed response schema."""
-        response_dict = self._to_response(estimate, include_line_items=True).model_dump()
+        response = await self._to_response(estimate, include_line_items=True)
+        response_dict = response.model_dump()
         # Ensure line_items is always a list, not None
         if response_dict.get("line_items") is None:
             response_dict["line_items"] = []

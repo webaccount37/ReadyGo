@@ -42,4 +42,5 @@ class Engagement(Base):
     billing_term = relationship("BillingTerm", back_populates="engagements")
     delivery_center = relationship("DeliveryCenter", back_populates="engagements")
     estimates = relationship("Estimate", back_populates="engagement", cascade="all, delete-orphan")
+    quotes = relationship("Quote", back_populates="engagement", cascade="all, delete-orphan")
 
