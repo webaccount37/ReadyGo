@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useEstimateDetail } from "@/hooks/useEstimates";
+import { useEngagement } from "@/hooks/useEngagements";
 import { Card } from "@/components/ui/card";
 import type { Estimate, EstimateDetailResponse } from "@/types/estimate";
 
@@ -16,9 +17,16 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
   }, [estimates]);
 
   // Only fetch detail data for the active version estimate
-  const { data: estimateDetail, isLoading } = useEstimateDetail(
+  const { data: estimateDetail, isLoading: isLoadingEstimate } = useEstimateDetail(
     activeEstimate?.id || "",
     { enabled: !!activeEstimate?.id }
+  );
+
+  // Fetch engagement to get the correct currency
+  const { data: engagement, isLoading: isLoadingEngagement } = useEngagement(
+    activeEstimate?.engagement_id || "",
+    false, // includeRelationships
+    { enabled: !!activeEstimate?.engagement_id }
   );
 
   // Calculate KPIs from fetched data (only for active version)
@@ -115,16 +123,19 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
     const marginAmount = totalRevenue - totalCost;
     const marginPercentage = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
 
+    // Use engagement's default_currency as the correct currency (same as estimate detail page)
+    const currency = engagement?.default_currency || estimateDetail.currency || "USD";
+
     return {
       totalCost,
       totalRevenue,
       marginAmount,
       marginPercentage,
-      currency: estimateDetail.currency || "USD",
+      currency,
     };
-  }, [estimateDetail]);
+  }, [estimateDetail, engagement]);
 
-  if (isLoading) {
+  if (isLoadingEstimate || isLoadingEngagement) {
     return (
       <div className="text-sm text-gray-500">Loading KPIs...</div>
     );
@@ -144,7 +155,6 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
 
   return (
     <div className="space-y-2">
-      <div className="text-sm font-semibold text-gray-700 mb-2">Summary</div>
       <div className="grid grid-cols-2 gap-2">
         <Card className="p-2">
           <div className="text-xs text-gray-600">Total Cost</div>
