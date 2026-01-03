@@ -56,7 +56,7 @@ class EstimatePhaseService(BaseService):
     
     async def list_phases(self, estimate_id: UUID) -> List[EstimatePhaseResponse]:
         """List all phases for an estimate."""
-        phases = await self.phase_repo.list_by_quote(estimate_id)  # Keep method name for now
+        phases = await self.phase_repo.list_by_estimate(estimate_id)
         return [EstimatePhaseResponse.model_validate(phase) for phase in phases]
     
     async def update_phase(

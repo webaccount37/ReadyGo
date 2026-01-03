@@ -16,7 +16,6 @@ from app.models.role_rate import RoleRate
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours, EstimatePhase
 from app.models.employee_engagement import EmployeeEngagement
 from app.models.delivery_center_approver import DeliveryCenterApprover
-from app.models.quote import Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours
 from app.models.currency_rate import CurrencyRate
 
 __all__ = [
@@ -36,10 +35,6 @@ __all__ = [
     "EstimatePhase",
     "EmployeeEngagement",
     "DeliveryCenterApprover",
-    "Quote",
-    "QuoteLineItem",
-    "QuotePhase",
-    "QuoteWeeklyHours",
     "CurrencyRate",
 ]
 

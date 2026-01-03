@@ -17,7 +17,7 @@ class EstimatePhaseRepository(BaseRepository[EstimatePhase]):
     def __init__(self, session: AsyncSession):
         super().__init__(EstimatePhase, session)
     
-    async def list_by_quote(
+    async def list_by_estimate(
         self,
         estimate_id: UUID,
     ) -> List[EstimatePhase]:

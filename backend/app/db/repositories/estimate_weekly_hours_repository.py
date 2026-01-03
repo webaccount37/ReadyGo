@@ -14,7 +14,7 @@ from app.models.estimate import EstimateWeeklyHours
 
 
 class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
-    """Repository for quote weekly hours operations."""
+    """Repository for estimate weekly hours operations."""
     
     def __init__(self, session: AsyncSession):
         super().__init__(EstimateWeeklyHours, session)

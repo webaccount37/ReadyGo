@@ -553,7 +553,7 @@ export function OpportunityRelationships({
                       <div className="ml-4 mt-2 space-y-2">
                         <div className="text-xs font-medium text-gray-600">Employees on this engagement:</div>
                         {engagementEmployees.map((employee) => {
-                          // Log dates for debugging (similar to Quotes page)
+                          // Log dates for debugging
                           if (employee.start_date && employee.end_date) {
                             const startDateStr = normalizeDateForInput(employee.start_date);
                             const endDateStr = normalizeDateForInput(employee.end_date);

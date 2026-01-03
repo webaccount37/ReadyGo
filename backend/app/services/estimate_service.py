@@ -1099,9 +1099,9 @@ class EstimateService(BaseService):
         
         return EstimateResponse.model_validate(estimate_dict)
     
-    def _to_detail_response(self, quote: Estimate) -> EstimateDetailResponse:
-        """Convert quote model to detailed response schema."""
-        response_dict = self._to_response(quote, include_line_items=True).model_dump()
+    def _to_detail_response(self, estimate: Estimate) -> EstimateDetailResponse:
+        """Convert estimate model to detailed response schema."""
+        response_dict = self._to_response(estimate, include_line_items=True).model_dump()
         # Ensure line_items is always a list, not None
         if response_dict.get("line_items") is None:
             response_dict["line_items"] = []

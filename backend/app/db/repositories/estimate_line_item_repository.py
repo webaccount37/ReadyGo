@@ -37,7 +37,7 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
-    async def list_by_quote(
+    async def list_by_estimate(
         self,
         estimate_id: UUID,
     ) -> List[EstimateLineItem]:
@@ -46,13 +46,6 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
         query = query.order_by(EstimateLineItem.row_order)
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
-    async def list_by_estimate(
-        self,
-        estimate_id: UUID,
-    ) -> List[EstimateLineItem]:
-        """List line items for an estimate, ordered by row_order (alias for list_by_quote)."""
-        return await self.list_by_quote(estimate_id)
     
     async def get_with_weekly_hours(self, line_item_id: UUID) -> Optional[EstimateLineItem]:
         """Get line item with weekly hours."""
@@ -107,7 +100,7 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
         await self.session.flush()
         return result.rowcount > 0
     
-    async def delete_by_quote(self, estimate_id: UUID) -> int:
+    async def delete_by_estimate(self, estimate_id: UUID) -> int:
         """Delete all line items for an estimate."""
         result = await self.session.execute(
             delete(EstimateLineItem).where(EstimateLineItem.estimate_id == estimate_id)
