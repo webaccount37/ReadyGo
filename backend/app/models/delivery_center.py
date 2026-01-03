@@ -23,5 +23,6 @@ class DeliveryCenter(Base):
     # Relationships
     opportunities = relationship("Opportunity", back_populates="delivery_center")
     engagements = relationship("Engagement", back_populates="delivery_center")
+    approvers = relationship("DeliveryCenterApprover", back_populates="delivery_center", cascade="all, delete-orphan")
 
 

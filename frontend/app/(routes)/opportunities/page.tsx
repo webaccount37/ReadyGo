@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import {
   useOpportunities,
@@ -26,13 +27,22 @@ import { useEngagements } from "@/hooks/useEngagements";
 import { opportunitiesApi } from "@/lib/api/opportunities";
 import Link from "next/link";
 
-export default function OpportunitiesPage() {
+function OpportunitiesPageContent() {
+  const searchParams = useSearchParams();
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingOpportunity, setEditingOpportunity] = useState<string | null>(null);
   const [viewingOpportunity, setViewingOpportunity] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Initialize search query from URL parameter
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const { data, isLoading, error, refetch } = useOpportunities({ skip, limit });
   const createOpportunity = useCreateOpportunity();
@@ -61,25 +71,57 @@ export default function OpportunitiesPage() {
     { enabled: !!editingOpportunity }
   );
 
-  const filteredItems = useMemo(() => {
-    if (!data?.items || !searchQuery.trim()) {
-      return data?.items || [];
-    }
-    const query = searchQuery.toLowerCase();
-    return data.items.filter((opportunity) => {
-      const name = (opportunity.name || "").toLowerCase();
-      const account = (opportunity.account_name || opportunity.account_id || "").toLowerCase();
-      const status = (opportunity.status || "").toLowerCase();
-      return (
-        name.includes(query) ||
-        account.includes(query) ||
-        status.includes(query)
-      );
-    });
-  }, [data, searchQuery]);
+  // Helper functions for formatting display values (must be defined before filteredItems)
+  const formatCurrency = (value: string | number | undefined, currency?: string): string => {
+    if (value === undefined || value === null || value === "") return "—";
+    const numValue = typeof value === "string" ? parseFloat(value) : value;
+    if (isNaN(numValue)) return "—";
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    }).format(numValue);
+  };
+
+  const formatMonth = (month: number | undefined): string => {
+    if (!month) return "—";
+    return new Date(2000, month - 1).toLocaleString("default", { month: "long" });
+  };
+
+  // Get display names for IDs
+  const getAccountName = (accountId: string | undefined): string => {
+    if (!accountId) return "—";
+    const account = accountsData?.items.find((a) => a.id === accountId);
+    return account?.company_name || accountId;
+  };
+
+  const getDeliveryCenterName = (dcId: string | undefined): string => {
+    if (!dcId) return "—";
+    const dc = deliveryCentersData?.items.find((d) => d.id === dcId);
+    return dc?.name || dcId;
+  };
+
+  const getBillingTermName = (termId: string | undefined): string => {
+    if (!termId) return "—";
+    const term = billingTermsData?.items.find((t) => t.id === termId);
+    return term?.name || termId;
+  };
+
+  const getEmployeeName = (empId: string | undefined): string => {
+    if (!empId) return "—";
+    const emp = employeesData?.items.find((e) => e.id === empId);
+    return emp ? `${emp.first_name} ${emp.last_name}` : empId;
+  };
+
+  const getParentOpportunityName = (parentId: string | undefined): string => {
+    if (!parentId) return "None";
+    const parent = allOpportunitiesData?.items.find((e) => e.id === parentId);
+    return parent?.name || parentId;
+  };
 
   // Fetch opportunities with relationships for accurate counts (only for current page)
-  const opportunityIdsForCounts = useMemo(() => filteredItems.map(opp => opp.id), [filteredItems]);
+  const opportunityIdsForCounts = useMemo(() => (data?.items || []).map(opp => opp.id), [data]);
   const opportunityCountsQueries = useQueries({
     queries: opportunityIdsForCounts.map(id => ({
       queryKey: ["opportunities", "detail", id, true],
@@ -88,6 +130,145 @@ export default function OpportunitiesPage() {
       staleTime: 30000,
     })),
   });
+
+  // Calculate engagement and employee counts per opportunity
+  const engagementCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    
+    // Use opportunity data with relationships if available (most accurate)
+    opportunityCountsQueries.forEach((query) => {
+      if (query.data?.engagements) {
+        const oppId = query.data.id;
+        counts[oppId] = query.data.engagements.length;
+      }
+    });
+    
+    // Fallback: use engagement list data for opportunities not yet loaded with relationships
+    if (allEngagementsData?.items) {
+      const fallbackCounts: Record<string, number> = {};
+      allEngagementsData.items.forEach((engagement) => {
+        if (engagement.opportunity_id) {
+          fallbackCounts[engagement.opportunity_id] = (fallbackCounts[engagement.opportunity_id] || 0) + 1;
+        }
+      });
+      // Only use fallback counts for opportunities we don't have relationship data for
+      Object.keys(fallbackCounts).forEach((oppId) => {
+        if (counts[oppId] === undefined) {
+          counts[oppId] = fallbackCounts[oppId];
+        }
+      });
+    }
+    
+    return counts;
+  }, [opportunityCountsQueries, allEngagementsData]);
+
+  const employeeCounts = useMemo(() => {
+    const counts: Record<string, Set<string>> = {};
+    
+    // Use opportunity data with relationships if available (most accurate)
+    opportunityCountsQueries.forEach((query) => {
+      if (query.data?.employees) {
+        const oppId = query.data.id;
+        const employeeIds = new Set(query.data.employees.map((emp: { id: string }) => emp.id));
+        counts[oppId] = employeeIds;
+      }
+    });
+    
+    // Fallback: use engagement list data for opportunities not yet loaded with relationships
+    if (allEngagementsData?.items) {
+      allEngagementsData.items.forEach((engagement) => {
+        if (engagement.opportunity_id && engagement.employees) {
+          if (!counts[engagement.opportunity_id]) {
+            counts[engagement.opportunity_id] = new Set();
+          }
+          engagement.employees.forEach((emp: { id: string }) => {
+            counts[engagement.opportunity_id].add(emp.id);
+          });
+        }
+      });
+    }
+    
+    // Convert Sets to counts
+    const countDict: Record<string, number> = {};
+    Object.keys(counts).forEach((oppId) => {
+      countDict[oppId] = counts[oppId].size;
+    });
+    
+    return countDict;
+  }, [opportunityCountsQueries, allEngagementsData]);
+
+  const filteredItems = useMemo(() => {
+    if (!data?.items || !searchQuery.trim()) {
+      return data?.items || [];
+    }
+    const query = searchQuery.toLowerCase();
+    return data.items.filter((opportunity) => {
+      // Basic fields
+      const name = (opportunity.name || "").toLowerCase();
+      const account = (opportunity.account_name || opportunity.account_id || "").toLowerCase();
+      const status = (opportunity.status || "").toLowerCase();
+      const description = (opportunity.description || "").toLowerCase();
+      
+      // Get display names for searchable fields
+      const accountName = getAccountName(opportunity.account_id).toLowerCase();
+      const parentName = getParentOpportunityName(opportunity.parent_opportunity_id).toLowerCase();
+      const deliveryCenterName = getDeliveryCenterName(opportunity.delivery_center_id).toLowerCase();
+      const ownerName = getEmployeeName(opportunity.opportunity_owner_id).toLowerCase();
+      
+      // Date fields
+      const startDate = opportunity.start_date 
+        ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase()
+        : "";
+      const endDate = opportunity.end_date 
+        ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase()
+        : "";
+      
+      // Numeric/currency fields (convert to string for searching)
+      const dealValue = opportunity.deal_value_usd 
+        ? formatCurrency(opportunity.deal_value_usd, "USD").toLowerCase()
+        : "";
+      const forecastValue = opportunity.forecast_value_usd 
+        ? formatCurrency(opportunity.forecast_value_usd, "USD").toLowerCase()
+        : "";
+      const dealValueNum = opportunity.deal_value_usd ? String(opportunity.deal_value_usd).toLowerCase() : "";
+      const forecastValueNum = opportunity.forecast_value_usd ? String(opportunity.forecast_value_usd).toLowerCase() : "";
+      
+      // Project fields
+      const projectYear = opportunity.project_start_year ? String(opportunity.project_start_year).toLowerCase() : "";
+      const projectMonth = opportunity.project_start_month 
+        ? formatMonth(opportunity.project_start_month).toLowerCase()
+        : "";
+      const projectDuration = opportunity.project_duration_months 
+        ? `${opportunity.project_duration_months} months`.toLowerCase()
+        : "";
+      
+      // Count fields
+      const engagementCount = String(engagementCounts[opportunity.id] ?? 0).toLowerCase();
+      const employeeCount = String(employeeCounts[opportunity.id] ?? 0).toLowerCase();
+      
+      return (
+        name.includes(query) ||
+        account.includes(query) ||
+        accountName.includes(query) ||
+        status.includes(query) ||
+        description.includes(query) ||
+        parentName.includes(query) ||
+        deliveryCenterName.includes(query) ||
+        ownerName.includes(query) ||
+        startDate.includes(query) ||
+        endDate.includes(query) ||
+        dealValue.includes(query) ||
+        forecastValue.includes(query) ||
+        dealValueNum.includes(query) ||
+        forecastValueNum.includes(query) ||
+        projectYear.includes(query) ||
+        projectMonth.includes(query) ||
+        projectDuration.includes(query) ||
+        engagementCount.includes(query) ||
+        employeeCount.includes(query)
+      );
+    });
+  }, [data, searchQuery, accountsData, deliveryCentersData, employeesData, allOpportunitiesData, engagementCounts, employeeCounts]);
 
   const handleCreate = async (data: OpportunityCreate | OpportunityUpdate) => {
     try {
@@ -151,111 +332,6 @@ export default function OpportunitiesPage() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  const formatCurrency = (value: string | number | undefined, currency?: string): string => {
-    if (value === undefined || value === null || value === "") return "—";
-    const numValue = typeof value === "string" ? parseFloat(value) : value;
-    if (isNaN(numValue)) return "—";
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(numValue);
-  };
-
-  const formatMonth = (month: number | undefined): string => {
-    if (!month) return "—";
-    return new Date(2000, month - 1).toLocaleString("default", { month: "long" });
-  };
-
-  // Get display names for IDs
-  const getAccountName = (accountId: string | undefined): string => {
-    if (!accountId) return "—";
-    const account = accountsData?.items.find((a) => a.id === accountId);
-    return account?.company_name || accountId;
-  };
-
-  const getDeliveryCenterName = (dcId: string | undefined): string => {
-    if (!dcId) return "—";
-    const dc = deliveryCentersData?.items.find((d) => d.id === dcId);
-    return dc?.name || dcId;
-  };
-
-  const getBillingTermName = (termId: string | undefined): string => {
-    if (!termId) return "—";
-    const term = billingTermsData?.items.find((t) => t.id === termId);
-    return term?.name || termId;
-  };
-
-  const getEmployeeName = (empId: string | undefined): string => {
-    if (!empId) return "—";
-    const emp = employeesData?.items.find((e) => e.id === empId);
-    return emp ? `${emp.first_name} ${emp.last_name}` : empId;
-  };
-
-  const getParentOpportunityName = (parentId: string | undefined): string => {
-    if (!parentId) return "None";
-    const parent = allOpportunitiesData?.items.find((e) => e.id === parentId);
-    return parent?.name || parentId;
-  };
-
-  // Calculate engagement and employee counts per opportunity
-  // Use opportunity data with relationships for accurate counts
-  const engagementCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    
-    // Use opportunity data with relationships if available (most accurate)
-    opportunityCountsQueries.forEach((query) => {
-      if (query.data?.engagements) {
-        const oppId = query.data.id;
-        counts[oppId] = query.data.engagements.length;
-      }
-    });
-    
-    // Fallback: use engagement list data for opportunities not yet loaded with relationships
-    if (allEngagementsData?.items) {
-      const fallbackCounts: Record<string, number> = {};
-      allEngagementsData.items.forEach((engagement) => {
-        if (engagement.opportunity_id) {
-          fallbackCounts[engagement.opportunity_id] = (fallbackCounts[engagement.opportunity_id] || 0) + 1;
-        }
-      });
-      // Only use fallback counts for opportunities we don't have relationship data for
-      Object.keys(fallbackCounts).forEach((oppId) => {
-        if (counts[oppId] === undefined) {
-          counts[oppId] = fallbackCounts[oppId];
-        }
-      });
-    }
-    
-    return counts;
-  }, [opportunityCountsQueries, allEngagementsData]);
-
-  const employeeCounts = useMemo(() => {
-    const counts: Record<string, Set<string>> = {};
-    
-    // Use opportunity data with relationships if available (most accurate)
-    opportunityCountsQueries.forEach((query) => {
-      if (query.data?.engagements) {
-        const oppId = query.data.id;
-        const employeeSet = new Set<string>();
-        query.data.engagements.forEach((engagement) => {
-          if (engagement.employees) {
-            engagement.employees.forEach((emp) => {
-              employeeSet.add(emp.id);
-            });
-          }
-        });
-        counts[oppId] = employeeSet;
-      }
-    });
-    
-    const result: Record<string, number> = {};
-    Object.keys(counts).forEach((oppId) => {
-      result[oppId] = counts[oppId].size;
-    });
-    return result;
-  }, [opportunityCountsQueries]);
 
   return (
     <div>
@@ -848,6 +924,14 @@ export default function OpportunitiesPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function OpportunitiesPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <OpportunitiesPageContent />
+    </Suspense>
   );
 }
 

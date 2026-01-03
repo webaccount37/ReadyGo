@@ -22,6 +22,7 @@ from app.models import (
     Account,
     Role,
     DeliveryCenter,
+    DeliveryCenterApprover,
     CurrencyRate,
 )
 

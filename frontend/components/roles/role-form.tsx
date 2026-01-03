@@ -68,6 +68,7 @@ export function RoleForm({
         ),
       }));
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [deliveryCentersData, initialData]);
 
   const handleSubmit = async (e: React.FormEvent) => {

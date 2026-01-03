@@ -18,6 +18,7 @@ import {
   Calendar,
   Network,
   DollarSign,
+  MapPin,
 } from "lucide-react";
 
 interface NavItem {
@@ -49,8 +50,8 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Engagements", href: "/engagements", icon: Package },
       { title: "Estimates", href: "/estimates", icon: Calculator },
-      { title: "Quoting", href: "#", comingSoon: true, icon: FileCheck },
-      { title: "Forecast", href: "#", comingSoon: true, icon: TrendingUp },
+      { title: "Quotes", href: "#", comingSoon: true, icon: FileCheck },
+      { title: "Forecasts", href: "#", comingSoon: true, icon: TrendingUp },
     ],
   },
   {
@@ -58,6 +59,7 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Employees", href: "/employees", icon: Users },
       { title: "Roles", href: "/roles", icon: Shield },
+      { title: "Delivery Centers", href: "/delivery-centers", icon: MapPin },
       { title: "Calendars", href: "/calendars", icon: Calendar },
       { title: "Currency Rates", href: "/currency-rates", icon: DollarSign },
     ],
