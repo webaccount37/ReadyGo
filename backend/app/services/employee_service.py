@@ -681,6 +681,7 @@ class EmployeeService(BaseService):
         from sqlalchemy import select, func
         from app.models.delivery_center import DeliveryCenter as DeliveryCenterModel
         from app.db.repositories.role_repository import RoleRepository
+        from app.db.repositories.quote_repository import QuoteRepository
         from decimal import Decimal
         
         logger = logging.getLogger(__name__)
@@ -688,6 +689,12 @@ class EmployeeService(BaseService):
         engagement = await self.engagement_repo.get(engagement_id)
         if not engagement:
             return False
+        
+        # Check if engagement has active quote (lock check)
+        quote_repo = QuoteRepository(self.session)
+        active_quote = await quote_repo.get_active_quote_by_engagement(engagement_id)
+        if active_quote:
+            raise ValueError(f"Engagement is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         # Validate that engagement has delivery_center_id (Invoice Center) - required for role rate lookup
         if not engagement.delivery_center_id:
@@ -814,6 +821,13 @@ class EmployeeService(BaseService):
         """Unlink employees from an engagement by removing estimate line items."""
         from sqlalchemy import select
         from app.models.estimate import Estimate
+        from app.db.repositories.quote_repository import QuoteRepository
+        
+        # Check if engagement has active quote (lock check)
+        quote_repo = QuoteRepository(self.session)
+        active_quote = await quote_repo.get_active_quote_by_engagement(engagement_id)
+        if active_quote:
+            raise ValueError(f"Engagement is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         # Get active estimate for this engagement
         estimate_result = await self.session.execute(

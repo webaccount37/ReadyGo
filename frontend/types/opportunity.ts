@@ -28,6 +28,8 @@ export interface OpportunityEngagement {
   end_date?: string;
   status: string;
   employees?: OpportunityEmployee[];
+  has_active_quote?: boolean;
+  active_quote_id?: string;
 }
 
 export interface Opportunity {

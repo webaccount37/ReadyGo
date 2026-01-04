@@ -10,9 +10,7 @@ import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
 import { UnlockDialog } from "@/components/quotes/unlock-dialog";
 import { QuoteStatusUpdate } from "@/types/quote";
 import { Lock, FileText, Calendar } from "lucide-react";
-import { EstimateSpreadsheet } from "@/components/estimates/estimate-spreadsheet";
-import { PhaseManagement } from "@/components/estimates/phase-management";
-import type { EstimateDetailResponse } from "@/types/estimate";
+import { QuoteReadonlyTable } from "@/components/quotes/quote-readonly-table";
 
 export default function QuoteDetailPage() {
   const params = useParams();
@@ -83,48 +81,6 @@ export default function QuoteDetailPage() {
     );
   }
 
-  // Convert quote to estimate-like structure for the spreadsheet component
-  const estimateLikeData: EstimateDetailResponse = {
-    id: quote.id,
-    engagement_id: quote.engagement_id,
-    engagement_name: quote.engagement_name,
-    name: quote.quote_number,
-    currency: undefined,
-    active_version: false,
-    description: quote.notes,
-    line_items: (quote.line_items || []).map(item => ({
-      id: item.id,
-      estimate_id: quote.id,
-      role_id: item.role_rates_id,
-      role_name: item.role_name,
-      delivery_center_id: item.payable_center_id || "",
-      delivery_center_name: item.delivery_center_name,
-      employee_id: item.employee_id,
-      employee_name: item.employee_name,
-      rate: item.rate,
-      cost: item.cost,
-      currency: item.currency,
-      start_date: item.start_date,
-      end_date: item.end_date,
-      row_order: item.row_order,
-      billable: item.billable,
-      billable_expense_percentage: item.billable_expense_percentage,
-      weekly_hours: (item.weekly_hours || []).map(wh => ({
-        id: wh.id,
-        week_start_date: wh.week_start_date,
-        hours: wh.hours,
-      })),
-    })),
-    phases: (quote.phases || []).map(phase => ({
-      id: phase.id,
-      estimate_id: quote.id,
-      name: phase.name,
-      start_date: phase.start_date,
-      end_date: phase.end_date,
-      color: phase.color,
-      row_order: phase.row_order,
-    })),
-  };
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -259,10 +215,7 @@ export default function QuoteDetailPage() {
           <p className="text-sm text-gray-600 mb-4">
             This is a read-only snapshot of the estimate data at the time the quote was created.
           </p>
-          <EstimateSpreadsheet
-            estimate={estimateLikeData}
-            readOnly={true}
-          />
+          <QuoteReadonlyTable quote={quote} />
         </CardContent>
       </Card>
 
@@ -273,11 +226,24 @@ export default function QuoteDetailPage() {
             <CardTitle>Phases</CardTitle>
           </CardHeader>
           <CardContent>
-            <PhaseManagement
-              estimateId={quote.id}
-              phases={quote.phases}
-              readOnly={true}
-            />
+            <div className="space-y-2">
+              {quote.phases
+                .sort((a, b) => a.row_order - b.row_order)
+                .map((phase) => (
+                  <div
+                    key={phase.id}
+                    className="flex items-center gap-4 p-3 border rounded-lg"
+                    style={{ borderLeftColor: phase.color, borderLeftWidth: "4px" }}
+                  >
+                    <div className="flex-1">
+                      <div className="font-semibold">{phase.name}</div>
+                      <div className="text-sm text-gray-600">
+                        {new Date(phase.start_date).toLocaleDateString()} - {new Date(phase.end_date).toLocaleDateString()}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
           </CardContent>
         </Card>
       )}

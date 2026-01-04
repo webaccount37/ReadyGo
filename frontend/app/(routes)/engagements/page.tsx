@@ -44,6 +44,14 @@ function EngagementsPageContent() {
     }
   }, [searchParams]);
 
+  // Auto-open view dialog if view parameter is present in URL
+  useEffect(() => {
+    const viewParam = searchParams.get("view");
+    if (viewParam && viewParam !== viewingEngagement) {
+      setViewingEngagement(viewParam);
+    }
+  }, [searchParams, viewingEngagement]);
+
   const { data, isLoading, error, refetch } = useEngagements({ skip, limit });
   const createEngagement = useCreateEngagement();
   const updateEngagement = useUpdateEngagement();
@@ -603,7 +611,21 @@ function EngagementsPageContent() {
 
       {/* View Dialog */}
       {viewingEngagement && engagementToView && (
-        <Dialog open={!!viewingEngagement} onOpenChange={(open) => !open && setViewingEngagement(null)}>
+        <Dialog 
+          open={!!viewingEngagement} 
+          onOpenChange={(open) => {
+            if (!open) {
+              setViewingEngagement(null);
+              // Remove view parameter from URL when closing
+              const newSearchParams = new URLSearchParams(searchParams.toString());
+              newSearchParams.delete("view");
+              const newUrl = newSearchParams.toString() 
+                ? `/engagements?${newSearchParams.toString()}`
+                : "/engagements";
+              router.replace(newUrl);
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Engagement Details</DialogTitle>
           </DialogHeader>

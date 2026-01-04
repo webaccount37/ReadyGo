@@ -517,6 +517,14 @@ export function EmployeeRelationships({
       alert("Please select an engagement to link");
       return;
     }
+    
+    // Check if engagement is locked
+    const selectedEngagement = engagementsData?.items.find(e => e.id === selectedEngagementId);
+    if (selectedEngagement?.has_active_quote) {
+      alert(`Cannot link employees to this engagement. It is locked by an active quote.`);
+      return;
+    }
+    
     if (!engagementFormData.role_id || !engagementFormData.start_date || !engagementFormData.end_date || !engagementFormData.project_rate || !engagementFormData.delivery_center) {
       alert("Please fill in all required fields: Role, Start Date, End Date, Project Rate, and Payable Center");
       return;
@@ -611,6 +619,13 @@ export function EmployeeRelationships({
                 if (!opportunity) return null;
                 
                 const opportunityEngagements = engagementsByOpportunity[opportunityId] || [];
+                
+                // Check if any engagement under this opportunity is locked
+                const hasLockedEngagement = opportunityEngagements.some((engagement) => {
+                  const fullEngagement = engagementsData?.items.find(e => String(e.id) === String(engagement.id));
+                  return fullEngagement?.has_active_quote || false;
+                });
+                
                 return (
                   <div
                     key={opportunityId}
@@ -628,15 +643,23 @@ export function EmployeeRelationships({
                         <span className="ml-2 text-xs text-gray-500">(via Active Estimates)</span>
                       </div>
                       {!readOnly && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => handleUnlinkOpportunity(opportunityId)}
-                          disabled={unlinkFromOpportunity.isPending}
-                          className="w-full sm:w-auto"
-                        >
-                          Unlink Opportunity
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleUnlinkOpportunity(opportunityId)}
+                            disabled={unlinkFromOpportunity.isPending || hasLockedEngagement}
+                            className="w-full sm:w-auto"
+                            title={hasLockedEngagement ? "Cannot unlink opportunity with locked engagements" : ""}
+                          >
+                            Unlink Opportunity
+                          </Button>
+                          {hasLockedEngagement && (
+                            <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
+                              Locked
+                            </span>
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -646,6 +669,9 @@ export function EmployeeRelationships({
                         <div className="text-sm font-medium text-gray-700">Associated Engagements:</div>
                         {opportunityEngagements.map((engagement) => {
                           const engagementData = employee.engagements?.find(e => String(e.id) === String(engagement.id));
+                          // Get full engagement data to check for active quote
+                          const fullEngagement = engagementsData?.items.find(e => String(e.id) === String(engagement.id));
+                          const isLocked = fullEngagement?.has_active_quote || false;
                           return (
                             <div
                               key={engagement.id}
@@ -681,15 +707,23 @@ export function EmployeeRelationships({
                                   )}
                                 </div>
                                 {!readOnly && (
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    onClick={() => handleUnlinkEngagement(engagement.id)}
-                                    disabled={unlinkFromEngagement.isPending}
-                                    className="w-full sm:w-auto text-red-600 hover:text-red-800"
-                                  >
-                                    Unlink
-                                  </Button>
+                                  <div className="flex items-center gap-2">
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      onClick={() => handleUnlinkEngagement(engagement.id)}
+                                      disabled={unlinkFromEngagement.isPending || isLocked}
+                                      className="w-full sm:w-auto text-red-600 hover:text-red-800"
+                                      title={isLocked ? "Engagement is locked by active quote" : ""}
+                                    >
+                                      Unlink
+                                    </Button>
+                                    {isLocked && (
+                                      <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
+                                        Locked
+                                      </span>
+                                    )}
+                                  </div>
                                 )}
                               </div>
                             </div>
@@ -765,11 +799,26 @@ export function EmployeeRelationships({
                               >
                                 <option value="">Select an engagement</option>
                                 {availableEngagementsForThisOpportunity.map((engagement) => (
-                                  <option key={engagement.id} value={engagement.id}>
-                                    {engagement.name}
+                                  <option 
+                                    key={engagement.id} 
+                                    value={engagement.id}
+                                    disabled={engagement.has_active_quote}
+                                  >
+                                    {engagement.name}{engagement.has_active_quote ? " (Locked)" : ""}
                                   </option>
                                 ))}
                               </Select>
+                              {selectedEngagementId && (() => {
+                                const selectedEngagement = engagementsData?.items.find(e => e.id === selectedEngagementId);
+                                if (selectedEngagement?.has_active_quote) {
+                                  return (
+                                    <div className="text-sm text-yellow-600 bg-yellow-50 p-2 rounded">
+                                      This engagement is locked by an active quote. You cannot link employees to locked engagements.
+                                    </div>
+                                  );
+                                }
+                                return null;
+                              })()}
                               
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                                 <div>
@@ -868,9 +917,16 @@ export function EmployeeRelationships({
                               <div className="flex gap-2">
                                 <Button
                                   onClick={() => handleLinkEngagement(opportunity.id)}
-                                  disabled={!selectedEngagementId || !engagementFormData.role_id || !engagementFormData.start_date || !engagementFormData.end_date || !engagementFormData.project_rate || !engagementFormData.delivery_center || linkToEngagement.isPending}
+                                  disabled={!selectedEngagementId || !engagementFormData.role_id || !engagementFormData.start_date || !engagementFormData.end_date || !engagementFormData.project_rate || !engagementFormData.delivery_center || linkToEngagement.isPending || (() => {
+                                    const selectedEngagement = engagementsData?.items.find(e => e.id === selectedEngagementId);
+                                    return selectedEngagement?.has_active_quote || false;
+                                  })()}
                                   size="sm"
                                   className="flex-1"
+                                  title={(() => {
+                                    const selectedEngagement = engagementsData?.items.find(e => e.id === selectedEngagementId);
+                                    return selectedEngagement?.has_active_quote ? "Engagement is locked by active quote" : "";
+                                  })()}
                                 >
                                   {linkToEngagement.isPending ? "Linking..." : "Link Engagement"}
                                 </Button>

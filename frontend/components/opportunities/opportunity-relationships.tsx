@@ -484,6 +484,10 @@ export function OpportunityRelationships({
                   return null;
                 }
                 
+                // Get full engagement data to check for active quote
+                const fullEngagement = engagementsData?.items.find(e => String(e.id) === String(engagement.id));
+                const isLocked = fullEngagement?.has_active_quote || false;
+                
                 // If engagement comes from opportunity.engagements, it has employees embedded
                 // IMPORTANT: Filter employees to ensure they're actually linked to THIS engagement
                 const engagementFromOpportunity = opportunity.engagements?.find(e => e.id === engagement.id && e.opportunity_id === opportunity.id);
@@ -531,6 +535,8 @@ export function OpportunityRelationships({
                             variant="outline"
                             onClick={() => handleLinkEmployeeToEngagement(engagement.id)}
                             className="w-full sm:w-auto"
+                            disabled={isLocked}
+                            title={isLocked ? "Engagement is locked by active quote" : ""}
                           >
                             + Link Employee
                           </Button>
@@ -542,9 +548,16 @@ export function OpportunityRelationships({
                               alert("Engagement unlinking not yet implemented");
                             }}
                             className="w-full sm:w-auto"
+                            disabled={isLocked}
+                            title={isLocked ? "Engagement is locked by active quote" : ""}
                           >
                             Remove
                           </Button>
+                          {isLocked && (
+                            <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
+                              Locked
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
