@@ -9,18 +9,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { highlightText } from "@/lib/utils/highlight";
 import { useEngagements } from "@/hooks/useEngagements";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Trash2, Lock, FileCheck } from "lucide-react";
+import { Trash2, Lock, FileCheck, Calendar } from "lucide-react";
 import type { Estimate } from "@/types/estimate";
 import { EngagementKPIs } from "@/components/estimates/engagement-kpis";
+import { GanttViewDialog } from "@/components/estimates/gantt-view-dialog";
 
 export default function EstimatesPage() {
   const [skip] = useState(0);
   const [limit] = useState(1000); // Get all estimates to group properly
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedEstimateIds, setSelectedEstimateIds] = useState<Set<string>>(new Set());
+  const [isGanttDialogOpen, setIsGanttDialogOpen] = useState(false);
   const router = useRouter();
 
   const { data, isLoading, error, refetch } = useEstimates({
@@ -145,6 +150,50 @@ export default function EstimatesPage() {
     }
   };
 
+  // Selection handlers
+  const toggleEstimateSelection = (estimateId: string) => {
+    setSelectedEstimateIds((prev) => {
+      const newSet = new Set(prev);
+      if (newSet.has(estimateId)) {
+        newSet.delete(estimateId);
+      } else {
+        newSet.add(estimateId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllEstimates = () => {
+    if (!data?.items) return;
+    const allIds = new Set(data.items.map((e) => e.id));
+    setSelectedEstimateIds(allIds);
+  };
+
+  const clearSelection = () => {
+    setSelectedEstimateIds(new Set());
+  };
+
+  const selectEngagementEstimates = (engagementId: string) => {
+    if (!data?.items) return;
+    const engagementEstimates = data.items.filter((e) => e.engagement_id === engagementId);
+    setSelectedEstimateIds((prev) => {
+      const newSet = new Set(prev);
+      engagementEstimates.forEach((e) => newSet.add(e.id));
+      return newSet;
+    });
+  };
+
+  // Get all visible estimate IDs (for select all)
+  const visibleEstimateIds = useMemo(() => {
+    return Object.values(filteredGroups).flatMap((group) =>
+      group.estimates.map((e) => e.id)
+    );
+  }, [filteredGroups]);
+
+  const allVisibleSelected = useMemo(() => {
+    return visibleEstimateIds.length > 0 && visibleEstimateIds.every((id) => selectedEstimateIds.has(id));
+  }, [visibleEstimateIds, selectedEstimateIds]);
+
   if (error) {
     return (
       <div className="container mx-auto p-6">
@@ -164,17 +213,49 @@ export default function EstimatesPage() {
     <div className="container mx-auto p-6">
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">Estimates</h1>
+        <div className="flex items-center gap-4">
+          {selectedEstimateIds.size > 0 && (
+            <>
+              <Badge variant="default" className="text-sm px-3 py-1">
+                {selectedEstimateIds.size} selected
+              </Badge>
+              <Button
+                onClick={() => setIsGanttDialogOpen(true)}
+                variant="default"
+                size="sm"
+                className="flex items-center gap-2"
+              >
+                <Calendar className="w-4 h-4" />
+                View Timeline
+              </Button>
+            </>
+          )}
+        </div>
       </div>
 
       <Card className="mb-6">
         <CardContent className="p-4">
-          <div className="flex gap-4">
+          <div className="flex gap-4 items-center">
             <div className="flex-1">
               <Input
                 placeholder="Search by engagement, opportunity, delivery center, or estimate name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
+            </div>
+            <div className="flex gap-2">
+              <Button
+                onClick={allVisibleSelected ? clearSelection : selectAllEstimates}
+                variant="outline"
+                size="sm"
+              >
+                {allVisibleSelected ? "Clear All" : "Select All"}
+              </Button>
+              {selectedEstimateIds.size > 0 && (
+                <Button onClick={clearSelection} variant="outline" size="sm">
+                  Clear Selection
+                </Button>
+              )}
             </div>
           </div>
         </CardContent>
@@ -194,28 +275,62 @@ export default function EstimatesPage() {
         </Card>
       ) : (
         <div className="space-y-6">
-          {Object.values(filteredGroups).map((group) => (
-            <div key={group.engagement.id} className="flex gap-4">
-              <Card className="flex-1">
-                <CardHeader>
-                  <CardTitle className="text-xl">
-                    {highlightText(group.engagement.name, searchQuery)}
-                  </CardTitle>
-                  <div className="flex gap-4 text-sm text-gray-600 mt-2">
-                    {group.engagement.opportunity_name && (
-                      <span>
-                        <span className="font-semibold">Opportunity:</span>{" "}
-                        {group.engagement.opportunity_name}
-                      </span>
-                    )}
-                    {group.engagement.delivery_center_name && (
-                      <span>
-                        <span className="font-semibold">Delivery Center:</span>{" "}
-                        {group.engagement.delivery_center_name}
-                      </span>
-                    )}
-                  </div>
-                </CardHeader>
+          {Object.values(filteredGroups).map((group) => {
+            const engagementEstimateIds = group.estimates.map((e) => e.id);
+            const allEngagementSelected = engagementEstimateIds.length > 0 && engagementEstimateIds.every((id) => selectedEstimateIds.has(id));
+            const someEngagementSelected = engagementEstimateIds.some((id) => selectedEstimateIds.has(id));
+            
+            return (
+              <div key={group.engagement.id} className="flex gap-4">
+                <Card className="flex-1">
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1">
+                        <CardTitle className="text-xl">
+                          {highlightText(group.engagement.name, searchQuery)}
+                        </CardTitle>
+                        <div className="flex gap-4 text-sm text-gray-600 mt-2">
+                          {group.engagement.opportunity_name && (
+                            <span>
+                              <span className="font-semibold">Opportunity:</span>{" "}
+                              {group.engagement.opportunity_name}
+                            </span>
+                          )}
+                          {group.engagement.delivery_center_name && (
+                            <span>
+                              <span className="font-semibold">Delivery Center:</span>{" "}
+                              {group.engagement.delivery_center_name}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Checkbox
+                          checked={allEngagementSelected}
+                          onChange={() => {
+                            if (allEngagementSelected) {
+                              // Deselect all in this engagement
+                              setSelectedEstimateIds((prev) => {
+                                const newSet = new Set(prev);
+                                engagementEstimateIds.forEach((id) => newSet.delete(id));
+                                return newSet;
+                              });
+                            } else {
+                              // Select all in this engagement
+                              selectEngagementEstimates(group.engagement.id);
+                            }
+                          }}
+                          aria-label={`Select all estimates for ${group.engagement.name}`}
+                          style={{
+                            ...(someEngagementSelected && !allEngagementSelected
+                              ? { opacity: 0.6 }
+                              : {}),
+                          }}
+                        />
+                        <span className="text-sm text-gray-600">Select engagement</span>
+                      </div>
+                    </div>
+                  </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
                     {group.estimates.length === 0 ? (
@@ -229,9 +344,16 @@ export default function EstimatesPage() {
                           return (
                             <div
                               key={estimate.id}
-                              className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
+                              className={`flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 ${
+                                selectedEstimateIds.has(estimate.id) ? "bg-blue-50 border-blue-300" : ""
+                              }`}
                             >
                               <div className="flex items-center gap-3 flex-1">
+                                <Checkbox
+                                  checked={selectedEstimateIds.has(estimate.id)}
+                                  onChange={() => toggleEstimateSelection(estimate.id)}
+                                  aria-label={`Select estimate ${estimate.name}`}
+                                />
                                 <Link
                                   href={`/estimates/${estimate.id}`}
                                   className="text-blue-600 hover:underline font-medium"
@@ -322,9 +444,16 @@ export default function EstimatesPage() {
                 </Card>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
+      
+      <GanttViewDialog
+        open={isGanttDialogOpen}
+        onOpenChange={setIsGanttDialogOpen}
+        estimateIds={Array.from(selectedEstimateIds)}
+      />
     </div>
   );
 }
