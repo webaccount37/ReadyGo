@@ -197,10 +197,10 @@ export default function EstimateDetailPage() {
               </Button>
             </Link>
           )}
-          <Button onClick={handleNew} variant="outline" disabled={isCreating || estimate.is_locked} title={estimate.is_locked ? "Estimate is locked by active quote" : ""}>
+          <Button onClick={handleNew} variant="outline" disabled={isCreating} title="">
             {isCreating ? "Creating..." : "NEW"}
           </Button>
-          <Button onClick={handleDuplicate} variant="outline" disabled={isCloning || estimate.is_locked} title={estimate.is_locked ? "Estimate is locked by active quote" : ""}>
+          <Button onClick={handleDuplicate} variant="outline" disabled={isCloning || estimate.is_locked} title={estimate.is_locked ? "Active estimate is locked by active quote" : ""}>
             {isCloning ? "Duplicating..." : "DUPLICATE"}
           </Button>
           {!estimate.active_version && (
@@ -208,7 +208,7 @@ export default function EstimateDetailPage() {
               onClick={handleDelete} 
               variant="outline" 
               disabled={deleteEstimate.isPending || estimate.is_locked}
-              title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
+              title={estimate.is_locked ? "Active estimate is locked by active quote" : ""}
               className="text-red-600 hover:text-red-700 hover:bg-red-50"
             >
               {deleteEstimate.isPending ? "Deleting..." : "DELETE"}

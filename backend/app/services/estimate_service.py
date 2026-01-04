@@ -208,15 +208,17 @@ class EstimateService(BaseService):
         if not estimate:
             return None
         
-        # Check if estimate is locked by active quote
+        # Check if estimate is locked by active quote (only lock active version)
         active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
-        if active_quote:
-            raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
+        if active_quote and estimate.active_version:
+            raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         update_dict = estimate_data.model_dump(exclude_unset=True)
         
-        # Handle active_version changes - ensure only one active estimate per engagement
+        # Prevent changing active_version if there's an active quote
         if "active_version" in update_dict and update_dict["active_version"]:
+            if active_quote:
+                raise ValueError(f"Cannot change active version while quote {active_quote.quote_number} is active. Deactivate the quote first.")
             await self._deactivate_other_estimates(estimate.engagement_id)
         
         updated = await self.estimate_repo.update(estimate_id, **update_dict)
@@ -229,6 +231,15 @@ class EstimateService(BaseService):
     
     async def delete_estimate(self, estimate_id: UUID) -> bool:
         """Delete an estimate."""
+        estimate = await self.estimate_repo.get(estimate_id)
+        if not estimate:
+            return False
+        
+        # Check if estimate is locked by active quote (only lock active version)
+        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        if active_quote and estimate.active_version:
+            raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
+        
         deleted = await self.estimate_repo.delete(estimate_id)
         await self.session.commit()
         return deleted
@@ -238,6 +249,11 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             return None
+        
+        # Prevent setting active version if there's an active quote
+        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        if active_quote:
+            raise ValueError(f"Cannot change active version while quote {active_quote.quote_number} is active. Deactivate the quote first.")
         
         # Deactivate all other estimates for this engagement
         await self._deactivate_other_estimates(estimate.engagement_id)
@@ -450,10 +466,10 @@ class EstimateService(BaseService):
         if not estimate:
             raise ValueError("Estimate not found")
         
-        # Check if estimate is locked by active quote
+        # Check if estimate is locked by active quote (only lock active version)
         active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
-        if active_quote:
-            raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
+        if active_quote and estimate.active_version:
+            raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         # Get engagement to get currency
         engagement = await self.engagement_repo.get(estimate.engagement_id)
@@ -569,12 +585,12 @@ class EstimateService(BaseService):
         if not line_item or line_item.estimate_id != estimate_id:
             return None
         
-        # Check if estimate is locked by active quote
+        # Check if estimate is locked by active quote (only lock active version)
         estimate = await self.estimate_repo.get(estimate_id)
         if estimate:
             active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
-            if active_quote:
-                raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
+            if active_quote and estimate.active_version:
+                raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
         
@@ -720,8 +736,8 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get(estimate_id)
         if estimate:
             active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
-            if active_quote:
-                raise ValueError(f"Estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
+            if active_quote and estimate.active_version:
+                raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         logger.info(f"Line item found, deleting weekly hours first")
         # Explicitly delete weekly hours first (cascade should handle this, but being explicit)
@@ -1092,12 +1108,12 @@ class EstimateService(BaseService):
         except (AttributeError, KeyError, TypeError):
             pass
         
-        # Check if estimate is locked by active quote
+        # Check if estimate is locked by active quote (only lock active version)
         is_locked = False
         locked_by_quote_id = None
         try:
             active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
-            if active_quote:
+            if active_quote and estimate.active_version:
                 is_locked = True
                 locked_by_quote_id = active_quote.id
         except Exception:

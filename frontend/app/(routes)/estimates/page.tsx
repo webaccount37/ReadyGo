@@ -222,87 +222,92 @@ export default function EstimatesPage() {
                       <p className="text-sm text-gray-500">No estimates found.</p>
                     ) : (
                       <div className="space-y-2">
-                        {group.estimates.map((estimate) => (
-                          <div
-                            key={estimate.id}
-                            className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
-                          >
-                            <div className="flex items-center gap-3 flex-1">
-                              <Link
-                                href={`/estimates/${estimate.id}`}
-                                className="text-blue-600 hover:underline font-medium"
-                              >
-                                {highlightText(estimate.name, searchQuery)}
-                              </Link>
-                              {estimate.active_version ? (
-                                <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
-                                  ACTIVE VERSION
-                                </span>
-                              ) : (
-                                <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs font-semibold">
-                                  PENDING VERSION
-                                </span>
-                              )}
-                              {estimate.is_locked && (
-                                <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold">
-                                  <Lock className="w-3 h-3" />
-                                  LOCKED
-                                </span>
-                              )}
-                              {estimate.description && (
-                                <span className="text-sm text-gray-500">
-                                  {estimate.description}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex gap-2">
-                              {!estimate.active_version && (
-                                <>
-                                  <Button
-                                    onClick={() => handleSetActive(estimate.id)}
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={setActiveVersion.isPending || estimate.is_locked}
-                                    title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
-                                  >
-                                    Set Active
-                                  </Button>
-                                  <Button
-                                    onClick={() => handleDelete(estimate.id, estimate.name)}
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={deleteEstimate.isPending || estimate.is_locked}
-                                    title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
-                                    className="text-red-600 hover:text-red-700"
-                                  >
-                                    <Trash2 className="w-4 h-4" />
-                                  </Button>
-                                </>
-                              )}
-                              <Button
-                                onClick={() => router.push(`/estimates/${estimate.id}`)}
-                                variant="outline"
-                                size="sm"
-                                disabled={estimate.is_locked}
-                                title={estimate.is_locked ? "Estimate is locked by active quote" : ""}
-                              >
-                                Edit
-                              </Button>
-                              {estimate.is_locked && estimate.locked_by_quote_id && (
-                                <Link href={`/quotes/${estimate.locked_by_quote_id}`}>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    title="View Quote"
-                                    className="text-blue-600 hover:text-blue-700"
-                                  >
-                                    <FileCheck className="w-4 h-4" />
-                                  </Button>
+                        {group.estimates.map((estimate) => {
+                          // Check if any estimate in this engagement is locked (to disable Set Active for all)
+                          const hasAnyLockedEstimate = group.estimates.some(e => e.is_locked);
+                          
+                          return (
+                            <div
+                              key={estimate.id}
+                              className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50"
+                            >
+                              <div className="flex items-center gap-3 flex-1">
+                                <Link
+                                  href={`/estimates/${estimate.id}`}
+                                  className="text-blue-600 hover:underline font-medium"
+                                >
+                                  {highlightText(estimate.name, searchQuery)}
                                 </Link>
-                              )}
+                                {estimate.active_version ? (
+                                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                    ACTIVE VERSION
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs font-semibold">
+                                    PENDING VERSION
+                                  </span>
+                                )}
+                                {estimate.is_locked && (
+                                  <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold">
+                                    <Lock className="w-3 h-3" />
+                                    LOCKED
+                                  </span>
+                                )}
+                                {estimate.description && (
+                                  <span className="text-sm text-gray-500">
+                                    {estimate.description}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                {!estimate.active_version && (
+                                  <>
+                                    <Button
+                                      onClick={() => handleSetActive(estimate.id)}
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={setActiveVersion.isPending || hasAnyLockedEstimate}
+                                      title={hasAnyLockedEstimate ? "Cannot change active version while quote is active" : ""}
+                                    >
+                                      Set Active
+                                    </Button>
+                                    <Button
+                                      onClick={() => handleDelete(estimate.id, estimate.name)}
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={deleteEstimate.isPending || estimate.is_locked}
+                                      title={estimate.is_locked ? "Active estimate is locked by active quote" : ""}
+                                      className="text-red-600 hover:text-red-700"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </Button>
+                                  </>
+                                )}
+                                <Button
+                                  onClick={() => router.push(`/estimates/${estimate.id}`)}
+                                  variant="outline"
+                                  size="sm"
+                                  disabled={estimate.is_locked}
+                                  title={estimate.is_locked ? "Active estimate is locked by active quote" : ""}
+                                >
+                                  Edit
+                                </Button>
+                                {estimate.is_locked && estimate.locked_by_quote_id && (
+                                  <Link href={`/quotes/${estimate.locked_by_quote_id}`}>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      title="View Quote"
+                                      className="text-blue-600 hover:text-blue-700"
+                                    >
+                                      <FileCheck className="w-4 h-4" />
+                                    </Button>
+                                  </Link>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -310,7 +315,7 @@ export default function EstimatesPage() {
               </Card>
               {/* KPIs Section */}
               <div className="w-64 flex-shrink-0">
-                <Card className="h-full">
+                <Card className="h-full bg-green-50 border-green-200">
                   <CardContent className="p-4">
                     <EngagementKPIs estimates={group.estimates} />
                   </CardContent>
