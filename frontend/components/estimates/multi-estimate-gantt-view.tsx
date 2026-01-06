@@ -3,7 +3,7 @@
 import React, { useMemo } from "react";
 import { useQueries } from "@tanstack/react-query";
 import { estimatesApi } from "@/lib/api/estimates";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import type { EstimateDetailResponse } from "@/types/estimate";
 
 interface MultiEstimateGanttViewProps {
@@ -12,11 +12,11 @@ interface MultiEstimateGanttViewProps {
 
 interface EstimateRow {
   estimate: EstimateDetailResponse;
-  engagementId: string;
-  engagementName: string;
-  engagementStartDate?: Date;
-  engagementEndDate?: Date;
-  estimateIndex: number; // Index within the engagement for color assignment
+  opportunityId: string;
+  opportunityName: string;
+  opportunityStartDate?: Date;
+  opportunityEndDate?: Date;
+  estimateIndex: number; // Index within the opportunity for color assignment
 }
 
 // Convert HSL to hex color
@@ -57,10 +57,10 @@ const hslToHex = (h: number, s: number, l: number): string => {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
 };
 
-// Generate progressive grayish/purple slate colors for engagements
+// Generate progressive grayish/purple slate colors for opportunities
 // Creates a smooth, natural progression that doesn't imply grouping
 // Returns both base color and gradient colors for the bar
-const generateEngagementColor = (index: number, totalCount: number): { base: string; gradient: string } => {
+const generateOpportunityColor = (index: number, totalCount: number): { base: string; gradient: string } => {
   // Base HSL values for grayish/purple slate
   const baseHue = 250; // Purple hue
   const baseSaturation = 15; // Low saturation for muted look
@@ -113,39 +113,39 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
     .map((q) => q.data)
     .filter((e): e is EstimateDetailResponse => e !== undefined);
 
-  // Fetch engagements to get engagement dates
-  const { data: engagementsData } = useEngagements({ limit: 1000 });
+  // Fetch opportunities to get opportunity dates
+  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
 
-  // Create separate rows for each estimate, grouped by engagement
+  // Create separate rows for each estimate, grouped by opportunity
   const estimateRows = useMemo(() => {
-    if (!estimates.length || !engagementsData?.items) return [];
+    if (!estimates.length || !opportunitiesData?.items) return [];
 
     const rows: EstimateRow[] = [];
-    const engagementEstimateCounts = new Map<string, number>();
+    const opportunityEstimateCounts = new Map<string, number>();
 
     estimates.forEach((estimate) => {
-      const engagementId = estimate.engagement_id;
-      const engagement = engagementsData.items.find((e) => e.id === engagementId);
+      const opportunityId = estimate.opportunity_id;
+      const opportunity = opportunitiesData.items.find((o) => o.id === opportunityId);
       
-      // Track how many estimates we've seen for this engagement (for color assignment)
-      const count = engagementEstimateCounts.get(engagementId) || 0;
-      engagementEstimateCounts.set(engagementId, count + 1);
+      // Track how many estimates we've seen for this opportunity (for color assignment)
+      const count = opportunityEstimateCounts.get(opportunityId) || 0;
+      opportunityEstimateCounts.set(opportunityId, count + 1);
 
       rows.push({
         estimate,
-        engagementId,
-        engagementName: engagement?.name || estimate.engagement_name || "Unknown Engagement",
-        engagementStartDate: engagement?.start_date ? new Date(engagement.start_date) : undefined,
-        engagementEndDate: engagement?.end_date ? new Date(engagement.end_date) : undefined,
+        opportunityId,
+        opportunityName: opportunity?.name || estimate.opportunity_name || "Unknown Opportunity",
+        opportunityStartDate: opportunity?.start_date ? new Date(opportunity.start_date) : undefined,
+        opportunityEndDate: opportunity?.end_date ? new Date(opportunity.end_date) : undefined,
         estimateIndex: count,
       });
     });
 
     // Sort by earliest date first, then by name
     return rows.sort((a, b) => {
-      // Get earliest start date for each row (from engagement dates or phases)
+      // Get earliest start date for each row (from opportunity dates or phases)
       const getEarliestStart = (row: EstimateRow): Date | null => {
-        let earliest: Date | null = row.engagementStartDate || null;
+        let earliest: Date | null = row.opportunityStartDate || null;
         
         if (row.estimate.phases && row.estimate.phases.length > 0) {
           row.estimate.phases.forEach((phase) => {
@@ -165,7 +165,7 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
       // Sort by date first
       if (!aStart && !bStart) {
         // Both have no dates, sort by name
-        return a.engagementName.localeCompare(b.engagementName) || a.estimate.name.localeCompare(b.estimate.name);
+        return a.opportunityName.localeCompare(b.opportunityName) || a.estimate.name.localeCompare(b.estimate.name);
       }
       if (!aStart) return 1;
       if (!bStart) return -1;
@@ -173,13 +173,13 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
       const dateCompare = aStart.getTime() - bStart.getTime();
       if (dateCompare !== 0) return dateCompare;
       
-      // Same date, sort by engagement name, then estimate name
-      const engagementCompare = a.engagementName.localeCompare(b.engagementName);
-      if (engagementCompare !== 0) return engagementCompare;
+      // Same date, sort by opportunity name, then estimate name
+      const opportunityCompare = a.opportunityName.localeCompare(b.opportunityName);
+      if (opportunityCompare !== 0) return opportunityCompare;
       
       return a.estimate.name.localeCompare(b.estimate.name);
     });
-  }, [estimates, engagementsData]);
+  }, [estimates, opportunitiesData]);
 
   // Calculate timeline bounds from all estimates and phases
   const timelineBounds = useMemo(() => {
@@ -195,15 +195,15 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
     let latestEnd: Date | null = null;
 
     estimateRows.forEach((row) => {
-      // Check engagement dates
-      if (row.engagementStartDate) {
-        if (!earliestStart || row.engagementStartDate < earliestStart) {
-          earliestStart = row.engagementStartDate;
+      // Check opportunity dates
+      if (row.opportunityStartDate) {
+        if (!earliestStart || row.opportunityStartDate < earliestStart) {
+          earliestStart = row.opportunityStartDate;
         }
       }
-      if (row.engagementEndDate) {
-        if (!latestEnd || row.engagementEndDate > latestEnd) {
-          latestEnd = row.engagementEndDate;
+      if (row.opportunityEndDate) {
+        if (!latestEnd || row.opportunityEndDate > latestEnd) {
+          latestEnd = row.opportunityEndDate;
         }
       }
 
@@ -269,11 +269,11 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
     return weekStarts;
   }, [timelineBounds]);
 
-  // Get color for engagement/phase
-  // Returns color object for engagements, or string for phases
-  const getColor = (engagementIndex: number, totalCount: number, phaseColor?: string): { base: string; gradient: string } | string => {
+  // Get color for opportunity/phase
+  // Returns color object for opportunities, or string for phases
+  const getColor = (opportunityIndex: number, totalCount: number, phaseColor?: string): { base: string; gradient: string } | string => {
     if (phaseColor) return phaseColor;
-    return generateEngagementColor(engagementIndex, totalCount);
+    return generateOpportunityColor(opportunityIndex, totalCount);
   };
 
   // Get year range for header (must be before early returns)
@@ -324,7 +324,7 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
               {/* Week headers row */}
               <tr className="bg-gray-50 border-b border-gray-300">
                 <th className="sticky left-0 z-20 bg-gray-50 border-r border-gray-300 px-1.5 py-1 text-left text-[9px] font-medium w-[180px]">
-                  Engagement / Phase
+                  Opportunity / Phase
                 </th>
                 {weeks.map((week, index) => {
                   const weekEnd = new Date(week.getTime() + 6 * 24 * 60 * 60 * 1000);
@@ -362,33 +362,33 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
                     return a.name.localeCompare(b.name);
                   });
 
-                // Use engagement index for color with progressive gradient
-                const engagementColorData = getColor(rowIndex, estimateRows.length);
-                const engagementColor = typeof engagementColorData === 'string' 
-                  ? engagementColorData 
-                  : engagementColorData.base;
-                const engagementGradient = typeof engagementColorData === 'string'
+                // Use opportunity index for color with progressive gradient
+                const opportunityColorData = getColor(rowIndex, estimateRows.length);
+                const opportunityColor = typeof opportunityColorData === 'string' 
+                  ? opportunityColorData 
+                  : opportunityColorData.base;
+                const opportunityGradient = typeof opportunityColorData === 'string'
                   ? null
-                  : `linear-gradient(to right, ${engagementColorData.base}, ${engagementColorData.gradient})`;
+                  : `linear-gradient(to right, ${opportunityColorData.base}, ${opportunityColorData.gradient})`;
 
                 return (
                   <React.Fragment key={row.estimate.id}>
-                    {/* Estimate row - shows engagement name and estimate name */}
+                    {/* Estimate row - shows opportunity name and estimate name */}
                     <tr className="border-b border-gray-200 hover:bg-gray-50 bg-white">
                       <td className="sticky left-0 z-10 bg-white border-r border-gray-300 px-1.5 py-0.5 shadow-sm relative">
                         <div className="flex flex-col leading-tight">
                           <div className="flex items-center gap-1">
                             <span className="text-[10px] font-medium text-gray-900">
-                              {row.engagementName}
+                              {row.opportunityName}
                             </span>
                           </div>
                           <span className="text-[9px] text-gray-600 mt-0">
                             {row.estimate.name}
                           </span>
-                          {row.engagementStartDate && row.engagementEndDate && (
+                          {row.opportunityStartDate && row.opportunityEndDate && (
                             <span className="text-[9px] text-gray-500 mt-0">
-                              {row.engagementStartDate.toLocaleDateString()} -{" "}
-                              {row.engagementEndDate.toLocaleDateString()}
+                              {row.opportunityStartDate.toLocaleDateString()} -{" "}
+                              {row.opportunityEndDate.toLocaleDateString()}
                             </span>
                           )}
                         </div>
@@ -400,13 +400,13 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
                       </td>
                       {weeks.map((week, weekIndex) => {
                         const weekEnd = new Date(week.getTime() + 6 * 24 * 60 * 60 * 1000);
-                        const hasEngagementBar =
-                          row.engagementStartDate &&
-                          row.engagementEndDate &&
-                          row.engagementStartDate <= weekEnd &&
-                          row.engagementEndDate >= week;
-                        const isStartWeek = row.engagementStartDate! >= week && row.engagementStartDate! < weekEnd;
-                        const isEndWeek = row.engagementEndDate! >= week && row.engagementEndDate! < weekEnd;
+                        const hasOpportunityBar =
+                          row.opportunityStartDate &&
+                          row.opportunityEndDate &&
+                          row.opportunityStartDate <= weekEnd &&
+                          row.opportunityEndDate >= week;
+                        const isStartWeek = row.opportunityStartDate! >= week && row.opportunityStartDate! < weekEnd;
+                        const isEndWeek = row.opportunityEndDate! >= week && row.opportunityEndDate! < weekEnd;
 
                         return (
                           <td
@@ -414,30 +414,30 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
                             className="border-l border-gray-200 px-0 py-0 relative h-7 bg-white"
                             style={{ width: `${weekColumnWidth}px` }}
                           >
-                            {hasEngagementBar && estimatePhases.length === 0 && (
+                            {hasOpportunityBar && estimatePhases.length === 0 && (
                               <div
                                 className="absolute top-0.5 bottom-0.5 rounded shadow-sm"
                                 style={{
-                                  ...(engagementGradient 
-                                    ? { backgroundImage: engagementGradient }
-                                    : { backgroundColor: engagementColor }),
-                                  left: isStartWeek ? `${Math.max(0, ((row.engagementStartDate!.getTime() - week.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
-                                  right: isEndWeek ? `${Math.max(0, ((weekEnd.getTime() - row.engagementEndDate!.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
+                                  ...(opportunityGradient 
+                                    ? { backgroundImage: opportunityGradient }
+                                    : { backgroundColor: opportunityColor }),
+                                  left: isStartWeek ? `${Math.max(0, ((row.opportunityStartDate!.getTime() - week.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
+                                  right: isEndWeek ? `${Math.max(0, ((weekEnd.getTime() - row.opportunityEndDate!.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
                                 }}
-                                title={`${row.engagementName} - ${row.estimate.name}: ${row.engagementStartDate!.toLocaleDateString()} - ${row.engagementEndDate!.toLocaleDateString()}`}
+                                title={`${row.opportunityName} - ${row.estimate.name}: ${row.opportunityStartDate!.toLocaleDateString()} - ${row.opportunityEndDate!.toLocaleDateString()}`}
                               />
                             )}
-                            {hasEngagementBar && estimatePhases.length > 0 && (
+                            {hasOpportunityBar && estimatePhases.length > 0 && (
                               <div
                                 className="absolute top-0.5 bottom-0.5 rounded shadow-sm opacity-60"
                                 style={{
-                                  ...(engagementGradient 
-                                    ? { backgroundImage: engagementGradient }
-                                    : { backgroundColor: engagementColor }),
-                                  left: isStartWeek ? `${Math.max(0, ((row.engagementStartDate!.getTime() - week.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
-                                  right: isEndWeek ? `${Math.max(0, ((weekEnd.getTime() - row.engagementEndDate!.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
+                                  ...(opportunityGradient 
+                                    ? { backgroundImage: opportunityGradient }
+                                    : { backgroundColor: opportunityColor }),
+                                  left: isStartWeek ? `${Math.max(0, ((row.opportunityStartDate!.getTime() - week.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
+                                  right: isEndWeek ? `${Math.max(0, ((weekEnd.getTime() - row.opportunityEndDate!.getTime()) / (7 * 24 * 60 * 60 * 1000)) * 100)}%` : "1px",
                                 }}
-                                title={`${row.engagementName} - ${row.estimate.name}: ${row.engagementStartDate!.toLocaleDateString()} - ${row.engagementEndDate!.toLocaleDateString()}`}
+                                title={`${row.opportunityName} - ${row.estimate.name}: ${row.opportunityStartDate!.toLocaleDateString()} - ${row.opportunityEndDate!.toLocaleDateString()}`}
                               />
                             )}
                           </td>
@@ -448,7 +448,7 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
                     {estimatePhases.map((phase) => {
                       const phaseStart = new Date(phase.start_date);
                       const phaseEnd = new Date(phase.end_date);
-                      // Phases use their own color if available, otherwise fallback to engagement base color
+                      // Phases use their own color if available, otherwise fallback to opportunity base color
                       const phaseColorResult = phase.color || getColor(rowIndex, estimateRows.length);
                       const phaseColorValue = typeof phaseColorResult === 'string' ? phaseColorResult : phaseColorResult.base;
 

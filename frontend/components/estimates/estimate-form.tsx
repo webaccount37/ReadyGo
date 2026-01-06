@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import type { EstimateCreate, EstimateUpdate } from "@/types/estimate";
 
 interface EstimateFormProps {
@@ -21,9 +21,9 @@ export function EstimateForm({
   onCancel,
   isLoading = false,
 }: EstimateFormProps) {
-  const { data: engagementsData } = useEngagements({ limit: 100 });
+  const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const [formData, setFormData] = useState<EstimateCreate>({
-    engagement_id: initialData?.engagement_id || "",
+    opportunity_id: initialData?.opportunity_id || "",
     name: initialData?.name || "",
     description: initialData?.description || "",
   });
@@ -36,20 +36,20 @@ export function EstimateForm({
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div>
-        <Label htmlFor="engagement_id">Engagement *</Label>
+        <Label htmlFor="opportunity_id">Opportunity *</Label>
         <Select
-          id="engagement_id"
-          value={formData.engagement_id}
+          id="opportunity_id"
+          value={formData.opportunity_id}
           onChange={(e) =>
-            setFormData({ ...formData, engagement_id: e.target.value })
+            setFormData({ ...formData, opportunity_id: e.target.value })
           }
           required
-          disabled={!!initialData?.engagement_id}
+          disabled={!!initialData?.opportunity_id}
         >
-          <option value="">Select an engagement</option>
-          {engagementsData?.items?.map((engagement) => (
-            <option key={engagement.id} value={engagement.id}>
-              {engagement.name} ({engagement.opportunity_name || engagement.opportunity_id})
+          <option value="">Select an opportunity</option>
+          {opportunitiesData?.items?.map((opportunity) => (
+            <option key={opportunity.id} value={opportunity.id}>
+              {opportunity.name} {opportunity.account_name && `(${opportunity.account_name})`}
             </option>
           ))}
         </Select>

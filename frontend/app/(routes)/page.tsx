@@ -47,20 +47,6 @@ export default function HomePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Engagements</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-gray-600 mb-4">
-              Manage project engagements and iterations.
-            </p>
-            <Link href="/engagements">
-              <Button>View Engagements</Button>
-            </Link>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
             <CardTitle>Accounts</CardTitle>
           </CardHeader>
           <CardContent>

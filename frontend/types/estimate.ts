@@ -44,12 +44,10 @@ export interface EstimateLineItem {
 
 export interface Estimate {
   id: string;
-  engagement_id: string;
-  engagement_name?: string;
-  opportunity_id?: string;
+  opportunity_id: string;
   opportunity_name?: string;
   name: string;
-  currency?: string; // Derived from engagement, optional in response
+  currency?: string; // Derived from opportunity, optional in response
   active_version?: boolean;
   description?: string;
   phases?: EstimatePhase[];
@@ -62,7 +60,7 @@ export interface Estimate {
 }
 
 export interface EstimateCreate {
-  engagement_id: string;
+  opportunity_id: string;
   name: string;
   description?: string;
   active_version?: boolean;

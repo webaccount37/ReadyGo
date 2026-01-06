@@ -19,7 +19,7 @@ from app.db.repositories.delivery_center_repository import DeliveryCenterReposit
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.role_rate_repository import RoleRateRepository
-from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.models.estimate import EstimateLineItem, EstimateWeeklyHours
 from app.models.delivery_center import DeliveryCenter
 from app.models.employee import Employee
@@ -42,7 +42,7 @@ class ExcelImportService:
         self.employee_repo = EmployeeRepository(session)
         self.role_repo = RoleRepository(session)
         self.role_rate_repo = RoleRateRepository(session)
-        self.engagement_repo = EngagementRepository(session)
+        self.opportunity_repo = OpportunityRepository(session)
     
     async def import_estimate_from_excel(self, estimate_id: UUID, file_path: str) -> Dict:
         """Import estimate data from Excel file."""
@@ -60,17 +60,17 @@ class ExcelImportService:
         if str(metadata["estimate_id"]) != str(estimate_id):
             raise ValueError(f"Template estimate_id ({metadata['estimate_id']}) does not match requested estimate_id ({estimate_id})")
         
-        # Get estimate and engagement
+        # Get estimate and opportunity
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             raise ValueError("Estimate not found")
         
-        engagement = await self.engagement_repo.get(estimate.engagement_id)
-        if not engagement:
-            raise ValueError("Engagement not found")
+        opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
         
-        if str(metadata["engagement_delivery_center_id"]) != str(engagement.delivery_center_id):
-            raise ValueError("Engagement Invoice Center mismatch")
+        if str(metadata["opportunity_delivery_center_id"]) != str(opportunity.delivery_center_id):
+            raise ValueError("Opportunity Invoice Center mismatch")
         
         # Read data sheet
         if "Estimate Data" not in wb.sheetnames:
@@ -96,8 +96,8 @@ class ExcelImportService:
             data_ws, 
             expected_weeks,
             metadata,
-            engagement.delivery_center_id,
-            engagement.default_currency or "USD"
+            opportunity.delivery_center_id,
+            opportunity.default_currency or "USD"
         )
         
         # Upsert line items
@@ -116,10 +116,10 @@ class ExcelImportService:
             
             if key == "estimate_id":
                 metadata["estimate_id"] = UUID(value)
-            elif key == "engagement_id":
-                metadata["engagement_id"] = UUID(value)
-            elif key == "engagement_delivery_center_id":
-                metadata["engagement_delivery_center_id"] = UUID(value)
+            elif key == "opportunity_id":
+                metadata["opportunity_id"] = UUID(value)
+            elif key == "opportunity_delivery_center_id":
+                metadata["opportunity_delivery_center_id"] = UUID(value)
             elif key == "week_start_dates":
                 metadata["week_start_dates"] = [date.fromisoformat(d) for d in value.split(",") if d]
             elif key == "phases":
@@ -201,7 +201,7 @@ class ExcelImportService:
         return get_column_letter(col)
     
     def _parse_data_rows(self, ws, weeks: List[date], metadata: Dict, 
-                        engagement_delivery_center_id: UUID, currency: str) -> List[Dict]:
+                        opportunity_delivery_center_id: UUID, currency: str) -> List[Dict]:
         """Parse data rows from worksheet."""
         line_items = []
         start_row = 4  # Data starts at row 4 (row 3 is headers)
@@ -220,7 +220,7 @@ class ExcelImportService:
             
             # Parse row data
             try:
-                line_item = self._parse_line_item_row(ws, row, weeks, metadata, engagement_delivery_center_id, currency)
+                line_item = self._parse_line_item_row(ws, row, weeks, metadata, opportunity_delivery_center_id, currency)
                 if line_item:
                     line_items.append(line_item)
             except Exception as e:
@@ -232,7 +232,7 @@ class ExcelImportService:
         return line_items
     
     def _parse_line_item_row(self, ws, row: int, weeks: List[date], metadata: Dict,
-                            engagement_delivery_center_id: UUID, currency: str) -> Optional[Dict]:
+                            opportunity_delivery_center_id: UUID, currency: str) -> Optional[Dict]:
         """Parse a single line item row."""
         # Payable Center (Column A)
         payable_center_name = ws[f"A{row}"].value
@@ -258,7 +258,7 @@ class ExcelImportService:
         if not role_id:
             raise ValueError(f"Row {row}: Invalid Role '{role_name}'")
         
-        # Verify role has relationship with engagement delivery center
+        # Verify role has relationship with opportunity delivery center
         # This will be checked during upsert
         
         # Employee (Column C) - optional
@@ -422,8 +422,8 @@ class ExcelImportService:
         
         # Get estimate for currency
         estimate = await self.estimate_repo.get(estimate_id)
-        engagement = await self.engagement_repo.get(estimate.engagement_id)
-        engagement_delivery_center_id = engagement.delivery_center_id
+        opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        opportunity_delivery_center_id = opportunity.delivery_center_id
         
         # Get max row_order
         max_order = await self.line_item_repo.get_max_row_order(estimate_id)
@@ -431,39 +431,39 @@ class ExcelImportService:
         
         for idx, item_data in enumerate(line_items_data):
             try:
-                # Verify role has relationship with engagement delivery center
+                # Verify role has relationship with opportunity delivery center
                 # Check if ANY role rate exists for this role + delivery center (currency doesn't matter for this check)
                 # Use first() instead of scalar_one_or_none() to handle multiple currencies gracefully
                 role_rate_result = await self.session.execute(
                     select(RoleRate).where(
                         RoleRate.role_id == item_data["role_id"],
-                        RoleRate.delivery_center_id == engagement_delivery_center_id,
+                        RoleRate.delivery_center_id == opportunity_delivery_center_id,
                     ).limit(1)
                 )
                 role_rate_for_lookup = role_rate_result.scalars().first()
                 
                 if not role_rate_for_lookup:
-                    raise ValueError(f"Row {idx + 4}: Role does not have relationship with Engagement Invoice Center")
+                    raise ValueError(f"Row {idx + 4}: Role does not have relationship with Opportunity Invoice Center")
                 
                 # IMPORTANT: Payable Center is reference-only and NOT used for rate determinations
-                # All rate lookups must use Engagement Invoice Center
+                # All rate lookups must use Opportunity Invoice Center
                 
-                # Look up RoleRate for Engagement Invoice Center (for rate calculations)
-                engagement_role_rate_result = await self.session.execute(
+                # Look up RoleRate for Opportunity Invoice Center (for rate calculations)
+                opportunity_role_rate_result = await self.session.execute(
                     select(RoleRate).where(
                         RoleRate.role_id == item_data["role_id"],
-                        RoleRate.delivery_center_id == engagement_delivery_center_id,
+                        RoleRate.delivery_center_id == opportunity_delivery_center_id,
                         RoleRate.default_currency == item_data["currency"],
                     ).limit(1)
                 )
-                engagement_role_rate = engagement_role_rate_result.scalars().first()
+                opportunity_role_rate = opportunity_role_rate_result.scalars().first()
                 
-                if not engagement_role_rate:
+                if not opportunity_role_rate:
                     # Estimates should NEVER create RoleRate records
-                    # If RoleRate doesn't exist for Engagement Invoice Center, raise an error
+                    # If RoleRate doesn't exist for Opportunity Invoice Center, raise an error
                     raise ValueError(
                         f"Row {idx + 4}: RoleRate not found for Role '{item_data['role_id']}', "
-                        f"Engagement Invoice Center '{engagement_delivery_center_id}', Currency '{item_data['currency']}'. "
+                        f"Opportunity Invoice Center '{opportunity_delivery_center_id}', Currency '{item_data['currency']}'. "
                         f"Please create the RoleRate association first before using it in Estimates."
                     )
                 
@@ -472,12 +472,12 @@ class ExcelImportService:
                 final_rate = item_data["rate"]
                 
                 if final_cost is None or final_rate is None:
-                    # Get default rates using Engagement Invoice Center RoleRate
+                    # Get default rates using Opportunity Invoice Center RoleRate
                     # This is the correct source for rate lookups per user requirements
                     default_rate, default_cost = await self._get_default_rates_from_role_rate(
-                        engagement_role_rate.id,
+                        opportunity_role_rate.id,
                         item_data["role_id"],
-                        engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookups
+                        opportunity_delivery_center_id,  # Use Opportunity Invoice Center for rate lookups
                         item_data["employee_id"],
                         item_data["currency"],
                     )
@@ -487,18 +487,18 @@ class ExcelImportService:
                     if final_cost is None:
                         final_cost = default_cost
                 
-                # Update Engagement Invoice Center RoleRate if cost/rate changed (only if Excel provided explicit values)
+                # Update Opportunity Invoice Center RoleRate if cost/rate changed (only if Excel provided explicit values)
                 # Note: This updates the role_rate defaults, which may affect other line items
                 # This is intentional - if user changes rates in Excel, they want to update the defaults
                 # Only update if Excel provided explicit values (not defaults)
                 if item_data["cost"] is not None and item_data["rate"] is not None:
-                    cost_changed = abs(float(engagement_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
-                    rate_changed = abs(float(engagement_role_rate.external_rate) - float(item_data["rate"])) > 0.01
+                    cost_changed = abs(float(opportunity_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
+                    rate_changed = abs(float(opportunity_role_rate.external_rate) - float(item_data["rate"])) > 0.01
                     
                     if cost_changed or rate_changed:
-                        logger.info(f"Updating Engagement Invoice Center role_rate {engagement_role_rate.id} defaults: cost={item_data['cost']}, rate={item_data['rate']}")
-                        engagement_role_rate.internal_cost_rate = float(item_data["cost"])
-                        engagement_role_rate.external_rate = float(item_data["rate"])
+                        logger.info(f"Updating Opportunity Invoice Center role_rate {opportunity_role_rate.id} defaults: cost={item_data['cost']}, rate={item_data['rate']}")
+                        opportunity_role_rate.internal_cost_rate = float(item_data["cost"])
+                        opportunity_role_rate.external_rate = float(item_data["rate"])
                         await self.session.flush()
                 # If Excel values were None, we used defaults but don't update role_rate defaults
                 
@@ -551,11 +551,11 @@ class ExcelImportService:
                 
                 if line_item:
                     # Update existing line item - use Excel values or defaults
-                    # Store Engagement Invoice Center's RoleRate (for rate calculations)
+                    # Store Opportunity Invoice Center's RoleRate (for rate calculations)
                     # Store Payable Center from Excel (for reference/export)
                     await self.line_item_repo.update(
                         line_item.id,
-                        role_rates_id=engagement_role_rate.id,  # Use Engagement Invoice Center RoleRate
+                        role_rates_id=opportunity_role_rate.id,  # Use Opportunity Invoice Center RoleRate
                         payable_center_id=item_data["delivery_center_id"],  # Payable Center from Excel (reference only)
                         employee_id=item_data["employee_id"],  # Update employee (may be adding or changing)
                         rate=final_rate,  # Use Excel value or default
@@ -570,11 +570,11 @@ class ExcelImportService:
                     logger.info(f"Updated line item {line_item.id} from Excel row {idx + 4} (rate={final_rate}, cost={final_cost})")
                 else:
                     # Create new line item - use Excel values or defaults
-                    # Store Engagement Invoice Center's RoleRate (for rate calculations)
+                    # Store Opportunity Invoice Center's RoleRate (for rate calculations)
                     # Store Payable Center from Excel (for reference/export)
                     line_item = await self.line_item_repo.create(
                         estimate_id=estimate_id,
-                        role_rates_id=engagement_role_rate.id,  # Use Engagement Invoice Center RoleRate
+                        role_rates_id=opportunity_role_rate.id,  # Use Opportunity Invoice Center RoleRate
                         payable_center_id=item_data["delivery_center_id"],  # Payable Center from Excel (reference only)
                         employee_id=item_data["employee_id"],
                         rate=final_rate,  # Use Excel value or default
@@ -648,7 +648,7 @@ class ExcelImportService:
         self,
         role_rates_id: Optional[UUID],
         role_id: UUID,
-        delivery_center_id: UUID,  # This is the engagement delivery center ID (Invoice Center)
+        delivery_center_id: UUID,  # This is the opportunity delivery center ID (Invoice Center)
         employee_id: Optional[UUID],
         target_currency: str,
     ) -> Tuple[Decimal, Decimal]:
@@ -661,7 +661,7 @@ class ExcelImportService:
         Args:
             role_rates_id: ID of the role_rate to use for rate lookup (may be None)
             role_id: Role ID (used if role_rates_id is None)
-            delivery_center_id: Engagement delivery center ID (Invoice Center) - used if role_rates_id is None, and for comparison with employee delivery center
+            delivery_center_id: Opportunity delivery center ID (Invoice Center) - used if role_rates_id is None, and for comparison with employee delivery center
             employee_id: Optional employee ID - if provided, only cost is taken from employee
             target_currency: Target currency for conversion
         
@@ -698,7 +698,7 @@ class ExcelImportService:
         if employee_id:
             employee = await self.employee_repo.get(employee_id)
             if employee:
-                # Compare Engagement Invoice Center with Employee Delivery Center
+                # Compare Opportunity Invoice Center with Employee Delivery Center
                 centers_match = delivery_center_id == employee.delivery_center_id if (delivery_center_id and employee.delivery_center_id) else False
                 
                 if centers_match:

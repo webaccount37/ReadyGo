@@ -98,7 +98,7 @@ export default function QuoteDetailPage() {
                 {quote.is_active && (
                   <span className="flex items-center gap-1 text-green-600 text-sm">
                     <Lock className="h-4 w-4" />
-                    Active (Locking Engagement)
+                    Active (Locking Opportunity)
                   </span>
                 )}
                 <span className="text-sm text-gray-500">
@@ -116,8 +116,8 @@ export default function QuoteDetailPage() {
                   Unlock
                 </Button>
               )}
-              <Link href={`/engagements/${quote.engagement_id}`}>
-                <Button variant="outline">View Engagement</Button>
+              <Link href={`/opportunities/${quote.opportunity_id}`}>
+                <Button variant="outline">View Opportunity</Button>
               </Link>
               <Link href={`/estimates/${quote.estimate_id}`}>
                 <Button variant="outline">View Estimate</Button>
@@ -128,8 +128,8 @@ export default function QuoteDetailPage() {
         <CardContent>
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <p className="text-sm text-gray-500">Engagement</p>
-              <p className="font-medium">{quote.engagement_name}</p>
+              <p className="text-sm text-gray-500">Opportunity</p>
+              <p className="font-medium">{quote.opportunity_name}</p>
             </div>
             <div>
               <p className="text-sm text-gray-500">Source Estimate</p>

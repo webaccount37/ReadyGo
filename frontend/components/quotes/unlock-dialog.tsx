@@ -34,7 +34,7 @@ export function UnlockDialog({
             Deactivate Quote and Unlock?
           </DialogTitle>
           <DialogDescription>
-            Deactivating this quote will unlock the engagement and all its estimates,
+            Deactivating this quote will unlock the opportunity and all its estimates,
             allowing them to be edited again. The quote will be marked as INVALID
             (unless it&apos;s already ACCEPTED or REJECTED).
           </DialogDescription>
@@ -44,7 +44,7 @@ export function UnlockDialog({
             <strong>Quote:</strong> {quote.quote_number}
           </p>
           <p className="text-sm text-gray-600 mt-2">
-            <strong>Engagement:</strong> {quote.engagement_name}
+            <strong>Opportunity:</strong> {quote.opportunity_name}
           </p>
         </div>
         <DialogFooter>

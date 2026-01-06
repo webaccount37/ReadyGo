@@ -35,18 +35,6 @@ export interface Employee {
     project_rate?: number;
     delivery_center?: string;
   }>;
-  engagements?: Array<{
-    id: string;
-    name: string;
-    opportunity_id: string;
-    opportunity_name?: string;
-    role_id?: string;
-    role_name?: string;
-    start_date?: string;
-    end_date?: string;
-    project_rate?: number;
-    delivery_center?: string;
-  }>;
 }
 
 export interface EmployeeCreate {

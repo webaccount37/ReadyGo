@@ -14,13 +14,11 @@ from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
-from app.db.repositories.engagement_repository import EngagementRepository
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate, OpportunityResponse
 from app.models.opportunity import OpportunityStatus
 from app.utils.currency_converter import convert_to_usd
 from sqlalchemy import select, and_
 from app.models.estimate import Estimate, EstimateLineItem
-from app.models.engagement import Engagement
 
 
 class OpportunityService(BaseService):
@@ -33,7 +31,6 @@ class OpportunityService(BaseService):
         self.role_repo = RoleRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.line_item_repo = EstimateLineItemRepository(session)
-        self.engagement_repo = EngagementRepository(session)
     
     @staticmethod
     def calculate_probability_from_status(status: OpportunityStatus) -> float:
@@ -127,6 +124,18 @@ class OpportunityService(BaseService):
             opportunity_dict['deal_length'] = self.calculate_deal_length(creation_date, close_date)
         
         opportunity = await self.opportunity_repo.create(**opportunity_dict)
+        await self.session.flush()  # Flush to get opportunity.id
+        
+        # Auto-create "INITIAL" estimate for the opportunity
+        from app.models.estimate import Estimate
+        initial_estimate = Estimate(
+            opportunity_id=opportunity.id,
+            name="INITIAL",
+            active_version=True,  # First estimate is always active
+        )
+        self.session.add(initial_estimate)
+        await self.session.flush()
+        
         await self.session.commit()
         # Reload with account relationship
         opportunity = await self.opportunity_repo.get(opportunity.id)
@@ -203,11 +212,37 @@ class OpportunityService(BaseService):
         if not opportunity:
             return None
         
+        # Check if opportunity is locked by active quote
+        from app.db.repositories.quote_repository import QuoteRepository
+        quote_repo = QuoteRepository(self.session)
+        active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity_id)
+        
         # Server-side validation: end_date must be after start_date when both are provided
         # Check which fields were explicitly set in the request
         # Pydantic v2 provides model_fields_set to see which fields were explicitly provided
         fields_set = getattr(opportunity_data, 'model_fields_set', None)
         update_dict = opportunity_data.model_dump(exclude_unset=True, exclude_none=False)
+        
+        if active_quote:
+            # Fields that cannot be changed when locked by active quote
+            locked_fields = {
+                'delivery_center_id',  # Invoice Center
+                'default_currency',
+                'start_date',
+                'end_date',
+                'opportunity_owner_id',
+                'account_id',
+                'billing_term_id',
+            }
+            
+            # Check if any locked fields are in the update
+            attempted_locked_fields = [field for field in locked_fields if field in update_dict]
+            if attempted_locked_fields:
+                raise ValueError(
+                    f"Opportunity is locked by active quote {active_quote.quote_number}. "
+                    f"Cannot update locked fields: {', '.join(attempted_locked_fields)}. "
+                    f"Deactivate the quote to unlock."
+                )
         
         # If end_date was explicitly provided in the request (even if None), include it in the update
         # This allows clearing the field by setting it to None
@@ -336,79 +371,12 @@ class OpportunityService(BaseService):
         return True
     
     async def _get_employees_from_active_estimates_for_opportunity(self, opportunity_id: UUID) -> List[dict]:
-        """Get employees from active estimate line items for all engagements in an opportunity."""
-        # Get all engagements for this opportunity
-        engagements_result = await self.session.execute(
-            select(Engagement).where(Engagement.opportunity_id == opportunity_id)
-        )
-        engagements = engagements_result.scalars().all()
-        
-        employees_dict = {}  # employee_id -> employee data
-        
-        for engagement in engagements:
-            # Get active estimate for this engagement
-            estimate_result = await self.session.execute(
-                select(Estimate).where(
-                    and_(
-                        Estimate.engagement_id == engagement.id,
-                        Estimate.active_version == True
-                    )
-                )
-            )
-            active_estimate = estimate_result.scalar_one_or_none()
-            
-            if not active_estimate:
-                continue
-            
-            # Get line items from active estimate
-            line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
-            
-            for li in line_items:
-                if not li.employee_id:
-                    continue
-                
-                employee_id = str(li.employee_id)
-                
-                # Get employee if not already in dict
-                if employee_id not in employees_dict:
-                    employee = await self.employee_repo.get(li.employee_id)
-                    if not employee:
-                        continue
-                    
-                    # Get role and delivery center from role_rate
-                    role_id = None
-                    role_name = None
-                    delivery_center_code = None
-                    
-                    if li.role_rate:
-                        if li.role_rate.role:
-                            role_id = str(li.role_rate.role.id)
-                            role_name = li.role_rate.role.role_name
-                        if li.role_rate.delivery_center:
-                            delivery_center_code = li.role_rate.delivery_center.code
-                    
-                    employees_dict[employee_id] = {
-                        "id": employee_id,
-                        "first_name": employee.first_name,
-                        "last_name": employee.last_name,
-                        "email": employee.email,
-                        "role_id": role_id,
-                        "role_name": role_name,
-                        "start_date": li.start_date.isoformat() if li.start_date else None,
-                        "end_date": li.end_date.isoformat() if li.end_date else None,
-                        "project_rate": float(li.rate) if li.rate else None,
-                        "delivery_center": delivery_center_code,
-                    }
-        
-        return list(employees_dict.values())
-    
-    async def _get_employees_from_active_estimates_for_engagement(self, engagement_id: UUID) -> List[dict]:
-        """Get employees from active estimate line items for an engagement."""
-        # Get active estimate for this engagement
+        """Get employees from active estimate line items for an opportunity."""
+        # Get active estimate for this opportunity
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
-                    Estimate.engagement_id == engagement_id,
+                    Estimate.opportunity_id == opportunity_id,
                     Estimate.active_version == True
                 )
             )
@@ -505,57 +473,10 @@ class OpportunityService(BaseService):
         }
         
         if include_relationships:
-            # Include engagements with their employee associations from active estimates
-            engagements = []
-            if hasattr(opportunity, 'engagements') and opportunity.engagements:
-                for engagement in opportunity.engagements:
-                    # Safety check: ensure engagement belongs to this opportunity
-                    if engagement.opportunity_id != opportunity.id:
-                        continue
-                    
-                    engagement_dict = {
-                        "id": str(engagement.id),
-                        "name": engagement.name,
-                        "opportunity_id": str(engagement.opportunity_id),
-                        "start_date": engagement.start_date.isoformat() if engagement.start_date else None,
-                        "end_date": engagement.end_date.isoformat() if engagement.end_date else None,
-                        "status": engagement.status.value if hasattr(engagement.status, 'value') else str(engagement.status),
-                        "budget": float(engagement.budget) if engagement.budget else None,
-                        "billing_term_id": str(engagement.billing_term_id) if engagement.billing_term_id else None,
-                        "description": engagement.description,
-                        "default_currency": engagement.default_currency,
-                        "delivery_center_id": str(engagement.delivery_center_id) if engagement.delivery_center_id else None,
-                        "attributes": engagement.attributes,
-                        "employees": await self._get_employees_from_active_estimates_for_engagement(engagement.id)
-                    }
-                    engagements.append(engagement_dict)
-            opportunity_dict["engagements"] = engagements
-            
-            # Include releases with their employee associations from active estimates
-            releases = []
-            if hasattr(opportunity, 'releases') and opportunity.releases:
-                for release in opportunity.releases:
-                    # Safety check: ensure release belongs to this opportunity
-                    if release.opportunity_id != opportunity.id:
-                        continue
-                    
-                    release_dict = {
-                        "id": str(release.id),
-                        "name": release.name,
-                        "opportunity_id": str(release.opportunity_id),
-                        "start_date": release.start_date.isoformat() if release.start_date else None,
-                        "end_date": release.end_date.isoformat() if release.end_date else None,
-                        "status": release.status.value if hasattr(release.status, 'value') else str(release.status),
-                        "employees": await self._get_employees_from_active_estimates_for_release(release.id)
-                    }
-                    releases.append(release_dict)
-            opportunity_dict["releases"] = releases
-            
-            # Include employees directly linked to opportunity (from all releases' active estimates)
+            # Include employees from active estimates
             employees = await self._get_employees_from_active_estimates_for_opportunity(opportunity.id)
             opportunity_dict["employees"] = employees
         else:
-            opportunity_dict["engagements"] = []
             opportunity_dict["employees"] = []
         
         return OpportunityResponse.model_validate(opportunity_dict)

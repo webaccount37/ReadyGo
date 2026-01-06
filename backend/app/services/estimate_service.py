@@ -20,7 +20,7 @@ from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyH
 from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
-from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.db.repositories.quote_repository import QuoteRepository
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours
 from app.models.role_rate import RoleRate
@@ -48,24 +48,24 @@ class EstimateService(BaseService):
         self.role_rate_repo = RoleRateRepository(session)
         self.role_repo = RoleRepository(session)
         self.employee_repo = EmployeeRepository(session)
-        self.engagement_repo = EngagementRepository(session)
+        self.opportunity_repo = OpportunityRepository(session)
         self.quote_repo = QuoteRepository(session)
     
     async def create_estimate(self, estimate_data: EstimateCreate) -> EstimateResponse:
         """Create a new estimate."""
-        # Get engagement to check for existing active estimate
-        engagement = await self.engagement_repo.get(estimate_data.engagement_id)
-        if not engagement:
-            raise ValueError("Engagement not found")
+        # Get opportunity to check for existing active estimate
+        opportunity = await self.opportunity_repo.get(estimate_data.opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
         
         estimate_dict = estimate_data.model_dump(exclude_unset=True)
         
         # Auto-generate version name if name is "NEW", empty, or None
         name = estimate_dict.get("name")
         if not name or name.strip() == "" or name == "NEW":
-            # Get all existing estimates for this engagement to find the highest version number
-            existing_estimates = await self.estimate_repo.list_by_engagement(
-                engagement_id=estimate_data.engagement_id,
+            # Get all existing estimates for this opportunity to find the highest version number
+            existing_estimates = await self.estimate_repo.list_by_opportunity(
+                opportunity_id=estimate_data.opportunity_id,
                 skip=0,
                 limit=1000  # Get all estimates
             )
@@ -91,13 +91,13 @@ class EstimateService(BaseService):
         
         # Set active_version based on whether there's already an active estimate
         # If this is the first estimate or explicitly set, use the provided value
-        # Otherwise, ensure only one active estimate per engagement
+        # Otherwise, ensure only one active estimate per opportunity
         if estimate_dict.get("active_version", False):
-            # If setting this as active, deactivate all other estimates for this engagement
-            await self._deactivate_other_estimates(estimate_data.engagement_id)
+            # If setting this as active, deactivate all other estimates for this opportunity
+            await self._deactivate_other_estimates(estimate_data.opportunity_id)
         else:
             # Check if there's already an active estimate
-            existing_active = await self._get_active_estimate(estimate_data.engagement_id)
+            existing_active = await self._get_active_estimate(estimate_data.opportunity_id)
             if not existing_active:
                 # No active estimate exists, make this one active by default
                 estimate_dict["active_version"] = True
@@ -106,7 +106,7 @@ class EstimateService(BaseService):
         await self.session.flush()  # Flush to get estimate.id
         
         # Create default line items from active estimate if one exists
-        active_estimate = await self._get_active_estimate(estimate_data.engagement_id)
+        active_estimate = await self._get_active_estimate(estimate_data.opportunity_id)
         if active_estimate and active_estimate.id != estimate.id:
             # Copy line items from active estimate
             active_line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
@@ -183,12 +183,12 @@ class EstimateService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
-        engagement_id: Optional[UUID] = None,
+        opportunity_id: Optional[UUID] = None,
     ) -> Tuple[List[EstimateResponse], int]:
         """List estimates with optional filters."""
         filters = {}
-        if engagement_id:
-            filters["engagement_id"] = engagement_id
+        if opportunity_id:
+            filters["opportunity_id"] = opportunity_id
         
         estimates = await self.estimate_repo.list(skip=skip, limit=limit, **filters)
         total = await self.estimate_repo.count(**filters)
@@ -209,7 +209,7 @@ class EstimateService(BaseService):
             return None
         
         # Check if estimate is locked by active quote (only lock active version)
-        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
         if active_quote and estimate.active_version:
             raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
@@ -219,7 +219,7 @@ class EstimateService(BaseService):
         if "active_version" in update_dict and update_dict["active_version"]:
             if active_quote:
                 raise ValueError(f"Cannot change active version while quote {active_quote.quote_number} is active. Deactivate the quote first.")
-            await self._deactivate_other_estimates(estimate.engagement_id)
+            await self._deactivate_other_estimates(estimate.opportunity_id)
         
         updated = await self.estimate_repo.update(estimate_id, **update_dict)
         await self.session.commit()
@@ -236,7 +236,7 @@ class EstimateService(BaseService):
             return False
         
         # Check if estimate is locked by active quote (only lock active version)
-        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
         if active_quote and estimate.active_version:
             raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
@@ -245,18 +245,18 @@ class EstimateService(BaseService):
         return deleted
     
     async def set_active_version(self, estimate_id: UUID) -> Optional[EstimateResponse]:
-        """Set an estimate as the active version for its engagement."""
+        """Set an estimate as the active version for its opportunity."""
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             return None
         
         # Prevent setting active version if there's an active quote
-        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
         if active_quote:
             raise ValueError(f"Cannot change active version while quote {active_quote.quote_number} is active. Deactivate the quote first.")
         
-        # Deactivate all other estimates for this engagement
-        await self._deactivate_other_estimates(estimate.engagement_id)
+        # Deactivate all other estimates for this opportunity
+        await self._deactivate_other_estimates(estimate.opportunity_id)
         
         # Set this estimate as active
         updated = await self.estimate_repo.update(estimate_id, active_version=True)
@@ -275,9 +275,9 @@ class EstimateService(BaseService):
         
         # Auto-generate version name if not provided
         if not new_name:
-            # Get all existing estimates for this engagement to find the highest version number
-            existing_estimates = await self.estimate_repo.list_by_engagement(
-                engagement_id=estimate.engagement_id,
+            # Get all existing estimates for this opportunity to find the highest version number
+            existing_estimates = await self.estimate_repo.list_by_opportunity(
+                opportunity_id=estimate.opportunity_id,
                 skip=0,
                 limit=1000  # Get all estimates
             )
@@ -303,7 +303,7 @@ class EstimateService(BaseService):
         
         # Create new estimate
         new_estimate_dict = {
-            "engagement_id": estimate.engagement_id,
+            "opportunity_id": estimate.opportunity_id,
             "name": new_name,
             "description": estimate.description,
             "attributes": estimate.attributes.copy() if estimate.attributes else {},
@@ -363,7 +363,7 @@ class EstimateService(BaseService):
         role_rates_id: UUID,
         employee_id: Optional[UUID] = None,
         target_currency: Optional[str] = None,
-        engagement_delivery_center_id: Optional[UUID] = None,
+        opportunity_delivery_center_id: Optional[UUID] = None,
     ) -> Tuple[Decimal, Decimal]:
         """Get default rate and cost from a role_rate.
         
@@ -375,7 +375,7 @@ class EstimateService(BaseService):
             role_rates_id: ID of the role_rate to use for rate lookup
             employee_id: Optional employee ID - if provided, only cost is taken from employee
             target_currency: Target currency for conversion (if different from employee/role_rate currency)
-            engagement_delivery_center_id: Optional engagement delivery center ID (Invoice Center) for comparison
+            opportunity_delivery_center_id: Optional opportunity delivery center ID (Invoice Center) for comparison
         
         Returns:
             Tuple of (rate, cost)
@@ -394,8 +394,8 @@ class EstimateService(BaseService):
         if employee_id:
             employee = await self.employee_repo.get(employee_id)
             if employee:
-                # Compare Engagement Invoice Center with Employee Delivery Center
-                centers_match = engagement_delivery_center_id == employee.delivery_center_id if (engagement_delivery_center_id and employee.delivery_center_id) else False
+                # Compare Opportunity Invoice Center with Employee Delivery Center
+                centers_match = opportunity_delivery_center_id == employee.delivery_center_id if (opportunity_delivery_center_id and employee.delivery_center_id) else False
                 
                 if centers_match:
                     # Centers match: use internal_cost_rate with NO currency conversion
@@ -430,25 +430,25 @@ class EstimateService(BaseService):
         
         return rate, cost
     
-    async def _get_active_estimate(self, engagement_id: UUID) -> Optional[Estimate]:
-        """Get the active estimate for an engagement."""
+    async def _get_active_estimate(self, opportunity_id: UUID) -> Optional[Estimate]:
+        """Get the active estimate for an opportunity."""
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
-                    Estimate.engagement_id == engagement_id,
+                    Estimate.opportunity_id == opportunity_id,
                     Estimate.active_version == True
                 )
             )
         )
         return result.scalar_one_or_none()
     
-    async def _deactivate_other_estimates(self, engagement_id: UUID) -> None:
-        """Deactivate all estimates for an engagement except the current one being created."""
+    async def _deactivate_other_estimates(self, opportunity_id: UUID) -> None:
+        """Deactivate all estimates for an opportunity except the current one being created."""
         await self.session.execute(
             update(Estimate)
             .where(
                 and_(
-                    Estimate.engagement_id == engagement_id,
+                    Estimate.opportunity_id == opportunity_id,
                     Estimate.active_version == True
                 )
             )
@@ -467,33 +467,33 @@ class EstimateService(BaseService):
             raise ValueError("Estimate not found")
         
         # Check if estimate is locked by active quote (only lock active version)
-        active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+        active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
         if active_quote and estimate.active_version:
             raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
-        # Get engagement to get currency
-        engagement = await self.engagement_repo.get(estimate.engagement_id)
-        if not engagement:
-            raise ValueError("Engagement not found")
+        # Get opportunity to get currency
+        opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
         
         # Convert role_id to role_rates_id if needed
-        # IMPORTANT: Rate lookups use Engagement Invoice Center, NOT Payable Center
+        # IMPORTANT: Rate lookups use Opportunity Invoice Center, NOT Payable Center
         role_rates_id = line_item_data.role_rates_id
-        currency = line_item_data.currency or engagement.default_currency
-        engagement_delivery_center_id = engagement.delivery_center_id
+        currency = line_item_data.currency or opportunity.default_currency
+        opportunity_delivery_center_id = opportunity.delivery_center_id
         
         if not role_rates_id and line_item_data.role_id:
-            # Get role rate using Engagement Invoice Center (not Payable Center)
+            # Get role rate using Opportunity Invoice Center (not Payable Center)
             # Estimates should NEVER create RoleRate records
             role_rate = await self._get_role_rate(
                 line_item_data.role_id,
-                engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookup
+                opportunity_delivery_center_id,  # Use Opportunity Invoice Center for rate lookup
                 currency
             )
             if not role_rate:
                 raise ValueError(
                     f"RoleRate not found for Role '{line_item_data.role_id}', "
-                    f"Engagement Invoice Center '{engagement_delivery_center_id}', Currency '{currency}'. "
+                    f"Opportunity Invoice Center '{opportunity_delivery_center_id}', Currency '{currency}'. "
                     f"Please create the RoleRate association first before using it in Estimates."
                 )
             role_rates_id = role_rate.id
@@ -501,11 +501,11 @@ class EstimateService(BaseService):
             raise ValueError("Either role_rates_id OR role_id must be provided")
         
         # Determine payable_center_id (Payable Center - reference only)
-        # Default to Engagement Invoice Center if not provided
+        # Default to Opportunity Invoice Center if not provided
         payable_center_id = (
             line_item_data.payable_center_id or 
             line_item_data.delivery_center_id or  # Backward compatibility
-            engagement_delivery_center_id  # Default to Engagement Invoice Center
+            opportunity_delivery_center_id  # Default to Opportunity Invoice Center
         )
         
         # Get default rates if not provided
@@ -517,7 +517,7 @@ class EstimateService(BaseService):
                 role_rates_id,
                 line_item_data.employee_id,
                 target_currency=currency,  # Pass currency for conversion
-                engagement_delivery_center_id=engagement_delivery_center_id,  # Pass engagement delivery center for comparison
+                opportunity_delivery_center_id=opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison
             )
             if rate == 0:
                 rate = default_rate
@@ -588,33 +588,33 @@ class EstimateService(BaseService):
         # Check if estimate is locked by active quote (only lock active version)
         estimate = await self.estimate_repo.get(estimate_id)
         if estimate:
-            active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+            active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
             if active_quote and estimate.active_version:
                 raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
         
-        # Handle role_id updates - use Engagement Invoice Center (not Payable Center) for role_rate lookup
+        # Handle role_id updates - use Opportunity Invoice Center (not Payable Center) for role_rate lookup
         if "role_id" in update_dict:
-            # Get currency and engagement delivery center (Invoice Center) for role_rate lookup
+            # Get currency and opportunity delivery center (Invoice Center) for role_rate lookup
             estimate = await self.estimate_repo.get(estimate_id)
-            engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
-            currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
+            opportunity = await self.opportunity_repo.get(estimate.opportunity_id) if estimate else None
+            currency = update_dict.get("currency") or line_item.currency or (opportunity.default_currency if opportunity else "USD")
             
-            # Use Engagement Invoice Center (delivery_center_id) for role_rate lookup, NOT Payable Center
-            engagement_delivery_center_id = engagement.delivery_center_id if engagement else None
-            if not engagement_delivery_center_id:
-                raise ValueError("Engagement Invoice Center (delivery_center_id) is required for role rate lookup")
+            # Use Opportunity Invoice Center (delivery_center_id) for role_rate lookup, NOT Payable Center
+            opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
+            if not opportunity_delivery_center_id:
+                raise ValueError("Opportunity Invoice Center (delivery_center_id) is required for role rate lookup")
             
             role_rate = await self._get_role_rate(
                 update_dict["role_id"],
-                engagement_delivery_center_id,  # Use Engagement Invoice Center, not Payable Center
+                opportunity_delivery_center_id,  # Use Opportunity Invoice Center, not Payable Center
                 currency
             )
             if not role_rate:
                 raise ValueError(
                     f"RoleRate not found for Role '{update_dict['role_id']}', "
-                    f"Delivery Center '{engagement_delivery_center_id}', Currency '{currency}'. "
+                    f"Delivery Center '{opportunity_delivery_center_id}', Currency '{currency}'. "
                     f"Please create the RoleRate association first before using it in Estimates."
                 )
             update_dict["role_rates_id"] = role_rate.id
@@ -635,7 +635,7 @@ class EstimateService(BaseService):
             update_dict.pop("delivery_center_id", None)
         
         # Recalculate rates if role_rates_id/employee changed
-        # BUT: Rate lookup should use Role ID + Engagement Invoice Center (not Payable Center from role_rate)
+        # BUT: Rate lookup should use Role ID + Opportunity Invoice Center (not Payable Center from role_rate)
         if "role_rates_id" in update_dict or "employee_id" in update_dict or "role_id" in update_dict:
             # Get the role_id (either from update or existing)
             if "role_id" in update_dict:
@@ -653,18 +653,18 @@ class EstimateService(BaseService):
             
             new_employee_id = update_dict.get("employee_id", line_item.employee_id)
             
-            # For rate lookup, use Role ID + Engagement Invoice Center (not Payable Center)
+            # For rate lookup, use Role ID + Opportunity Invoice Center (not Payable Center)
             if new_role_id:
                 estimate = await self.estimate_repo.get(estimate_id)
-                engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
-                engagement_delivery_center_id = engagement.delivery_center_id if engagement else None
-                currency = update_dict.get("currency") or line_item.currency or (engagement.default_currency if engagement else "USD")
+                opportunity = await self.opportunity_repo.get(estimate.opportunity_id) if estimate else None
+                opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
+                currency = update_dict.get("currency") or line_item.currency or (opportunity.default_currency if opportunity else "USD")
                 
-                if engagement_delivery_center_id:
-                    # Get role_rate using Role ID + Engagement Invoice Center for rate lookup
+                if opportunity_delivery_center_id:
+                    # Get role_rate using Role ID + Opportunity Invoice Center for rate lookup
                     role_rate_for_rates = await self._get_role_rate(
                         new_role_id,
-                        engagement_delivery_center_id,  # Use Engagement Invoice Center for rate lookup
+                        opportunity_delivery_center_id,  # Use Opportunity Invoice Center for rate lookup
                         currency
                     )
                     if not role_rate_for_rates:
@@ -674,33 +674,33 @@ class EstimateService(BaseService):
                         default_cost = Decimal(str(role.role_internal_cost_rate)) if role and role.role_internal_cost_rate else Decimal("0")
                     else:
                         default_rate, default_cost = await self._get_default_rates_from_role_rate(
-                            role_rate_for_rates.id,  # Use role_rate with Engagement Invoice Center
+                            role_rate_for_rates.id,  # Use role_rate with Opportunity Invoice Center
                             new_employee_id,
                             target_currency=currency,  # Pass currency for conversion
-                            engagement_delivery_center_id=engagement_delivery_center_id,  # Pass engagement delivery center for comparison
+                            opportunity_delivery_center_id=opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison
                         )
                 else:
-                    # Fallback to using the role_rates_id directly if no engagement delivery center
+                    # Fallback to using the role_rates_id directly if no opportunity delivery center
                     default_rate, default_cost = await self._get_default_rates_from_role_rate(
                         update_dict.get("role_rates_id", line_item.role_rates_id),
                         new_employee_id,
                         target_currency=currency,  # Pass currency for conversion
-                        engagement_delivery_center_id=engagement_delivery_center_id,  # Pass engagement delivery center for comparison (may be None)
+                        opportunity_delivery_center_id=opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison (may be None)
                     )
             else:
                 # Fallback to using the role_rates_id directly
-                # Get engagement delivery center from line item's estimate
+                # Get opportunity delivery center from line item's estimate
                 estimate = await self.estimate_repo.get(estimate_id)
-                fallback_engagement_delivery_center_id = None
+                fallback_opportunity_delivery_center_id = None
                 if estimate:
-                    engagement = await self.engagement_repo.get(estimate.engagement_id) if estimate else None
-                    fallback_engagement_delivery_center_id = engagement.delivery_center_id if engagement else None
+                    opportunity = await self.opportunity_repo.get(estimate.opportunity_id) if estimate else None
+                    fallback_opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
                 
                 default_rate, default_cost = await self._get_default_rates_from_role_rate(
                     update_dict.get("role_rates_id", line_item.role_rates_id),
                     new_employee_id,
                     target_currency=currency,  # Pass currency for conversion
-                    engagement_delivery_center_id=fallback_engagement_delivery_center_id,  # Pass engagement delivery center for comparison (may be None)
+                    opportunity_delivery_center_id=fallback_opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison (may be None)
                 )
             
             # Only update if rates weren't explicitly provided
@@ -735,7 +735,7 @@ class EstimateService(BaseService):
         # Check if estimate is locked by active quote
         estimate = await self.estimate_repo.get(estimate_id)
         if estimate:
-            active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+            active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
             if active_quote and estimate.active_version:
                 raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
@@ -1068,24 +1068,15 @@ class EstimateService(BaseService):
         
         inspector = inspect(estimate)
         
-        # Safely get engagement name and currency if loaded
-        engagement_name = None
-        engagement_currency = None
-        opportunity_id = None
+        # Safely get opportunity name and currency if loaded
         opportunity_name = None
+        opportunity_currency = None
         try:
-            if inspector.attrs.engagement.loaded_value is not None:
-                engagement = inspector.attrs.engagement.loaded_value
-                if engagement:
-                    engagement_name = engagement.name
-                    engagement_currency = engagement.default_currency
-                    # Check if opportunity is loaded on engagement
-                    engagement_inspector = inspect(engagement)
-                    if engagement_inspector.attrs.opportunity.loaded_value is not None:
-                        opportunity = engagement_inspector.attrs.opportunity.loaded_value
-                        if opportunity:
-                            opportunity_id = opportunity.id
-                            opportunity_name = opportunity.name
+            if inspector.attrs.opportunity.loaded_value is not None:
+                opportunity = inspector.attrs.opportunity.loaded_value
+                if opportunity:
+                    opportunity_name = opportunity.name
+                    opportunity_currency = opportunity.default_currency
         except (AttributeError, KeyError):
             pass
         
@@ -1112,7 +1103,7 @@ class EstimateService(BaseService):
         is_locked = False
         locked_by_quote_id = None
         try:
-            active_quote = await self.quote_repo.get_active_quote_by_engagement(estimate.engagement_id)
+            active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
             if active_quote and estimate.active_version:
                 is_locked = True
                 locked_by_quote_id = active_quote.id
@@ -1121,15 +1112,13 @@ class EstimateService(BaseService):
         
         estimate_dict = {
             "id": estimate.id,
-            "engagement_id": estimate.engagement_id,
+            "opportunity_id": estimate.opportunity_id,
             "name": estimate.name,
-            "currency": engagement_currency or "USD",  # Get currency from engagement
+            "currency": opportunity_currency or "USD",  # Get currency from opportunity
             "description": estimate.description,
             "active_version": estimate.active_version,
             "phases": phases_list,
             "attributes": estimate.attributes or {},
-            "engagement_name": engagement_name,
-            "opportunity_id": opportunity_id,
             "opportunity_name": opportunity_name,
             "created_by": estimate.created_by,
             "created_by_name": created_by_name,
@@ -1214,7 +1203,7 @@ class EstimateService(BaseService):
             start_date_iso = line_item.start_date.date().isoformat()
             logger.warning(f"  start_date was datetime! date()={line_item.start_date.date()}, isoformat={start_date_iso}")
         elif isinstance(line_item.start_date, date):
-            # Pure date object - call isoformat() directly (same as Engagement service)
+            # Pure date object - call isoformat() directly (same as Opportunity service)
             start_date_iso = line_item.start_date.isoformat()
             logger.info(f"  start_date.isoformat() = {start_date_iso}")
         else:
@@ -1225,7 +1214,7 @@ class EstimateService(BaseService):
             end_date_iso = line_item.end_date.date().isoformat()
             logger.warning(f"  end_date was datetime! date()={line_item.end_date.date()}, isoformat={end_date_iso}")
         elif isinstance(line_item.end_date, date):
-            # Pure date object - call isoformat() directly (same as Engagement service)
+            # Pure date object - call isoformat() directly (same as Opportunity service)
             end_date_iso = line_item.end_date.isoformat()
             logger.info(f"  end_date.isoformat() = {end_date_iso}")
         else:
@@ -1234,8 +1223,8 @@ class EstimateService(BaseService):
         logger.info(f"  === SERIALIZATION ===")
         logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
         
-        # Serialize dates directly as ISO strings (EXACTLY like Engagement/Opportunity services)
-        # Engagement service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
+        # Serialize dates directly as ISO strings (EXACTLY like Opportunity service)
+        # Opportunity service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
         # Get role_id and delivery_center_id from role_rate for backward compatibility
         role_id = None
         delivery_center_id = None
@@ -1268,8 +1257,8 @@ class EstimateService(BaseService):
             "rate": line_item.rate,
             "cost": line_item.cost,
             "currency": line_item.currency,
-            "start_date": start_date_iso,  # ISO string (same as Engagement service)
-            "end_date": end_date_iso,  # ISO string (same as Engagement service)
+            "start_date": start_date_iso,  # ISO string (same as Opportunity service)
+            "end_date": end_date_iso,  # ISO string (same as Opportunity service)
             "row_order": line_item.row_order,
             "billable": line_item.billable,
             "billable_expense_percentage": line_item.billable_expense_percentage,
@@ -1285,7 +1274,7 @@ class EstimateService(BaseService):
             if weekly_hours_attr and weekly_hours_attr.loaded_value is not None:
                 weekly_hours_list = weekly_hours_attr.loaded_value
                 logger.info(f"Found {len(weekly_hours_list) if weekly_hours_list else 0} weekly hours in loaded_value")
-                # Build dicts directly, serializing dates as ISO strings (same as Engagement service)
+                # Build dicts directly, serializing dates as ISO strings (same as Opportunity service)
                 line_item_dict["weekly_hours"] = [
                     {
                         "id": str(wh.id),

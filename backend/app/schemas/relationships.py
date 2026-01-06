@@ -10,24 +10,8 @@ from uuid import UUID
 # Delivery center is now a string code that will be looked up
 
 
-class EngagementLinkData(BaseModel):
-    """Data for linking an employee to an engagement."""
-    engagement_id: UUID
-    role_id: UUID = Field(..., description="Role ID (foreign key)")
-    start_date: date = Field(..., description="Start date for the association")
-    end_date: date = Field(..., description="End date for the association")
-    project_rate: float = Field(..., ge=0, description="Project rate")
-    project_cost: Optional[float] = Field(None, ge=0, description="Project cost (optional, auto-filled from role or employee)")
-    delivery_center: str = Field(..., description="Payable Center code (e.g., 'north-america') - reference only, not used for rate calculations")
-
-
 class LinkEmployeeToOpportunityRequest(BaseModel):
-    """Request schema for linking an employee to an opportunity with engagements."""
-    engagements: List[EngagementLinkData] = Field(..., min_length=1, description="At least one engagement with fields is required")
-
-
-class LinkEmployeeToEngagementRequest(BaseModel):
-    """Request schema for linking an employee to an engagement with required fields."""
+    """Request schema for linking an employee to an opportunity."""
     role_id: UUID = Field(..., description="Role ID (foreign key)")
     start_date: date = Field(..., description="Start date for the association")
     end_date: date = Field(..., description="End date for the association")
@@ -39,12 +23,6 @@ class LinkEmployeeToEngagementRequest(BaseModel):
 class LinkEmployeesToOpportunityRequest(BaseModel):
     """Request schema for linking multiple employees to an opportunity."""
     employee_ids: List[UUID]
-    engagements: List[EngagementLinkData] = Field(..., min_length=1, description="At least one engagement with fields is required")
-
-
-class LinkEmployeesToEngagementRequest(BaseModel):
-    """Request schema for linking multiple employees to an engagement."""
-    employee_ids: List[UUID]
     role_id: UUID = Field(..., description="Role ID (foreign key)")
     start_date: date = Field(..., description="Start date for the association")
     end_date: date = Field(..., description="End date for the association")
@@ -55,11 +33,6 @@ class LinkEmployeesToEngagementRequest(BaseModel):
 
 class LinkRolesToOpportunityRequest(BaseModel):
     """Request schema for linking roles to an opportunity."""
-    role_ids: List[UUID]
-
-
-class LinkRolesToEngagementRequest(BaseModel):
-    """Request schema for linking roles to an engagement."""
     role_ids: List[UUID]
 
 
@@ -83,16 +56,3 @@ class OpportunityAssociationResponse(BaseModel):
         from_attributes = True
 
 
-class EngagementAssociationResponse(BaseModel):
-    """Response schema for engagement association with additional fields."""
-    engagement_id: UUID
-    engagement_name: str
-    role_id: UUID
-    role_name: str
-    start_date: date
-    end_date: date
-    project_rate: float
-    delivery_center: str
-    
-    class Config:
-        from_attributes = True

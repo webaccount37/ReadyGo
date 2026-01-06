@@ -20,18 +20,6 @@ export interface OpportunityEmployee {
   delivery_center?: string;
 }
 
-export interface OpportunityEngagement {
-  id: string;
-  name: string;
-  opportunity_id: string;
-  start_date?: string;
-  end_date?: string;
-  status: string;
-  employees?: OpportunityEmployee[];
-  has_active_quote?: boolean;
-  active_quote_id?: string;
-}
-
 export interface Opportunity {
   id: string;
   name: string;
@@ -51,7 +39,6 @@ export interface Opportunity {
   invoice_customer: boolean;
   billable_expenses: boolean;
   attributes?: Record<string, unknown>;
-  engagements?: OpportunityEngagement[];
   employees?: OpportunityEmployee[];
   // New deal/forecast fields
   probability?: number;

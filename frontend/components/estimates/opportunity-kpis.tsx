@@ -2,15 +2,15 @@
 
 import { useMemo } from "react";
 import { useEstimateDetail } from "@/hooks/useEstimates";
-import { useEngagement } from "@/hooks/useEngagements";
+import { useOpportunity } from "@/hooks/useOpportunities";
 import { Card } from "@/components/ui/card";
 import type { Estimate, EstimateDetailResponse } from "@/types/estimate";
 
-interface EngagementKPIsProps {
+interface OpportunityKPIsProps {
   estimates: Estimate[];
 }
 
-export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
+export function OpportunityKPIs({ estimates }: OpportunityKPIsProps) {
   // Find the active version estimate
   const activeEstimate = useMemo(() => {
     return estimates.find((est) => est.active_version === true);
@@ -22,11 +22,11 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
     { enabled: !!activeEstimate?.id }
   );
 
-  // Fetch engagement to get the correct currency
-  const { data: engagement, isLoading: isLoadingEngagement } = useEngagement(
-    activeEstimate?.engagement_id || "",
+  // Fetch opportunity to get the correct currency
+  const { data: opportunity, isLoading: isLoadingOpportunity } = useOpportunity(
+    activeEstimate?.opportunity_id || "",
     false, // includeRelationships
-    { enabled: !!activeEstimate?.engagement_id }
+    { enabled: !!activeEstimate?.opportunity_id }
   );
 
   // Calculate KPIs from fetched data (only for active version)
@@ -123,8 +123,8 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
     const marginAmount = totalRevenue - totalCost;
     const marginPercentage = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
 
-    // Use engagement's default_currency as the correct currency (same as estimate detail page)
-    const currency = engagement?.default_currency || estimateDetail.currency || "USD";
+    // Use opportunity's default_currency as the correct currency (same as estimate detail page)
+    const currency = opportunity?.default_currency || estimateDetail.currency || "USD";
 
     return {
       totalCost,
@@ -133,9 +133,9 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
       marginPercentage,
       currency,
     };
-  }, [estimateDetail, engagement]);
+  }, [estimateDetail, opportunity]);
 
-  if (isLoadingEstimate || isLoadingEngagement) {
+  if (isLoadingEstimate || isLoadingOpportunity) {
     return (
       <div className="text-sm text-gray-500">Loading KPIs...</div>
     );
@@ -184,4 +184,3 @@ export function EngagementKPIs({ estimates }: EngagementKPIsProps) {
     </div>
   );
 }
-

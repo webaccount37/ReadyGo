@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useEstimates,
   useSetActiveVersion,
@@ -12,25 +13,29 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { highlightText } from "@/lib/utils/highlight";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
+import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2, Lock, FileCheck, Calendar } from "lucide-react";
 import type { Estimate } from "@/types/estimate";
-import { EngagementKPIs } from "@/components/estimates/engagement-kpis";
+import { OpportunityKPIs } from "@/components/estimates/opportunity-kpis";
 import { GanttViewDialog } from "@/components/estimates/gantt-view-dialog";
 
-export default function EstimatesPage() {
+function EstimatesPageContent() {
+  const searchParams = useSearchParams();
   const [skip] = useState(0);
   const [limit] = useState(1000); // Get all estimates to group properly
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedEstimateIds, setSelectedEstimateIds] = useState<Set<string>>(new Set());
   const [isGanttDialogOpen, setIsGanttDialogOpen] = useState(false);
   const router = useRouter();
+  const opportunityIdFilter = searchParams.get("opportunity_id") || undefined;
 
   const { data, isLoading, error, refetch } = useEstimates({
     skip,
     limit,
+    opportunity_id: opportunityIdFilter,
   });
   const setActiveVersion = useSetActiveVersion();
   const deleteEstimate = useDeleteEstimate();
@@ -49,21 +54,21 @@ export default function EstimatesPage() {
     }
   };
 
-  // Fetch engagements to get opportunity and delivery center info
-  const { data: engagementsData } = useEngagements({ limit: 1000 });
+  // Fetch opportunities and delivery centers to get display info
+  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
+  const { data: deliveryCentersData } = useDeliveryCenters();
 
-  // Group estimates by engagement
-  const groupedByEngagement = useMemo(() => {
-    if (!data?.items || !engagementsData?.items) return {};
+  // Group estimates by opportunity
+  const groupedByOpportunity = useMemo(() => {
+    if (!data?.items || !opportunitiesData?.items) return {};
 
     const grouped: Record<
       string,
       {
-        engagement: {
+        opportunity: {
           id: string;
           name: string;
-          opportunity_id?: string;
-          opportunity_name?: string;
+          account_name?: string;
           delivery_center_id?: string;
           delivery_center_name?: string;
         };
@@ -71,57 +76,63 @@ export default function EstimatesPage() {
       }
     > = {};
 
-    // Create a map of engagements for quick lookup
-    const engagementsMap = new Map(
-      engagementsData.items.map((e) => [e.id, e])
+    // Create a map of opportunities for quick lookup
+    const opportunitiesMap = new Map(
+      opportunitiesData.items.map((o) => [o.id, o])
     );
 
-    // Group estimates by engagement_id
+    // Helper to get delivery center name
+    const getDeliveryCenterName = (dcId: string | undefined): string | undefined => {
+      if (!dcId || !deliveryCentersData?.items) return undefined;
+      const dc = deliveryCentersData.items.find(d => d.id === dcId);
+      return dc?.name;
+    };
+
+    // Group estimates by opportunity_id
     data.items.forEach((estimate) => {
-      const engagementId = estimate.engagement_id;
-      if (!grouped[engagementId]) {
-        const engagement = engagementsMap.get(engagementId);
-        if (engagement) {
-          grouped[engagementId] = {
-            engagement: {
-              id: engagement.id,
-              name: engagement.name,
-              opportunity_id: engagement.opportunity_id,
-              opportunity_name: engagement.opportunity_name,
-              delivery_center_id: engagement.delivery_center_id,
-              delivery_center_name: engagement.delivery_center_name,
+      const opportunityId = estimate.opportunity_id;
+      if (!grouped[opportunityId]) {
+        const opportunity = opportunitiesMap.get(opportunityId);
+        if (opportunity) {
+          grouped[opportunityId] = {
+            opportunity: {
+              id: opportunity.id,
+              name: opportunity.name,
+              account_name: opportunity.account_name,
+              delivery_center_id: opportunity.delivery_center_id,
+              delivery_center_name: getDeliveryCenterName(opportunity.delivery_center_id),
             },
             estimates: [],
           };
         }
       }
-      if (grouped[engagementId]) {
-        grouped[engagementId].estimates.push(estimate);
+      if (grouped[opportunityId]) {
+        grouped[opportunityId].estimates.push(estimate);
       }
     });
 
-    // Sort estimates within each engagement by name
+    // Sort estimates within each opportunity by name
     Object.values(grouped).forEach((group) => {
       group.estimates.sort((a, b) => a.name.localeCompare(b.name));
     });
 
     return grouped;
-  }, [data, engagementsData]);
+  }, [data, opportunitiesData, deliveryCentersData]);
 
   // Filter grouped data by search query
   const filteredGroups = useMemo(() => {
     if (!searchQuery.trim()) {
-      return groupedByEngagement;
+      return groupedByOpportunity;
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered: typeof groupedByEngagement = {};
+    const filtered: typeof groupedByOpportunity = {};
 
-    Object.entries(groupedByEngagement).forEach(([engagementId, group]) => {
-      const engagementMatches =
-        group.engagement.name.toLowerCase().includes(query) ||
-        group.engagement.opportunity_name?.toLowerCase().includes(query) ||
-        group.engagement.delivery_center_name?.toLowerCase().includes(query);
+    Object.entries(groupedByOpportunity).forEach(([opportunityId, group]) => {
+      const opportunityMatches =
+        group.opportunity.name.toLowerCase().includes(query) ||
+        group.opportunity.account_name?.toLowerCase().includes(query) ||
+        group.opportunity.delivery_center_name?.toLowerCase().includes(query);
 
       const matchingEstimates = group.estimates.filter(
         (estimate) =>
@@ -129,16 +140,16 @@ export default function EstimatesPage() {
           estimate.description?.toLowerCase().includes(query)
       );
 
-      if (engagementMatches || matchingEstimates.length > 0) {
-        filtered[engagementId] = {
+      if (opportunityMatches || matchingEstimates.length > 0) {
+        filtered[opportunityId] = {
           ...group,
-          estimates: engagementMatches ? group.estimates : matchingEstimates,
+          estimates: opportunityMatches ? group.estimates : matchingEstimates,
         };
       }
     });
 
     return filtered;
-  }, [groupedByEngagement, searchQuery]);
+  }, [groupedByOpportunity, searchQuery]);
 
   const handleSetActive = async (estimateId: string) => {
     try {
@@ -173,12 +184,12 @@ export default function EstimatesPage() {
     setSelectedEstimateIds(new Set());
   };
 
-  const selectEngagementEstimates = (engagementId: string) => {
+  const selectOpportunityEstimates = (opportunityId: string) => {
     if (!data?.items) return;
-    const engagementEstimates = data.items.filter((e) => e.engagement_id === engagementId);
+    const opportunityEstimates = data.items.filter((e) => e.opportunity_id === opportunityId);
     setSelectedEstimateIds((prev) => {
       const newSet = new Set(prev);
-      engagementEstimates.forEach((e) => newSet.add(e.id));
+      opportunityEstimates.forEach((e) => newSet.add(e.id));
       return newSet;
     });
   };
@@ -238,7 +249,7 @@ export default function EstimatesPage() {
           <div className="flex gap-4 items-center">
             <div className="flex-1">
               <Input
-                placeholder="Search by engagement, opportunity, delivery center, or estimate name..."
+                placeholder="Search by opportunity, account, invoice center, or estimate name..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
@@ -276,58 +287,58 @@ export default function EstimatesPage() {
       ) : (
         <div className="space-y-6">
           {Object.values(filteredGroups).map((group) => {
-            const engagementEstimateIds = group.estimates.map((e) => e.id);
-            const allEngagementSelected = engagementEstimateIds.length > 0 && engagementEstimateIds.every((id) => selectedEstimateIds.has(id));
-            const someEngagementSelected = engagementEstimateIds.some((id) => selectedEstimateIds.has(id));
+            const opportunityEstimateIds = group.estimates.map((e) => e.id);
+            const allOpportunitySelected = opportunityEstimateIds.length > 0 && opportunityEstimateIds.every((id) => selectedEstimateIds.has(id));
+            const someOpportunitySelected = opportunityEstimateIds.some((id) => selectedEstimateIds.has(id));
             
             return (
-              <div key={group.engagement.id} className="flex gap-4">
+              <div key={group.opportunity.id} className="flex gap-4">
                 <Card className="flex-1">
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <div className="flex-1">
                         <CardTitle className="text-xl">
-                          {highlightText(group.engagement.name, searchQuery)}
+                          {highlightText(group.opportunity.name, searchQuery)}
                         </CardTitle>
                         <div className="flex gap-4 text-sm text-gray-600 mt-2">
-                          {group.engagement.opportunity_name && (
+                          {group.opportunity.account_name && (
                             <span>
-                              <span className="font-semibold">Opportunity:</span>{" "}
-                              {group.engagement.opportunity_name}
+                              <span className="font-semibold">Account:</span>{" "}
+                              {group.opportunity.account_name}
                             </span>
                           )}
-                          {group.engagement.delivery_center_name && (
+                          {group.opportunity.delivery_center_name && (
                             <span>
-                              <span className="font-semibold">Delivery Center:</span>{" "}
-                              {group.engagement.delivery_center_name}
+                              <span className="font-semibold">Invoice Center:</span>{" "}
+                              {group.opportunity.delivery_center_name}
                             </span>
                           )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
                         <Checkbox
-                          checked={allEngagementSelected}
+                          checked={allOpportunitySelected}
                           onChange={() => {
-                            if (allEngagementSelected) {
-                              // Deselect all in this engagement
+                            if (allOpportunitySelected) {
+                              // Deselect all in this opportunity
                               setSelectedEstimateIds((prev) => {
                                 const newSet = new Set(prev);
-                                engagementEstimateIds.forEach((id) => newSet.delete(id));
+                                opportunityEstimateIds.forEach((id) => newSet.delete(id));
                                 return newSet;
                               });
                             } else {
-                              // Select all in this engagement
-                              selectEngagementEstimates(group.engagement.id);
+                              // Select all in this opportunity
+                              selectOpportunityEstimates(group.opportunity.id);
                             }
                           }}
-                          aria-label={`Select all estimates for ${group.engagement.name}`}
+                          aria-label={`Select all estimates for ${group.opportunity.name}`}
                           style={{
-                            ...(someEngagementSelected && !allEngagementSelected
+                            ...(someOpportunitySelected && !allOpportunitySelected
                               ? { opacity: 0.6 }
                               : {}),
                           }}
                         />
-                        <span className="text-sm text-gray-600">Select engagement</span>
+                        <span className="text-sm text-gray-600">Select opportunity</span>
                       </div>
                     </div>
                   </CardHeader>
@@ -338,7 +349,7 @@ export default function EstimatesPage() {
                     ) : (
                       <div className="space-y-2">
                         {group.estimates.map((estimate) => {
-                          // Check if any estimate in this engagement is locked (to disable Set Active for all)
+                          // Check if any estimate in this opportunity is locked (to disable Set Active for all)
                           const hasAnyLockedEstimate = group.estimates.some(e => e.is_locked);
                           
                           return (
@@ -420,7 +431,7 @@ export default function EstimatesPage() {
                                       variant="outline"
                                       size="sm"
                                       title="View Quote"
-                                      className="text-blue-600 hover:text-blue-700"
+                                      className="text-green-600 hover:text-green-700"
                                     >
                                       <FileCheck className="w-4 h-4" />
                                     </Button>
@@ -439,7 +450,7 @@ export default function EstimatesPage() {
               <div className="w-64 flex-shrink-0">
                 <Card className="h-full bg-green-50 border-green-200">
                   <CardContent className="p-4">
-                    <EngagementKPIs estimates={group.estimates} />
+                    <OpportunityKPIs estimates={group.estimates} />
                   </CardContent>
                 </Card>
               </div>
@@ -455,5 +466,13 @@ export default function EstimatesPage() {
         estimateIds={Array.from(selectedEstimateIds)}
       />
     </div>
+  );
+}
+
+export default function EstimatesPage() {
+  return (
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
+      <EstimatesPageContent />
+    </Suspense>
   );
 }

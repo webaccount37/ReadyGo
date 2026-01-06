@@ -73,7 +73,7 @@ class QuoteLineItemResponse(BaseModel):
 
 class QuoteBase(BaseModel):
     """Base quote schema with common fields."""
-    engagement_id: UUID
+    opportunity_id: UUID
     estimate_id: UUID
     notes: Optional[str] = Field(None, max_length=2000)
 
@@ -106,7 +106,7 @@ class QuoteResponse(QuoteBase):
     created_by_name: Optional[str] = None
     sent_date: Optional[date] = None
     snapshot_data: Optional[dict] = None
-    engagement_name: Optional[str] = None
+    opportunity_name: Optional[str] = None
     estimate_name: Optional[str] = None
     
     class Config:

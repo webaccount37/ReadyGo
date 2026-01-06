@@ -9,8 +9,11 @@ import {
   useUpdateOpportunity,
   useDeleteOpportunity,
 } from "@/hooks/useOpportunities";
+import { useEstimates } from "@/hooks/useEstimates";
+import { useQuotes } from "@/hooks/useQuotes";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, Calculator, FileCheck, Lock } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { OpportunityForm } from "@/components/opportunities/opportunity-form";
@@ -23,7 +26,6 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useEmployees } from "@/hooks/useEmployees";
-import { useEngagements } from "@/hooks/useEngagements";
 import { opportunitiesApi } from "@/lib/api/opportunities";
 import Link from "next/link";
 
@@ -44,6 +46,7 @@ function OpportunitiesPageContent() {
     }
   }, [searchParams]);
 
+  const router = useRouter();
   const { data, isLoading, error, refetch } = useOpportunities({ skip, limit });
   const createOpportunity = useCreateOpportunity();
   const updateOpportunity = useUpdateOpportunity();
@@ -55,8 +58,11 @@ function OpportunitiesPageContent() {
   const { data: billingTermsData } = useBillingTerms();
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: allOpportunitiesData } = useOpportunities({ limit: 100 });
-  // Fetch all engagements to calculate counts
-  const { data: allEngagementsData } = useEngagements({ limit: 10000 });
+  
+  // Fetch all estimates and quotes to determine active estimates and quote existence
+  // Note: API limit is 1000, so we fetch up to 1000 items
+  const { data: allEstimatesData } = useEstimates({ limit: 1000 });
+  const { data: allQuotesData } = useQuotes({ limit: 1000 });
   
   // Fetch opportunity with relationships for viewing/editing
   const { data: viewingOpportunityData, refetch: refetchViewingOpportunity } = useOpportunity(
@@ -131,37 +137,7 @@ function OpportunitiesPageContent() {
     })),
   });
 
-  // Calculate engagement and employee counts per opportunity
-  const engagementCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    
-    // Use opportunity data with relationships if available (most accurate)
-    opportunityCountsQueries.forEach((query) => {
-      if (query.data?.engagements) {
-        const oppId = query.data.id;
-        counts[oppId] = query.data.engagements.length;
-      }
-    });
-    
-    // Fallback: use engagement list data for opportunities not yet loaded with relationships
-    if (allEngagementsData?.items) {
-      const fallbackCounts: Record<string, number> = {};
-      allEngagementsData.items.forEach((engagement) => {
-        if (engagement.opportunity_id) {
-          fallbackCounts[engagement.opportunity_id] = (fallbackCounts[engagement.opportunity_id] || 0) + 1;
-        }
-      });
-      // Only use fallback counts for opportunities we don't have relationship data for
-      Object.keys(fallbackCounts).forEach((oppId) => {
-        if (counts[oppId] === undefined) {
-          counts[oppId] = fallbackCounts[oppId];
-        }
-      });
-    }
-    
-    return counts;
-  }, [opportunityCountsQueries, allEngagementsData]);
-
+  // Calculate employee counts per opportunity
   const employeeCounts = useMemo(() => {
     const counts: Record<string, Set<string>> = {};
     
@@ -174,20 +150,6 @@ function OpportunitiesPageContent() {
       }
     });
     
-    // Fallback: use engagement list data for opportunities not yet loaded with relationships
-    if (allEngagementsData?.items) {
-      allEngagementsData.items.forEach((engagement) => {
-        if (engagement.opportunity_id && engagement.employees) {
-          if (!counts[engagement.opportunity_id]) {
-            counts[engagement.opportunity_id] = new Set();
-          }
-          engagement.employees.forEach((emp: { id: string }) => {
-            counts[engagement.opportunity_id].add(emp.id);
-          });
-        }
-      });
-    }
-    
     // Convert Sets to counts
     const countDict: Record<string, number> = {};
     Object.keys(counts).forEach((oppId) => {
@@ -195,7 +157,53 @@ function OpportunitiesPageContent() {
     });
     
     return countDict;
-  }, [opportunityCountsQueries, allEngagementsData]);
+  }, [opportunityCountsQueries]);
+
+  // Helper function to get active estimate ID for an opportunity
+  const getActiveEstimateId = (opportunityId: string): string | null => {
+    if (!allEstimatesData?.items) return null;
+    const activeEstimate = allEstimatesData.items.find(
+      (est) => est.opportunity_id === opportunityId && est.active_version === true
+    );
+    return activeEstimate?.id || null;
+  };
+
+  // Helper function to check if quotes exist for an opportunity
+  const hasQuotes = (opportunityId: string): boolean => {
+    if (!allQuotesData?.items) return false;
+    return allQuotesData.items.some((quote) => quote.opportunity_id === opportunityId);
+  };
+
+  // Helper function to check if there's an active quote for an opportunity
+  const hasActiveQuote = (opportunityId: string): boolean => {
+    if (!allQuotesData?.items || !opportunityId) {
+      return false;
+    }
+    return allQuotesData.items.some((quote) => {
+      return quote.opportunity_id === opportunityId && quote.is_active === true;
+    });
+  };
+
+  // Handler for Estimates button - navigate to active estimate or estimates page
+  const handleEstimatesClick = (opportunityId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const activeEstimateId = getActiveEstimateId(opportunityId);
+    if (activeEstimateId) {
+      router.push(`/estimates/${activeEstimateId}`);
+    } else {
+      router.push(`/estimates?opportunity_id=${opportunityId}`);
+    }
+  };
+
+  // Handler for Quotes button - navigate to create quote if none exist, otherwise quotes page
+  const handleQuotesClick = (opportunityId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (hasQuotes(opportunityId)) {
+      router.push(`/quotes?opportunity_id=${opportunityId}`);
+    } else {
+      router.push(`/quotes/create?opportunity_id=${opportunityId}`);
+    }
+  };
 
   const filteredItems = useMemo(() => {
     if (!data?.items || !searchQuery.trim()) {
@@ -243,7 +251,6 @@ function OpportunitiesPageContent() {
         : "";
       
       // Count fields
-      const engagementCount = String(engagementCounts[opportunity.id] ?? 0).toLowerCase();
       const employeeCount = String(employeeCounts[opportunity.id] ?? 0).toLowerCase();
       
       return (
@@ -264,11 +271,10 @@ function OpportunitiesPageContent() {
         projectYear.includes(query) ||
         projectMonth.includes(query) ||
         projectDuration.includes(query) ||
-        engagementCount.includes(query) ||
         employeeCount.includes(query)
       );
     });
-  }, [data, searchQuery, accountsData, deliveryCentersData, employeesData, allOpportunitiesData, engagementCounts, employeeCounts]);
+  }, [data, searchQuery, accountsData, deliveryCentersData, employeesData, allOpportunitiesData, employeeCounts]);
 
   const handleCreate = async (data: OpportunityCreate | OpportunityUpdate) => {
     try {
@@ -387,13 +393,12 @@ function OpportunitiesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Parent Opportunity Name">Parent</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Status">Status</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Start Date">Start</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Invoice Center">IC</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Deal Value (USD)">Deal $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Forecast Value (USD)">Forecast $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Start Year">Year</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Start Month">Mo</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Duration (Months)">Dur</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Engagement Count">Eng</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
@@ -405,7 +410,16 @@ function OpportunitiesPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingOpportunity(opportunity.id)}
                           >
-                            <td className="p-1.5 font-medium max-w-[120px] truncate text-xs" title={opportunity.name}>{highlightText(opportunity.name, searchQuery)}</td>
+                            <td className="p-1.5 font-medium max-w-[120px] truncate text-xs" title={opportunity.name}>
+                              <div className="flex items-center gap-1.5">
+                                {highlightText(opportunity.name, searchQuery)}
+                                {hasActiveQuote(opportunity.id) ? (
+                                  <span className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold whitespace-nowrap" title="Locked by active quote">
+                                    <Lock className="w-3 h-3" />
+                                  </span>
+                                ) : null}
+                              </div>
+                            </td>
                             <td className="p-1.5 max-w-[100px] truncate text-xs" title={getAccountName(opportunity.account_id)}>{highlightText(getAccountName(opportunity.account_id), searchQuery)}</td>
                             <td className="p-1.5 max-w-[100px] truncate text-xs" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>{getParentOpportunityName(opportunity.parent_opportunity_id)}</td>
                             <td className="p-1.5">
@@ -450,15 +464,6 @@ function OpportunitiesPageContent() {
                             <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_duration_months ? `${opportunity.project_duration_months} months` : "—"}>{opportunity.project_duration_months || "—"}</td>
                             <td className="p-1.5 whitespace-nowrap text-xs">
                               <Link
-                                href={`/engagements?search=${encodeURIComponent(opportunity.name)}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                              >
-                                {engagementCounts[opportunity.id] ?? "—"}
-                              </Link>
-                            </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs">
-                              <Link
                                 href={`/employees?search=${encodeURIComponent(opportunity.name)}`}
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
@@ -471,18 +476,28 @@ function OpportunitiesPageContent() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setViewingOpportunity(opportunity.id)}
-                                  className="h-6 px-1.5 text-xs"
-                                >
-                                  View
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
                                   onClick={() => setEditingOpportunity(opportunity.id)}
                                   className="h-6 px-1.5 text-xs"
                                 >
                                   Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => handleEstimatesClick(opportunity.id, e)}
+                                  className="h-6 px-1.5 text-xs text-blue-600 hover:text-blue-700"
+                                  title={getActiveEstimateId(opportunity.id) ? "View Active Estimate" : "View Estimates"}
+                                >
+                                  <Calculator className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => handleQuotesClick(opportunity.id, e)}
+                                  className="h-6 px-1.5 text-xs text-green-600 hover:text-green-700"
+                                  title={hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
+                                >
+                                  <FileCheck className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -514,7 +529,15 @@ function OpportunitiesPageContent() {
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                                   Name
                                 </div>
-                                <div className="text-sm font-medium">{highlightText(opportunity.name, searchQuery)}</div>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-sm font-medium">{highlightText(opportunity.name, searchQuery)}</div>
+                                  {hasActiveQuote(opportunity.id) ? (
+                                    <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold whitespace-nowrap" title="Locked by active quote">
+                                      <Lock className="w-3 h-3" />
+                                      Locked
+                                    </span>
+                                  ) : null}
+                                </div>
                               </div>
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
@@ -562,18 +585,28 @@ function OpportunitiesPageContent() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => setViewingOpportunity(opportunity.id)}
-                                className="flex-1"
-                              >
-                                View
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
                                 onClick={() => setEditingOpportunity(opportunity.id)}
                                 className="flex-1"
                               >
                                 Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleEstimatesClick(opportunity.id, e)}
+                                className="flex-1 text-blue-600 hover:text-blue-700"
+                                title={getActiveEstimateId(opportunity.id) ? "View Active Estimate" : "View Estimates"}
+                              >
+                                <Calculator className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => handleQuotesClick(opportunity.id, e)}
+                                className="flex-1 text-green-600 hover:text-green-700"
+                                title={hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
+                              >
+                                <FileCheck className="w-4 h-4" />
                               </Button>
                               <Button
                                 size="sm"
@@ -708,7 +741,7 @@ function OpportunitiesPageContent() {
               
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <p className="text-sm font-semibold text-gray-800">Delivery Center</p>
+                  <p className="text-sm font-semibold text-gray-800">Invoice Center</p>
                   <p className="text-sm text-gray-700">{getDeliveryCenterName(opportunityToView.delivery_center_id)}</p>
                 </div>
                 <div>
@@ -897,7 +930,15 @@ function OpportunitiesPageContent() {
           onOpenChange={(open) => !open && setEditingOpportunity(null)}
         >
           <DialogHeader>
-            <DialogTitle>Edit Opportunity</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              Edit Opportunity
+              {opportunityToEdit?.id && hasActiveQuote(opportunityToEdit.id) ? (
+                <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-semibold whitespace-nowrap" title="Locked by active quote">
+                  <Lock className="w-4 h-4" />
+                  Locked
+                </span>
+              ) : null}
+            </DialogTitle>
           </DialogHeader>
           <DialogContent className="max-h-[90vh] overflow-y-auto">
             <OpportunityForm

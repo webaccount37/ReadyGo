@@ -26,7 +26,7 @@ class Quote(Base):
     __tablename__ = "quotes"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
-    engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id", ondelete="CASCADE"), nullable=False, index=True)
+    opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False, index=True)
     estimate_id = Column(UUID(as_uuid=True), ForeignKey("estimates.id", ondelete="RESTRICT"), nullable=False, index=True)
     quote_number = Column(String(255), nullable=False, unique=True, index=True)
     version = Column(Integer, nullable=False, default=1)
@@ -39,7 +39,7 @@ class Quote(Base):
     snapshot_data = Column(JSON, nullable=True)
     
     # Relationships
-    engagement = relationship("Engagement", back_populates="quotes")
+    opportunity = relationship("Opportunity", back_populates="quotes")
     estimate = relationship("Estimate")
     created_by_employee = relationship("Employee", foreign_keys=[created_by])
     line_items = relationship("QuoteLineItem", back_populates="quote", cascade="all, delete-orphan", order_by="QuoteLineItem.row_order")

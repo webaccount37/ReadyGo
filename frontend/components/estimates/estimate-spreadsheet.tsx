@@ -13,8 +13,8 @@ interface EstimateSpreadsheetProps {
   estimate: EstimateDetailResponse;
   startDate?: string;
   endDate?: string;
-  engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
-  engagementCurrency?: string; // Engagement default_currency
+  opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
+  opportunityCurrency?: string; // Opportunity default_currency
   readOnly?: boolean;
 }
 
@@ -22,8 +22,8 @@ export function EstimateSpreadsheet({
   estimate, 
   startDate, 
   endDate,
-  engagementDeliveryCenterId,
-  engagementCurrency,
+  opportunityDeliveryCenterId,
+  opportunityCurrency,
   readOnly = false
 }: EstimateSpreadsheetProps) {
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
@@ -375,7 +375,7 @@ export function EstimateSpreadsheet({
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {engagementCurrency || estimate.currency || "USD"} {summaryTotals.totalCost.toFixed(2)}
+                  {opportunityCurrency || estimate.currency || "USD"} {summaryTotals.totalCost.toFixed(2)}
                 </div>
               </CardContent>
             </Card>
@@ -387,7 +387,7 @@ export function EstimateSpreadsheet({
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {engagementCurrency || estimate.currency || "USD"} {summaryTotals.totalRevenue.toFixed(2)}
+                  {opportunityCurrency || estimate.currency || "USD"} {summaryTotals.totalRevenue.toFixed(2)}
                 </div>
               </CardContent>
             </Card>
@@ -399,7 +399,7 @@ export function EstimateSpreadsheet({
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">
-                  {engagementCurrency || estimate.currency || "USD"} {summaryTotals.marginAmount.toFixed(2)}
+                  {opportunityCurrency || estimate.currency || "USD"} {summaryTotals.marginAmount.toFixed(2)}
                 </div>
               </CardContent>
             </Card>
@@ -488,10 +488,10 @@ export function EstimateSpreadsheet({
                     Employee
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
-                    Cost ({engagementCurrency || estimate.currency || "USD"})
+                    Cost ({opportunityCurrency || estimate.currency || "USD"})
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
-                    Rate ({engagementCurrency || estimate.currency || "USD"})
+                    Rate ({opportunityCurrency || estimate.currency || "USD"})
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[100px]">
                     Start Date
@@ -564,9 +564,9 @@ export function EstimateSpreadsheet({
                     key={lineItem.id}
                     lineItem={lineItem}
                     weeks={weeks}
-                    currency={engagementCurrency || estimate.currency || "USD"}
+                    currency={opportunityCurrency || estimate.currency || "USD"}
                     estimateId={estimate.id}
-                    engagementDeliveryCenterId={engagementDeliveryCenterId}
+                    opportunityDeliveryCenterId={opportunityDeliveryCenterId}
                     onContextMenu={(e) => handleContextMenu(e, index)}
                     readOnly={readOnly}
                   />
@@ -580,10 +580,10 @@ export function EstimateSpreadsheet({
                       key={stableId}
                       estimateId={estimate.id}
                       weeks={weeks}
-                      currency={engagementCurrency || estimate.currency || "USD"}
+                      currency={opportunityCurrency || estimate.currency || "USD"}
                       rowIndex={existingLineItems.length + index}
                       stableId={stableId}
-                      engagementDeliveryCenterId={engagementDeliveryCenterId}
+                      opportunityDeliveryCenterId={opportunityDeliveryCenterId}
                       onContextMenu={(e) =>
                         handleContextMenu(e, existingLineItems.length + index)
                       }
@@ -594,7 +594,7 @@ export function EstimateSpreadsheet({
                   <EstimateTotalsRow
                     lineItems={existingLineItems}
                     weeks={weeks}
-                    currency={engagementCurrency || estimate.currency || "USD"}
+                    currency={opportunityCurrency || estimate.currency || "USD"}
                   />
                 )}
                 {/* Add Row button */}

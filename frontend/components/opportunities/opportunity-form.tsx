@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { Lock } from "lucide-react";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEmployees } from "@/hooks/useEmployees";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useCurrencyRates } from "@/hooks/useCurrencyRates";
+import { useQuotes } from "@/hooks/useQuotes";
 import { CURRENCIES } from "@/types/currency";
 import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import type { OpportunityCreate, OpportunityUpdate, Opportunity } from "@/types/opportunity";
@@ -43,6 +45,14 @@ export function OpportunityForm({
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
   const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
+  
+  // Check if opportunity has active quote (for locking fields)
+  const opportunityId = 'id' in (initialData || {}) ? (initialData as Opportunity).id : undefined;
+  const { data: quotesData } = useQuotes({ 
+    opportunity_id: opportunityId || "", 
+    limit: 100 
+  }, { enabled: !!opportunityId });
+  const hasActiveQuote = quotesData?.items?.some(q => q.is_active) || false;
 
   const [formData, setFormData] = useState<OpportunityCreate>({
     name: initialData?.name || "",
@@ -177,7 +187,7 @@ export function OpportunityForm({
       newErrors.end_date = "End date must be after start date";
     }
     if (!formData.delivery_center_id) {
-      newErrors.delivery_center_id = "Delivery center is required";
+      newErrors.delivery_center_id = "Invoice center is required";
     }
     if (!formData.billing_term_id) {
       newErrors.billing_term_id = "Billing terms are required";
@@ -206,6 +216,15 @@ export function OpportunityForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      {hasActiveQuote && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-yellow-50 border border-yellow-200 rounded-md">
+          <Lock className="w-5 h-5 text-yellow-600" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold text-yellow-800">Opportunity Locked</p>
+            <p className="text-xs text-yellow-700">This opportunity is locked by an active quote. Some fields cannot be modified until the quote is deactivated.</p>
+          </div>
+        </div>
+      )}
       <div>
         <Label htmlFor="name">Opportunity Name *</Label>
         <Input
@@ -234,7 +253,9 @@ export function OpportunityForm({
               if (errors.account_id) setErrors({ ...errors, account_id: undefined });
             }}
             required
+            disabled={hasActiveQuote}
             className={errors.account_id ? "border-red-500" : ""}
+            title={hasActiveQuote ? "Cannot change account when quote is active" : ""}
           >
             <option value="">Select an account</option>
             {accountsData?.items.map((account) => (
@@ -298,7 +319,7 @@ export function OpportunityForm({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label htmlFor="delivery_center_id">Delivery Center *</Label>
+          <Label htmlFor="delivery_center_id">Invoice Center *</Label>
           <Select
             id="delivery_center_id"
             value={formData.delivery_center_id}
@@ -307,17 +328,18 @@ export function OpportunityForm({
               setFormData({ 
                 ...formData, 
                 delivery_center_id: e.target.value,
-                opportunity_owner_id: undefined, // Reset opportunity owner when delivery center changes
+                opportunity_owner_id: undefined, // Reset opportunity owner when invoice center changes
                 default_currency: selectedDc?.default_currency || formData.default_currency,
               });
               if (errors.delivery_center_id) setErrors({ ...errors, delivery_center_id: undefined });
             }}
             required
             className={errors.delivery_center_id ? "border-red-500" : ""}
-            disabled={deliveryCentersData === undefined}
+            disabled={deliveryCentersData === undefined || hasActiveQuote}
+            title={hasActiveQuote ? "Cannot change invoice center when quote is active" : ""}
           >
             <option value="">
-              {deliveryCentersData === undefined ? "Loading..." : "Select delivery center"}
+              {deliveryCentersData === undefined ? "Loading..." : "Select invoice center"}
             </option>
             {deliveryCentersData?.items.map((dc) => (
               <option key={dc.id} value={dc.id}>
@@ -337,6 +359,8 @@ export function OpportunityForm({
             onChange={(e) =>
               setFormData({ ...formData, default_currency: e.target.value })
             }
+            disabled={hasActiveQuote}
+            title={hasActiveQuote ? "Cannot change default currency when quote is active" : ""}
           >
             {CURRENCIES.map((c) => (
               <option key={c.value} value={c.value}>
@@ -359,7 +383,9 @@ export function OpportunityForm({
               if (errors.start_date) setErrors({ ...errors, start_date: undefined });
             }}
             required
+            disabled={hasActiveQuote}
             className={errors.start_date ? "border-red-500" : ""}
+            title={hasActiveQuote ? "Cannot change start date when quote is active" : ""}
           />
           {errors.start_date && (
             <p className="text-red-500 text-sm mt-1">{errors.start_date}</p>
@@ -375,7 +401,9 @@ export function OpportunityForm({
               setFormData({ ...formData, end_date: e.target.value || undefined });
               if (errors.end_date) setErrors({ ...errors, end_date: undefined });
             }}
+            disabled={hasActiveQuote}
             className={errors.end_date ? "border-red-500" : ""}
+            title={hasActiveQuote ? "Cannot change end date when quote is active" : ""}
           />
           {errors.end_date && (
             <p className="text-red-500 text-sm mt-1">{errors.end_date}</p>
@@ -407,7 +435,8 @@ export function OpportunityForm({
                 opportunity_owner_id: e.target.value || undefined,
               })
             }
-            disabled={!formData.delivery_center_id}
+            disabled={!formData.delivery_center_id || hasActiveQuote}
+            title={hasActiveQuote ? "Cannot change opportunity owner when quote is active" : !formData.delivery_center_id ? "Select delivery center first" : ""}
           >
             <option value="">
               {!formData.delivery_center_id 
@@ -433,8 +462,9 @@ export function OpportunityForm({
               if (errors.billing_term_id) setErrors({ ...errors, billing_term_id: undefined });
             }}
             required
-            disabled={billingTermsLoading}
+            disabled={billingTermsLoading || hasActiveQuote}
             className={errors.billing_term_id ? "border-red-500" : ""}
+            title={hasActiveQuote ? "Cannot change billing terms when quote is active" : ""}
           >
             <option value="">
               {billingTermsLoading ? "Loading..." : "Select billing terms"}

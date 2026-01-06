@@ -34,7 +34,7 @@ export function useQuotes(
   params?: {
     skip?: number;
     limit?: number;
-    engagement_id?: string;
+    opportunity_id?: string;
   },
   options?: Omit<UseQueryOptions<QuoteListResponse>, "queryKey" | "queryFn">
 ) {
@@ -88,8 +88,8 @@ export function useCreateQuote(
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(data.id) });
-      // Also invalidate engagements and estimates since lock status changed
-      queryClient.invalidateQueries({ queryKey: ["engagements"] });
+      // Also invalidate opportunities and estimates since lock status changed
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["estimates"] });
     },
     ...options,
@@ -124,7 +124,7 @@ export function useUpdateQuoteStatus(
 }
 
 /**
- * Deactivate quote and unlock engagement/estimates.
+ * Deactivate quote and unlock opportunity/estimates.
  */
 export function useDeactivateQuote(
   options?: UseMutationOptions<QuoteResponse, Error, string>
@@ -136,8 +136,8 @@ export function useDeactivateQuote(
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(data.id) });
-      // Also invalidate engagements and estimates since lock status changed
-      queryClient.invalidateQueries({ queryKey: ["engagements"] });
+      // Also invalidate opportunities and estimates since lock status changed
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["estimates"] });
     },
     ...options,

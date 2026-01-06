@@ -75,25 +75,9 @@ class EmployeeUpdate(BaseModel):
 
 
 class OpportunityReference(BaseModel):
-    """Opportunity reference (no association fields - fields are on engagements)."""
+    """Opportunity reference with association fields from estimate line items."""
     id: UUID
     name: str
-    role_id: Optional[UUID] = None
-    role_name: Optional[str] = None
-    start_date: Optional[str] = None  # ISO date string
-    end_date: Optional[str] = None  # ISO date string
-    project_rate: Optional[float] = None
-    delivery_center: Optional[str] = None
-    
-    class Config:
-        from_attributes = True
-
-
-class EngagementReference(BaseModel):
-    """Engagement reference with association fields."""
-    id: UUID
-    name: str
-    opportunity_id: UUID  # Include opportunity_id to group engagements by opportunity
     role_id: Optional[UUID] = None
     role_name: Optional[str] = None
     start_date: Optional[str] = None  # ISO date string
@@ -109,7 +93,6 @@ class EmployeeResponse(EmployeeBase):
     """Schema for employee response."""
     id: UUID
     opportunities: Optional[List[OpportunityReference]] = None
-    engagements: Optional[List[EngagementReference]] = None
     
     class Config:
         from_attributes = True

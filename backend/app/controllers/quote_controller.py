@@ -36,13 +36,13 @@ class QuoteController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
-        engagement_id: Optional[UUID] = None,
+        opportunity_id: Optional[UUID] = None,
     ) -> QuoteListResponse:
         """List quotes with optional filters."""
         quotes, total = await self.quote_service.list_quotes(
             skip=skip,
             limit=limit,
-            engagement_id=engagement_id,
+            opportunity_id=opportunity_id,
         )
         return QuoteListResponse(items=quotes, total=total)
     
@@ -55,6 +55,6 @@ class QuoteController(BaseController):
         return await self.quote_service.update_quote_status(quote_id, status_data)
     
     async def deactivate_quote(self, quote_id: UUID) -> Optional[QuoteResponse]:
-        """Deactivate quote and unlock engagement/estimates."""
+        """Deactivate quote and unlock opportunity/estimates."""
         return await self.quote_service.deactivate_quote(quote_id)
 

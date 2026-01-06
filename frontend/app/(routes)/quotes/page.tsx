@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
-import { useEngagements } from "@/hooks/useEngagements";
+import { useOpportunities } from "@/hooks/useOpportunities";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FileText, Lock, Unlock } from "lucide-react";
@@ -18,12 +18,12 @@ function QuotesPageContent() {
   const [skip] = useState(0);
   const [limit] = useState(1000);
   const [searchQuery, setSearchQuery] = useState("");
-  const engagementIdFilter = searchParams.get("engagement_id") || undefined;
+  const opportunityIdFilter = searchParams.get("opportunity_id") || undefined;
 
   const { data, isLoading, error, refetch } = useQuotes({
     skip,
     limit,
-    engagement_id: engagementIdFilter,
+    opportunity_id: opportunityIdFilter,
   });
   const deactivateQuote = useDeactivateQuote();
 
@@ -36,7 +36,7 @@ function QuotesPageContent() {
   });
 
   const handleDeactivate = async (quoteId: string, quoteNumber: string) => {
-    if (!confirm(`Are you sure you want to deactivate quote "${quoteNumber}"? This will unlock the engagement and estimates.`)) {
+    if (!confirm(`Are you sure you want to deactivate quote "${quoteNumber}"? This will unlock the opportunity and estimates.`)) {
       return;
     }
     
@@ -49,80 +49,80 @@ function QuotesPageContent() {
     }
   };
 
-  // Fetch engagements to get engagement names
-  const { data: engagementsData } = useEngagements({ limit: 1000 });
+  // Fetch opportunities to get opportunity names
+  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
 
-  // Group quotes by engagement
-  const groupedByEngagement = useMemo(() => {
-    if (!data?.items || !engagementsData?.items) return {};
+  // Group quotes by opportunity
+  const groupedByOpportunity = useMemo(() => {
+    if (!data?.items || !opportunitiesData?.items) return {};
 
     const grouped: Record<
       string,
       {
-        engagement: {
+        opportunity: {
           id: string;
           name: string;
-          opportunity_name?: string;
+          account_name?: string;
         };
         quotes: Quote[];
       }
     > = {};
 
-    const engagementsMap = new Map(
-      engagementsData.items.map((e) => [e.id, e])
+    const opportunitiesMap = new Map(
+      opportunitiesData.items.map((o) => [o.id, o])
     );
 
     data.items.forEach((quote) => {
-      const engagementId = quote.engagement_id;
-      if (!grouped[engagementId]) {
-        const engagement = engagementsMap.get(engagementId);
-        if (engagement) {
-          grouped[engagementId] = {
-            engagement: {
-              id: engagement.id,
-              name: engagement.name,
-              opportunity_name: engagement.opportunity_name,
+      const opportunityId = quote.opportunity_id;
+      if (!grouped[opportunityId]) {
+        const opportunity = opportunitiesMap.get(opportunityId);
+        if (opportunity) {
+          grouped[opportunityId] = {
+            opportunity: {
+              id: opportunity.id,
+              name: opportunity.name,
+              account_name: opportunity.account_name,
             },
             quotes: [],
           };
         }
       }
-      if (grouped[engagementId]) {
-        grouped[engagementId].quotes.push(quote);
+      if (grouped[opportunityId]) {
+        grouped[opportunityId].quotes.push(quote);
       }
     });
 
-    // Sort quotes within each engagement by version (newest first)
+    // Sort quotes within each opportunity by version (newest first)
     Object.values(grouped).forEach((group) => {
       group.quotes.sort((a, b) => b.version - a.version);
     });
 
     return grouped;
-  }, [data?.items, engagementsData?.items]);
+  }, [data?.items, opportunitiesData?.items]);
 
   // Filter grouped quotes by search query
   const filteredGroups = useMemo(() => {
     if (!searchQuery.trim()) {
-      return groupedByEngagement;
+      return groupedByOpportunity;
     }
 
     const query = searchQuery.toLowerCase();
-    const filtered: typeof groupedByEngagement = {};
+    const filtered: typeof groupedByOpportunity = {};
 
-    Object.entries(groupedByEngagement).forEach(([engagementId, group]) => {
+    Object.entries(groupedByOpportunity).forEach(([opportunityId, group]) => {
       const matchingQuotes = group.quotes.filter((quote) => {
         const quoteNumber = (quote.quote_number || "").toLowerCase();
         const status = (quote.status || "").toLowerCase();
-        const engagementName = (group.engagement.name || "").toLowerCase();
+        const opportunityName = (group.opportunity.name || "").toLowerCase();
         return (
           quoteNumber.includes(query) ||
           status.includes(query) ||
-          engagementName.includes(query)
+          opportunityName.includes(query)
         );
       });
 
       if (matchingQuotes.length > 0) {
-        filtered[engagementId] = {
+        filtered[opportunityId] = {
           ...group,
           quotes: matchingQuotes,
         };
@@ -130,7 +130,7 @@ function QuotesPageContent() {
     });
 
     return filtered;
-  }, [groupedByEngagement, searchQuery]);
+  }, [groupedByOpportunity, searchQuery]);
 
   if (isLoading) {
     return (
@@ -173,7 +173,7 @@ function QuotesPageContent() {
         <CardContent>
           <div className="mb-4">
             <Input
-              placeholder="Search quotes by number, status, or engagement..."
+              placeholder="Search quotes by number, status, or opportunity..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="max-w-md"
@@ -184,23 +184,23 @@ function QuotesPageContent() {
             <p className="text-gray-500">No quotes found.</p>
           ) : (
             <div className="space-y-6">
-              {Object.entries(filteredGroups).map(([engagementId, group]) => (
-                <div key={engagementId} className="border rounded-lg p-4">
+              {Object.entries(filteredGroups).map(([opportunityId, group]) => (
+                <div key={opportunityId} className="border rounded-lg p-4">
                   <div className="flex items-center justify-between mb-3">
                     <div>
                       <Link
-                        href={`/engagements/${engagementId}`}
+                        href={`/opportunities/${opportunityId}`}
                         className="text-lg font-semibold hover:underline"
                       >
-                        {highlightText(group.engagement.name, searchQuery)}
+                        {highlightText(group.opportunity.name, searchQuery)}
                       </Link>
-                      {group.engagement.opportunity_name && (
+                      {group.opportunity.account_name && (
                         <p className="text-sm text-gray-500">
-                          {group.engagement.opportunity_name}
+                          {group.opportunity.account_name}
                         </p>
                       )}
                     </div>
-                    <Link href={`/quotes/create?engagement_id=${engagementId}`}>
+                    <Link href={`/quotes/create?opportunity_id=${opportunityId}`}>
                       <Button size="sm">Create Quote</Button>
                     </Link>
                   </div>

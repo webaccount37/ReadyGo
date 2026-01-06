@@ -20,7 +20,7 @@ interface EstimateLineItemRowProps {
   weeks: Date[];
   currency: string;
   estimateId: string;
-  engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
+  opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
   onContextMenu?: (e: React.MouseEvent) => void;
   readOnly?: boolean;
 }
@@ -30,7 +30,7 @@ export function EstimateLineItemRow({
   weeks,
   currency,
   estimateId,
-  engagementDeliveryCenterId,
+  opportunityDeliveryCenterId,
   onContextMenu,
   readOnly = false,
 }: EstimateLineItemRowProps) {
@@ -127,8 +127,8 @@ export function EstimateLineItemRow({
   );
   const hoursSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Only show roles that have RoleRate associations with Engagement Invoice Center
-  const { data: rolesData } = useRolesForDeliveryCenter(engagementDeliveryCenterId);
+  // Only show roles that have RoleRate associations with Opportunity Invoice Center
+  const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: employeesData } = useEmployees({ limit: 100 });
 
@@ -420,7 +420,7 @@ export function EstimateLineItemRow({
   const prevEmployeeRef = useRef<string>(employeeValue);
   const lastPopulatedRoleDataRef = useRef<string>("");
 
-  // When Role is selected, update Cost and Rate based on Engagement Invoice Center & Role
+  // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role
   // IMPORTANT: Only auto-populate when role/employee changes, NOT when lineItem updates
   useEffect(() => {
     // Skip if we're currently updating to prevent feedback loops
@@ -438,16 +438,16 @@ export function EstimateLineItemRow({
       return; // Don't auto-populate if role didn't change
     }
 
-    // Need roleValue, engagement delivery center, and selectedRoleData to proceed
-    if (!roleValue || !engagementDeliveryCenterId || !selectedRoleData) {
+    // Need roleValue, opportunity delivery center, and selectedRoleData to proceed
+    if (!roleValue || !opportunityDeliveryCenterId || !selectedRoleData) {
       // If role changed but data not loaded yet, update ref
       prevRoleRef.current = roleValue;
       lastPopulatedRoleDataRef.current = ""; // Reset when role changes
       return;
     }
 
-    // Check if we've already populated for this role+engagement+currency combination
-    const currentKey = `${roleValue}-${engagementDeliveryCenterId}-${currency}`;
+    // Check if we've already populated for this role+opportunity+currency combination
+    const currentKey = `${roleValue}-${opportunityDeliveryCenterId}-${currency}`;
     
     // Reset the populated flag when role changes
     lastPopulatedRoleDataRef.current = "";
@@ -458,11 +458,11 @@ export function EstimateLineItemRow({
       return;
     }
 
-    // Find the role rate that matches engagement delivery center and currency
+    // Find the role rate that matches opportunity delivery center and currency
     // Compare as strings to handle UUID string comparison
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
-        String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
         rate.default_currency === currency
     );
 
@@ -498,7 +498,7 @@ export function EstimateLineItemRow({
 
     prevRoleRef.current = roleValue;
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [roleValue, employeeValue, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate]);
+  }, [roleValue, employeeValue, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate]);
 
   // When Employee is selected or cleared, update Cost accordingly
   useEffect(() => {
@@ -517,12 +517,12 @@ export function EstimateLineItemRow({
 
     // If employee was cleared (set to empty), revert Cost to Role-based cost
     if (!employeeValue) {
-      // Need role and engagement delivery center to get role-based cost
-      if (roleValue && engagementDeliveryCenterId && selectedRoleData) {
-        // Find the role rate that matches engagement delivery center and currency
+      // Need role and opportunity delivery center to get role-based cost
+      if (roleValue && opportunityDeliveryCenterId && selectedRoleData) {
+        // Find the role rate that matches opportunity delivery center and currency
         const matchingRate = selectedRoleData.role_rates?.find(
           (rate) =>
-            String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+            String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
             rate.default_currency === currency
         );
 
@@ -561,9 +561,9 @@ export function EstimateLineItemRow({
       ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
       : null;
     
-    // Compare Engagement Invoice Center with Employee Delivery Center
-    const centersMatch = engagementDeliveryCenterId && employeeDeliveryCenterId 
-      ? engagementDeliveryCenterId === employeeDeliveryCenterId
+    // Compare Opportunity Invoice Center with Employee Delivery Center
+    const centersMatch = opportunityDeliveryCenterId && employeeDeliveryCenterId 
+      ? opportunityDeliveryCenterId === employeeDeliveryCenterId
       : false;
 
     // Determine which rate to use and whether to convert currency
@@ -588,7 +588,7 @@ export function EstimateLineItemRow({
         needsConversion: employeeCurrency.toUpperCase() !== currency.toUpperCase(),
       });
       
-      // Convert to Engagement Invoice Center Currency if different
+      // Convert to Opportunity Invoice Center Currency if different
       if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
         const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
         console.log("Currency conversion result:", {
@@ -618,7 +618,7 @@ export function EstimateLineItemRow({
     handleFieldUpdate("cost", newCost, lineItem.cost || "0");
 
     prevEmployeeRef.current = employeeValue;
-  }, [employeeValue, roleValue, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue]);
+  }, [employeeValue, roleValue, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     if (readOnly) {
@@ -697,7 +697,7 @@ export function EstimateLineItemRow({
               const newValue = e.target.value;
               setDeliveryCenterValue(newValue);
               // Payable Center (delivery_center_id) can be updated independently
-              // Backend will handle it using current role_id and Engagement Invoice Center for rate lookup
+              // Backend will handle it using current role_id and Opportunity Invoice Center for rate lookup
               handleFieldUpdate(
                 "delivery_center_id",
                 newValue,

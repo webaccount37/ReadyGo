@@ -9,15 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.base_service import BaseService
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
-from app.db.repositories.engagement_repository import EngagementRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
 from app.db.repositories.role_rate_repository import RoleRateRepository
-from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse, OpportunityReference, EngagementReference
-from app.schemas.relationships import LinkEmployeesToOpportunityRequest, LinkEmployeesToEngagementRequest
+from app.schemas.employee import EmployeeCreate, EmployeeUpdate, EmployeeResponse, OpportunityReference
+from app.schemas.relationships import LinkEmployeesToOpportunityRequest
 from app.models.employee import Employee
 from app.models.estimate import Estimate, EstimateLineItem
-from app.models.engagement import Engagement
 from app.models.role_rate import RoleRate
 from sqlalchemy import select, and_, func, update
 from uuid import UUID
@@ -32,7 +30,6 @@ class EmployeeService(BaseService):
         self.session = session
         self.employee_repo = EmployeeRepository(session)
         self.opportunity_repo = OpportunityRepository(session)
-        self.engagement_repo = EngagementRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.line_item_repo = EstimateLineItemRepository(session)
         self.role_rate_repo = RoleRateRepository(session)
@@ -57,7 +54,7 @@ class EmployeeService(BaseService):
         return await self._employee_to_response(employee, include_relationships=False)
     
     async def get_employee_with_relationships(self, employee_id: UUID) -> Optional[EmployeeResponse]:
-        """Get employee with related opportunities and engagements."""
+        """Get employee with related opportunities."""
         import logging
         logger = logging.getLogger(__name__)
         
@@ -167,12 +164,11 @@ class EmployeeService(BaseService):
         result = await self.session.execute(
             select(EstimateLineItem)
             .options(
-                selectinload(EstimateLineItem.estimate).selectinload(Estimate.engagement),
+                selectinload(EstimateLineItem.estimate).selectinload(Estimate.opportunity),
                 selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
                 selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center)
             )
             .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
-            .join(Engagement, Engagement.id == Estimate.engagement_id)
             .where(
                 and_(
                     EstimateLineItem.employee_id == employee_id,
@@ -185,21 +181,14 @@ class EmployeeService(BaseService):
         opportunities_dict = {}  # opportunity_id -> opportunity data
         
         for li in line_items:
-            # Get engagement and opportunity from loaded relationships
-            if not li.estimate or not li.estimate.engagement:
+            # Get opportunity from loaded relationship
+            if not li.estimate or not li.estimate.opportunity:
                 continue
             
-            engagement = li.estimate.engagement
-            if not engagement.opportunity_id:
-                continue
-            
-            opportunity_id = str(engagement.opportunity_id)
+            opportunity = li.estimate.opportunity
+            opportunity_id = str(opportunity.id)
             
             if opportunity_id not in opportunities_dict:
-                opportunity = await self.opportunity_repo.get(engagement.opportunity_id)
-                if not opportunity:
-                    continue
-                
                 # Get role and delivery center from role_rate
                 role_id = None
                 role_name = None
@@ -224,72 +213,6 @@ class EmployeeService(BaseService):
                 }
         
         return list(opportunities_dict.values())
-    
-    async def _get_releases_from_active_estimates(self, employee_id: UUID) -> List[dict]:
-        """Get releases from active estimate line items for an employee."""
-        # Get all active estimates with line items for this employee
-        from sqlalchemy.orm import selectinload
-        from app.models.role_rate import RoleRate
-        
-        result = await self.session.execute(
-            select(EstimateLineItem)
-            .options(
-                selectinload(EstimateLineItem.estimate).selectinload(Estimate.engagement),
-                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
-                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center)
-            )
-            .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
-            .where(
-                and_(
-                    EstimateLineItem.employee_id == employee_id,
-                    Estimate.active_version == True
-                )
-            )
-        )
-        line_items = result.scalars().all()
-        
-        engagements_dict = {}  # engagement_id -> engagement data
-        
-        for li in line_items:
-            # Get engagement from loaded relationship
-            if not li.estimate or not li.estimate.engagement:
-                continue
-            
-            engagement = li.estimate.engagement
-            engagement_id = str(engagement.id)
-            
-            # Always update the engagement entry to get the most recent line item data
-            # Get role and delivery center from role_rate
-            role_id = None
-            role_name = None
-            delivery_center_code = None
-            
-            if li.role_rate:
-                if li.role_rate.role:
-                    role_id = str(li.role_rate.role.id)
-                    role_name = li.role_rate.role.role_name
-                if li.role_rate.delivery_center:
-                    delivery_center_code = li.role_rate.delivery_center.code
-            
-            # Use the first line item's dates/rates
-            if engagement_id not in engagements_dict:
-                # Skip engagements without opportunity_id (shouldn't happen, but be safe)
-                if not engagement.opportunity_id:
-                    continue
-                    
-                engagements_dict[engagement_id] = {
-                    "id": engagement_id,  # Pydantic will convert string to UUID
-                    "name": engagement.name,
-                    "opportunity_id": str(engagement.opportunity_id),  # Pydantic will convert string to UUID
-                    "role_id": role_id,  # Already a string or None, Pydantic will convert to UUID if not None
-                    "role_name": role_name,
-                    "start_date": li.start_date.isoformat() if li.start_date else None,
-                    "end_date": li.end_date.isoformat() if li.end_date else None,
-                    "project_rate": float(li.rate) if li.rate else None,
-                    "delivery_center": delivery_center_code,
-                }
-        
-        return list(engagements_dict.values())
     
     async def _employee_to_response(self, employee, include_relationships: bool) -> EmployeeResponse:
         """Build EmployeeResponse from model with eager-loaded relationships."""
@@ -317,14 +240,11 @@ class EmployeeService(BaseService):
         }
 
         if include_relationships:
-            # Build opportunities and engagements from active estimate line items
+            # Build opportunities from active estimate line items
             opportunities = await self._get_opportunities_from_active_estimates(employee.id)
-            engagements = await self._get_releases_from_active_estimates(employee.id)
             base["opportunities"] = opportunities
-            base["engagements"] = engagements
         else:
             base["opportunities"] = []
-            base["engagements"] = []
 
         # Validate and return response
         try:
@@ -336,7 +256,7 @@ class EmployeeService(BaseService):
             logger.error(f"Error validating employee response: {e}")
             logger.error(f"Base dict: {base}")
             logger.error(f"Opportunities: {base.get('opportunities', [])}")
-            logger.error(f"Engagements: {base.get('engagements', [])}")
+            logger.error(f"Opportunities: {base.get('opportunities', [])}")
             raise
     
     async def _get_or_create_role_rate(self, role_id: UUID, delivery_center_id: UUID, currency: str) -> RoleRate:
@@ -367,13 +287,13 @@ class EmployeeService(BaseService):
         await self.session.flush()
         return role_rate
     
-    async def _get_or_create_active_estimate(self, engagement_id: UUID, currency: str = "USD") -> Estimate:
-        """Get or create an active estimate for an engagement."""
-        # First check if an "INITIAL" estimate exists (created when engagement was created)
+    async def _get_or_create_active_estimate(self, opportunity_id: UUID, currency: str = "USD") -> Estimate:
+        """Get or create an active estimate for an opportunity."""
+        # First check if an "INITIAL" estimate exists (created when opportunity was created)
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
-                    Estimate.engagement_id == engagement_id,
+                    Estimate.opportunity_id == opportunity_id,
                     Estimate.name == "INITIAL"
                 )
             )
@@ -388,7 +308,7 @@ class EmployeeService(BaseService):
                     update(Estimate)
                     .where(
                         and_(
-                            Estimate.engagement_id == engagement_id,
+                            Estimate.opportunity_id == opportunity_id,
                             Estimate.active_version == True
                         )
                     )
@@ -403,7 +323,7 @@ class EmployeeService(BaseService):
         result = await self.session.execute(
             select(Estimate).where(
                 and_(
-                    Estimate.engagement_id == engagement_id,
+                    Estimate.opportunity_id == opportunity_id,
                     Estimate.active_version == True
                 )
             )
@@ -413,17 +333,17 @@ class EmployeeService(BaseService):
         if active_estimate:
             return active_estimate
         
-        # Create a new INITIAL estimate (shouldn't happen if engagement was created properly, but handle it)
-        engagement = await self.engagement_repo.get(engagement_id)
-        if not engagement:
-            raise ValueError(f"Engagement {engagement_id} not found")
+        # Create a new INITIAL estimate (shouldn't happen if opportunity was created properly, but handle it)
+        opportunity = await self.opportunity_repo.get(opportunity_id)
+        if not opportunity:
+            raise ValueError(f"Opportunity {opportunity_id} not found")
         
-        # Deactivate any other estimates for this engagement (shouldn't be any, but safety check)
+        # Deactivate any other estimates for this opportunity (shouldn't be any, but safety check)
         await self.session.execute(
             update(Estimate)
             .where(
                 and_(
-                    Estimate.engagement_id == engagement_id,
+                    Estimate.opportunity_id == opportunity_id,
                     Estimate.active_version == True
                 )
             )
@@ -431,7 +351,7 @@ class EmployeeService(BaseService):
         )
         
         estimate = Estimate(
-            engagement_id=engagement_id,
+            opportunity_id=opportunity_id,
             name="INITIAL",
             active_version=True
         )
@@ -444,15 +364,13 @@ class EmployeeService(BaseService):
         opportunity_id: UUID,
         request: LinkEmployeesToOpportunityRequest,
     ) -> bool:
-        """Link employees to an opportunity and engagements by creating estimate line items."""
+        """Link employees to an opportunity by creating estimate line items."""
         import logging
-        from sqlalchemy import select, update
+        from sqlalchemy import select, func
         from app.db.repositories.role_repository import RoleRepository
-        from app.db.repositories.engagement_repository import EngagementRepository
+        from app.db.repositories.quote_repository import QuoteRepository
         from app.models.delivery_center import DeliveryCenter as DeliveryCenterModel
-        from app.models.estimate import Estimate
         from app.models.estimate import EstimateLineItem
-        from datetime import date
         from decimal import Decimal
         
         logger = logging.getLogger(__name__)
@@ -463,122 +381,119 @@ class EmployeeService(BaseService):
                 logger.warning(f"Opportunity {opportunity_id} not found")
                 return False
             
+            # Check if opportunity has active quote (lock check)
+            quote_repo = QuoteRepository(self.session)
+            active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity_id)
+            if active_quote:
+                raise ValueError(f"Opportunity is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
+            
+            # Validate that opportunity has delivery_center_id (Invoice Center) - required for role rate lookup
+            if not opportunity.delivery_center_id:
+                raise ValueError(f"Opportunity {opportunity_id} must have delivery_center_id (Invoice Center) set before linking employees")
+            
             role_repo = RoleRepository(self.session)
-            engagement_repo = EngagementRepository(self.session)
             line_items_created = 0
             
-            # Process each engagement in the request
-            for engagement_data in request.engagements:
-                engagement = await engagement_repo.get(engagement_data.engagement_id)
-                if not engagement:
-                    raise ValueError(f"Engagement {engagement_data.engagement_id} not found")
-                if engagement.opportunity_id != opportunity_id:
-                    raise ValueError(f"Engagement {engagement_data.engagement_id} does not belong to opportunity {opportunity_id}")
-                
-                # Validate that engagement has delivery_center_id (Invoice Center) - required for role rate lookup
-                if not engagement.delivery_center_id:
-                    raise ValueError(f"Engagement {engagement_data.engagement_id} must have delivery_center_id (Invoice Center) set before linking employees")
-                
-                # Verify role exists
-                role = await role_repo.get(engagement_data.role_id)
-                if not role:
-                    raise ValueError(f"Role {engagement_data.role_id} does not exist")
-                
-                # Look up Payable Center by code (reference-only field)
-                payable_center_result = await self.session.execute(
-                    select(DeliveryCenterModel).where(DeliveryCenterModel.code == engagement_data.delivery_center)
-                )
-                payable_center = payable_center_result.scalar_one_or_none()
-                if not payable_center:
-                    raise ValueError(f"Payable Center with code '{engagement_data.delivery_center}' not found")
-                
-                # Get or create active estimate for this engagement
-                estimate = await self._get_or_create_active_estimate(engagement_data.engagement_id, engagement.default_currency or "USD")
-                
-                # Get or create role rate using Engagement Invoice Center (delivery_center_id), not Payable Center
-                currency = engagement.default_currency or "USD"
-                role_rate = await self._get_or_create_role_rate(
-                    engagement_data.role_id,
-                    engagement.delivery_center_id,  # Use Engagement Invoice Center for rate lookup
-                    currency
-                )
-                
-                # Get existing line items for this employee/engagement combination
-                existing_line_items_result = await self.session.execute(
-                    select(EstimateLineItem).where(
-                        and_(
-                            EstimateLineItem.estimate_id == estimate.id,
-                            EstimateLineItem.employee_id.in_(request.employee_ids)
-                        )
+            # Verify role exists
+            role = await role_repo.get(request.role_id)
+            if not role:
+                raise ValueError(f"Role {request.role_id} does not exist")
+            
+            # Look up Payable Center by code (reference-only field)
+            payable_center_result = await self.session.execute(
+                select(DeliveryCenterModel).where(DeliveryCenterModel.code == request.delivery_center)
+            )
+            payable_center = payable_center_result.scalar_one_or_none()
+            if not payable_center:
+                raise ValueError(f"Payable Center with code '{request.delivery_center}' not found")
+            
+            # Get or create active estimate for this opportunity
+            currency = opportunity.default_currency or "USD"
+            estimate = await self._get_or_create_active_estimate(opportunity_id, currency)
+            
+            # Get or create role rate using Opportunity Invoice Center (delivery_center_id), not Payable Center
+            role_rate = await self._get_or_create_role_rate(
+                request.role_id,
+                opportunity.delivery_center_id,  # Use Opportunity Invoice Center for rate lookup
+                currency
+            )
+            
+            # Get existing line items for this employee/opportunity combination
+            existing_line_items_result = await self.session.execute(
+                select(EstimateLineItem).where(
+                    and_(
+                        EstimateLineItem.estimate_id == estimate.id,
+                        EstimateLineItem.employee_id.in_(request.employee_ids)
                     )
                 )
-                existing_employee_ids = {li.employee_id for li in existing_line_items_result.scalars()}
+            )
+            existing_employee_ids = {li.employee_id for li in existing_line_items_result.scalars()}
+            
+            # Create line items for employees not already linked
+            for emp_id in request.employee_ids:
+                if emp_id in existing_employee_ids:
+                    logger.info(f"Employee {emp_id} already has line item in estimate {estimate.id}, skipping")
+                    continue
                 
-                # Create line items for employees not already linked
-                for emp_id in request.employee_ids:
-                    if emp_id in existing_employee_ids:
-                        logger.info(f"Employee {emp_id} already has line item in estimate {estimate.id}, skipping")
-                        continue
+                employee = await self.employee_repo.get(emp_id)
+                if not employee:
+                    logger.warning(f"Employee {emp_id} not found")
+                    continue
+                
+                # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
+                rate = Decimal(str(request.project_rate)) if request.project_rate else Decimal(str(employee.external_bill_rate))
+                
+                # Determine cost based on delivery center matching
+                if request.project_cost is not None:
+                    # Use project_cost from request if provided
+                    cost = Decimal(str(request.project_cost))
+                else:
+                    # Compare Opportunity Invoice Center with Employee Delivery Center
+                    centers_match = opportunity.delivery_center_id == employee.delivery_center_id if (opportunity.delivery_center_id and employee.delivery_center_id) else False
                     
-                    employee = await self.employee_repo.get(emp_id)
-                    if not employee:
-                        logger.warning(f"Employee {emp_id} not found")
-                        continue
-                    
-                    # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
-                    rate = Decimal(str(engagement_data.project_rate)) if engagement_data.project_rate else Decimal(str(employee.external_bill_rate))
-                    
-                    # Determine cost based on delivery center matching
-                    if engagement_data.project_cost is not None:
-                        # Use project_cost from request if provided
-                        cost = Decimal(str(engagement_data.project_cost))
+                    if centers_match:
+                        # Centers match: use internal_cost_rate with NO currency conversion
+                        cost = Decimal(str(employee.internal_cost_rate))
                     else:
-                        # Compare Engagement Invoice Center with Employee Delivery Center
-                        centers_match = engagement.delivery_center_id == employee.delivery_center_id if (engagement.delivery_center_id and employee.delivery_center_id) else False
+                        # Centers don't match: use internal_bill_rate with currency conversion
+                        employee_cost = Decimal(str(employee.internal_bill_rate))
+                        employee_currency = employee.default_currency or "USD"
                         
-                        if centers_match:
-                            # Centers match: use internal_cost_rate with NO currency conversion
-                            cost = Decimal(str(employee.internal_cost_rate))
+                        # Convert to Opportunity Invoice Center Currency if different
+                        if employee_currency.upper() != currency.upper():
+                            cost_decimal = await convert_currency(
+                                float(employee_cost),
+                                employee_currency,
+                                currency,
+                                self.session
+                            )
+                            cost = Decimal(str(cost_decimal))
                         else:
-                            # Centers don't match: use internal_bill_rate with currency conversion
-                            employee_cost = Decimal(str(employee.internal_bill_rate))
-                            employee_currency = employee.default_currency or "USD"
-                            
-                            # Convert to Engagement Invoice Center Currency if different
-                            if employee_currency.upper() != currency.upper():
-                                cost_decimal = await convert_currency(
-                                    float(employee_cost),
-                                    employee_currency,
-                                    currency,
-                                    self.session
-                                )
-                                cost = Decimal(str(cost_decimal))
-                            else:
-                                cost = employee_cost
-                    
-                    # Get max row_order
-                    max_order_result = await self.session.execute(
-                        select(func.max(EstimateLineItem.row_order))
-                        .where(EstimateLineItem.estimate_id == estimate.id)
-                    )
-                    max_order = max_order_result.scalar_one_or_none() or -1
-                    
-                    # Create line item
-                    line_item = EstimateLineItem(
-                        estimate_id=estimate.id,
-                        role_rates_id=role_rate.id,
-                        payable_center_id=payable_center.id,  # Payable Center (reference only)
-                        employee_id=emp_id,
-                        rate=rate,
-                        cost=cost,
-                        currency=currency,
-                        start_date=engagement_data.start_date,
-                        end_date=engagement_data.end_date,
-                        row_order=max_order + 1,
-                    )
-                    self.session.add(line_item)
-                    line_items_created += 1
-                    logger.info(f"Creating estimate line item: employee_id={emp_id}, engagement_id={engagement_data.engagement_id}, role_rates_id={role_rate.id}")
+                            cost = employee_cost
+                
+                # Get max row_order
+                max_order_result = await self.session.execute(
+                    select(func.max(EstimateLineItem.row_order))
+                    .where(EstimateLineItem.estimate_id == estimate.id)
+                )
+                max_order = max_order_result.scalar_one_or_none() or -1
+                
+                # Create line item
+                line_item = EstimateLineItem(
+                    estimate_id=estimate.id,
+                    role_rates_id=role_rate.id,
+                    payable_center_id=payable_center.id,  # Payable Center (reference only)
+                    employee_id=emp_id,
+                    rate=rate,
+                    cost=cost,
+                    currency=currency,
+                    start_date=request.start_date,
+                    end_date=request.end_date,
+                    row_order=max_order + 1,
+                )
+                self.session.add(line_item)
+                line_items_created += 1
+                logger.info(f"Creating estimate line item: employee_id={emp_id}, opportunity_id={opportunity_id}, role_rates_id={role_rate.id}")
             
             if line_items_created == 0:
                 logger.warning(f"No new line items created - all employees already linked")
@@ -608,41 +523,31 @@ class EmployeeService(BaseService):
         """Unlink employees from an opportunity by removing estimate line items."""
         from sqlalchemy import select
         from app.models.estimate import Estimate
-        from app.models.release import Release
         
-        # Get all engagements for this opportunity
-        from app.models.engagement import Engagement
-        engagements_result = await self.session.execute(
-            select(Engagement).where(Engagement.opportunity_id == opportunity_id)
+        # Get active estimate for this opportunity
+        estimate_result = await self.session.execute(
+            select(Estimate).where(
+                and_(
+                    Estimate.opportunity_id == opportunity_id,
+                    Estimate.active_version == True
+                )
+            )
         )
-        engagements = engagements_result.scalars().all()
+        active_estimate = estimate_result.scalar_one_or_none()
         
-        # Delete line items from active estimates for these engagements
-        for engagement in engagements:
-            # Get active estimate
-            estimate_result = await self.session.execute(
-                select(Estimate).where(
+        if active_estimate:
+            # Delete line items for these employees
+            line_items_result = await self.session.execute(
+                select(EstimateLineItem).where(
                     and_(
-                        Estimate.engagement_id == engagement.id,
-                        Estimate.active_version == True
+                        EstimateLineItem.estimate_id == active_estimate.id,
+                        EstimateLineItem.employee_id.in_(employee_ids)
                     )
                 )
             )
-            active_estimate = estimate_result.scalar_one_or_none()
-            
-            if active_estimate:
-                # Delete line items for these employees
-                line_items_result = await self.session.execute(
-                    select(EstimateLineItem).where(
-                        and_(
-                            EstimateLineItem.estimate_id == active_estimate.id,
-                            EstimateLineItem.employee_id.in_(employee_ids)
-                        )
-                    )
-                )
-                line_items = line_items_result.scalars().all()
-                for li in line_items:
-                    await self.session.delete(li)
+            line_items = line_items_result.scalars().all()
+            for li in line_items:
+                await self.session.delete(li)
         
         await self.session.commit()
         return True
@@ -671,189 +576,3 @@ class EmployeeService(BaseService):
         await self.session.flush()
         return dc
     
-    async def link_employees_to_engagement(
-        self,
-        engagement_id: UUID,
-        request: LinkEmployeesToEngagementRequest,
-    ) -> bool:
-        """Link employees to an engagement by creating estimate line items."""
-        import logging
-        from sqlalchemy import select, func
-        from app.models.delivery_center import DeliveryCenter as DeliveryCenterModel
-        from app.db.repositories.role_repository import RoleRepository
-        from app.db.repositories.quote_repository import QuoteRepository
-        from decimal import Decimal
-        
-        logger = logging.getLogger(__name__)
-        
-        engagement = await self.engagement_repo.get(engagement_id)
-        if not engagement:
-            return False
-        
-        # Check if engagement has active quote (lock check)
-        quote_repo = QuoteRepository(self.session)
-        active_quote = await quote_repo.get_active_quote_by_engagement(engagement_id)
-        if active_quote:
-            raise ValueError(f"Engagement is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
-        
-        # Validate that engagement has delivery_center_id (Invoice Center) - required for role rate lookup
-        if not engagement.delivery_center_id:
-            raise ValueError(f"Engagement {engagement_id} must have delivery_center_id (Invoice Center) set before linking employees")
-        
-        # Look up Payable Center by code (reference-only field)
-        payable_center_result = await self.session.execute(
-            select(DeliveryCenterModel).where(DeliveryCenterModel.code == request.delivery_center)
-        )
-        payable_center = payable_center_result.scalar_one_or_none()
-        if not payable_center:
-            all_dc_result = await self.session.execute(select(DeliveryCenterModel))
-            all_dcs = list(all_dc_result.scalars())
-            available_codes = [dc.code for dc in all_dcs]
-            raise ValueError(f"Payable Center with code '{request.delivery_center}' not found. Available codes: {available_codes}")
-        
-        # Verify role exists
-        role_repo = RoleRepository(self.session)
-        role = await role_repo.get(request.role_id)
-        if not role:
-            raise ValueError(f"Role {request.role_id} not found")
-        
-        # Get or create active estimate for this engagement
-        currency = engagement.default_currency or "USD"
-        estimate = await self._get_or_create_active_estimate(engagement_id, currency)
-        
-        # Get or create role rate using Engagement Invoice Center (delivery_center_id), not Payable Center
-        role_rate = await self._get_or_create_role_rate(
-            request.role_id,
-            engagement.delivery_center_id,  # Use Engagement Invoice Center for rate lookup
-            currency
-        )
-        
-        # Get existing line items for this employee/engagement combination
-        existing_line_items_result = await self.session.execute(
-            select(EstimateLineItem).where(
-                and_(
-                    EstimateLineItem.estimate_id == estimate.id,
-                    EstimateLineItem.employee_id.in_(request.employee_ids)
-                )
-            )
-        )
-        existing_employee_ids = {li.employee_id for li in existing_line_items_result.scalars()}
-        
-        # Create line items for employees not already linked
-        line_items_created = 0
-        for emp_id in request.employee_ids:
-            if emp_id in existing_employee_ids:
-                logger.info(f"Employee {emp_id} already has line item in estimate {estimate.id}, skipping")
-                continue
-            
-            employee = await self.employee_repo.get(emp_id)
-            if not employee:
-                logger.warning(f"Employee {emp_id} not found")
-                continue
-            
-            # Get rates - use project_rate and project_cost from request, or employee rates, or role_rate rates
-            rate = Decimal(str(request.project_rate)) if request.project_rate else Decimal(str(employee.external_bill_rate))
-            
-            # Determine cost based on delivery center matching
-            if request.project_cost is not None:
-                # Use project_cost from request if provided
-                cost = Decimal(str(request.project_cost))
-            else:
-                # Compare Engagement Invoice Center with Employee Delivery Center
-                centers_match = engagement.delivery_center_id == employee.delivery_center_id if (engagement.delivery_center_id and employee.delivery_center_id) else False
-                
-                if centers_match:
-                    # Centers match: use internal_cost_rate with NO currency conversion
-                    cost = Decimal(str(employee.internal_cost_rate))
-                else:
-                    # Centers don't match: use internal_bill_rate with currency conversion
-                    employee_cost = Decimal(str(employee.internal_bill_rate))
-                    employee_currency = employee.default_currency or "USD"
-                    
-                    # Convert to Engagement Invoice Center Currency if different
-                    if employee_currency.upper() != currency.upper():
-                        cost_decimal = await convert_currency(
-                            float(employee_cost),
-                            employee_currency,
-                            currency,
-                            self.session
-                        )
-                        cost = Decimal(str(cost_decimal))
-                    else:
-                        cost = employee_cost
-            
-            # Get max row_order
-            max_order_result = await self.session.execute(
-                select(func.max(EstimateLineItem.row_order))
-                .where(EstimateLineItem.estimate_id == estimate.id)
-            )
-            max_order = max_order_result.scalar_one_or_none() or -1
-            
-            # Create line item
-            line_item = EstimateLineItem(
-                estimate_id=estimate.id,
-                role_rates_id=role_rate.id,
-                payable_center_id=payable_center.id,  # Payable Center (reference only)
-                employee_id=emp_id,
-                rate=rate,
-                cost=cost,
-                currency=currency,
-                start_date=request.start_date,
-                end_date=request.end_date,
-                row_order=max_order + 1,
-            )
-            self.session.add(line_item)
-            line_items_created += 1
-            logger.info(f"Creating estimate line item: employee_id={emp_id}, engagement_id={engagement_id}, role_rates_id={role_rate.id}")
-        
-        if line_items_created > 0:
-            await self.session.flush()
-            await self.session.commit()
-            logger.info(f"Successfully committed {line_items_created} estimate line items")
-        
-        return True
-    
-    async def unlink_employees_from_engagement(
-        self,
-        engagement_id: UUID,
-        employee_ids: List[UUID],
-    ) -> bool:
-        """Unlink employees from an engagement by removing estimate line items."""
-        from sqlalchemy import select
-        from app.models.estimate import Estimate
-        from app.db.repositories.quote_repository import QuoteRepository
-        
-        # Check if engagement has active quote (lock check)
-        quote_repo = QuoteRepository(self.session)
-        active_quote = await quote_repo.get_active_quote_by_engagement(engagement_id)
-        if active_quote:
-            raise ValueError(f"Engagement is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
-        
-        # Get active estimate for this engagement
-        estimate_result = await self.session.execute(
-            select(Estimate).where(
-                and_(
-                    Estimate.engagement_id == engagement_id,
-                    Estimate.active_version == True
-                )
-            )
-        )
-        active_estimate = estimate_result.scalar_one_or_none()
-        
-        if active_estimate:
-            # Delete line items for these employees
-            line_items_result = await self.session.execute(
-                select(EstimateLineItem).where(
-                    and_(
-                        EstimateLineItem.estimate_id == active_estimate.id,
-                        EstimateLineItem.employee_id.in_(employee_ids)
-                    )
-                )
-            )
-            line_items = line_items_result.scalars().all()
-            for li in line_items:
-                await self.session.delete(li)
-        
-        await self.session.commit()
-        return True
-

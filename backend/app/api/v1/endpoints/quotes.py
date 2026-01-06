@@ -41,7 +41,7 @@ async def create_quote(
 async def list_quotes(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    engagement_id: Optional[UUID] = Query(None),
+    opportunity_id: Optional[UUID] = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> QuoteListResponse:
     """List quotes with optional filters."""
@@ -49,7 +49,7 @@ async def list_quotes(
     return await controller.list_quotes(
         skip=skip,
         limit=limit,
-        engagement_id=engagement_id,
+        opportunity_id=opportunity_id,
     )
 
 
@@ -107,7 +107,7 @@ async def deactivate_quote(
     quote_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> QuoteResponse:
-    """Deactivate quote and unlock engagement/estimates."""
+    """Deactivate quote and unlock opportunity/estimates."""
     controller = QuoteController(db)
     quote = await controller.deactivate_quote(quote_id)
     if not quote:

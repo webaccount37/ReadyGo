@@ -21,10 +21,10 @@ from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
 from app.db.repositories.estimate_phase_repository import EstimatePhaseRepository
 from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
-from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.models.quote import Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus
 from app.models.estimate import Estimate
-from app.models.engagement import Engagement
+from app.models.opportunity import Opportunity
 from app.schemas.quote import (
     QuoteCreate, QuoteUpdate, QuoteResponse, QuoteDetailResponse, QuoteListResponse,
     QuoteStatusUpdate, QuoteLineItemResponse, QuotePhaseResponse, QuoteWeeklyHoursResponse,
@@ -44,7 +44,7 @@ class QuoteService(BaseService):
         self.estimate_line_item_repo = EstimateLineItemRepository(session)
         self.estimate_phase_repo = EstimatePhaseRepository(session)
         self.estimate_weekly_hours_repo = EstimateWeeklyHoursRepository(session)
-        self.engagement_repo = EngagementRepository(session)
+        self.opportunity_repo = OpportunityRepository(session)
     
     async def create_quote(self, quote_data: QuoteCreate, created_by: Optional[UUID] = None) -> QuoteResponse:
         """Create quote from estimate snapshot."""
@@ -56,33 +56,33 @@ class QuoteService(BaseService):
         if not estimate.active_version:
             raise ValueError("Can only create quotes from active estimates")
         
-        # Validate engagement exists
-        engagement = await self.engagement_repo.get(quote_data.engagement_id)
-        if not engagement:
-            raise ValueError("Engagement not found")
+        # Validate opportunity exists
+        opportunity = await self.opportunity_repo.get(quote_data.opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
         
-        if estimate.engagement_id != quote_data.engagement_id:
-            raise ValueError("Estimate does not belong to the specified engagement")
+        if estimate.opportunity_id != quote_data.opportunity_id:
+            raise ValueError("Estimate does not belong to the specified opportunity")
         
-        # Check if engagement already has active quote (deactivate if exists)
-        existing_active = await self.quote_repo.get_active_quote_by_engagement(quote_data.engagement_id)
+        # Check if opportunity already has active quote (deactivate if exists)
+        existing_active = await self.quote_repo.get_active_quote_by_opportunity(quote_data.opportunity_id)
         if existing_active:
-            await self.quote_repo.deactivate_all_by_engagement(quote_data.engagement_id)
-            # Unlock engagement and estimates
-            await self._unlock_engagement(quote_data.engagement_id)
-            await self._unlock_estimates(quote_data.engagement_id)
+            await self.quote_repo.deactivate_all_by_opportunity(quote_data.opportunity_id)
+            # Unlock opportunity and estimates
+            await self._unlock_opportunity(quote_data.opportunity_id)
+            await self._unlock_estimates(quote_data.opportunity_id)
         
         # Generate quote number and version
-        max_version = await self.quote_repo.get_max_version_by_engagement(quote_data.engagement_id)
+        max_version = await self.quote_repo.get_max_version_by_opportunity(quote_data.opportunity_id)
         next_version = max_version + 1
-        quote_number = f"QT-{quote_data.engagement_id}-{next_version}"
+        quote_number = f"QT-{quote_data.opportunity_id}-{next_version}"
         
-        # Snapshot engagement metadata
-        snapshot_data = await self._snapshot_engagement(quote_data.engagement_id)
+        # Snapshot opportunity metadata
+        snapshot_data = await self._snapshot_opportunity(quote_data.opportunity_id)
         
         # Create quote
         quote_dict = {
-            "engagement_id": quote_data.engagement_id,
+            "opportunity_id": quote_data.opportunity_id,
             "estimate_id": quote_data.estimate_id,
             "quote_number": quote_number,
             "version": next_version,
@@ -97,9 +97,9 @@ class QuoteService(BaseService):
         # Snapshot estimate data
         await self._snapshot_estimate(quote.id, quote_data.estimate_id)
         
-        # Lock engagement and estimates
-        await self._lock_engagement(quote_data.engagement_id)
-        await self._lock_estimates(quote_data.engagement_id)
+        # Lock opportunity and estimates
+        await self._lock_opportunity(quote_data.opportunity_id)
+        await self._lock_estimates(quote_data.opportunity_id)
         
         await self.session.commit()
         
@@ -151,12 +151,12 @@ class QuoteService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
-        engagement_id: Optional[UUID] = None,
+        opportunity_id: Optional[UUID] = None,
     ) -> Tuple[List[QuoteResponse], int]:
         """List quotes with filters."""
         filters = {}
-        if engagement_id:
-            filters["engagement_id"] = engagement_id
+        if opportunity_id:
+            filters["opportunity_id"] = opportunity_id
         
         quotes = await self.quote_repo.list(skip=skip, limit=limit, **filters)
         total = await self.quote_repo.count(**filters)
@@ -188,7 +188,7 @@ class QuoteService(BaseService):
         return await self._to_response(updated)
     
     async def deactivate_quote(self, quote_id: UUID) -> Optional[QuoteResponse]:
-        """Deactivate quote and unlock engagement/estimates."""
+        """Deactivate quote and unlock opportunity/estimates."""
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return None
@@ -202,9 +202,9 @@ class QuoteService(BaseService):
         
         updated = await self.quote_repo.update(quote_id, **update_dict)
         
-        # Unlock engagement and estimates
-        await self._unlock_engagement(quote.engagement_id)
-        await self._unlock_estimates(quote.engagement_id)
+        # Unlock opportunity and estimates
+        await self._unlock_opportunity(quote.opportunity_id)
+        await self._unlock_estimates(quote.opportunity_id)
         
         await self.session.commit()
         
@@ -259,53 +259,52 @@ class QuoteService(BaseService):
                             hours=weekly_hour.hours,
                         )
     
-    async def _snapshot_engagement(self, engagement_id: UUID) -> dict:
-        """Snapshot engagement metadata."""
-        engagement = await self.engagement_repo.get(engagement_id)
-        if not engagement:
-            raise ValueError("Engagement not found")
+    async def _snapshot_opportunity(self, opportunity_id: UUID) -> dict:
+        """Snapshot opportunity metadata."""
+        opportunity = await self.opportunity_repo.get(opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
         
         return {
-            "name": engagement.name,
-            "start_date": engagement.start_date.isoformat() if engagement.start_date else None,
-            "end_date": engagement.end_date.isoformat() if engagement.end_date else None,
-            "budget": str(engagement.budget) if engagement.budget else None,
-            "status": engagement.status.value if engagement.status else None,
-            "default_currency": engagement.default_currency,
-            "description": engagement.description,
+            "name": opportunity.name,
+            "start_date": opportunity.start_date.isoformat() if opportunity.start_date else None,
+            "end_date": opportunity.end_date.isoformat() if opportunity.end_date else None,
+            "status": opportunity.status.value if opportunity.status else None,
+            "default_currency": opportunity.default_currency,
+            "description": opportunity.description,
         }
     
-    async def _lock_engagement(self, engagement_id: UUID) -> None:
-        """Lock engagement (prevent updates)."""
+    async def _lock_opportunity(self, opportunity_id: UUID) -> None:
+        """Lock opportunity (prevent updates)."""
         # Locking is enforced at the service level by checking for active quotes
         # No database-level locking needed
         pass
     
-    async def _unlock_engagement(self, engagement_id: UUID) -> None:
-        """Unlock engagement (allow updates)."""
+    async def _unlock_opportunity(self, opportunity_id: UUID) -> None:
+        """Unlock opportunity (allow updates)."""
         # Unlocking is enforced at the service level
         pass
     
-    async def _lock_estimates(self, engagement_id: UUID) -> None:
-        """Lock all estimates for engagement (prevent updates)."""
+    async def _lock_estimates(self, opportunity_id: UUID) -> None:
+        """Lock all estimates for opportunity (prevent updates)."""
         # Locking is enforced at the service level by checking for active quotes
         # No database-level locking needed
         pass
     
-    async def _unlock_estimates(self, engagement_id: UUID) -> None:
-        """Unlock all estimates for engagement (allow updates)."""
+    async def _unlock_estimates(self, opportunity_id: UUID) -> None:
+        """Unlock all estimates for opportunity (allow updates)."""
         # Unlocking is enforced at the service level
         pass
     
-    async def check_active_quote(self, engagement_id: UUID) -> Optional[Quote]:
-        """Check if engagement has an active quote."""
-        return await self.quote_repo.get_active_quote_by_engagement(engagement_id)
+    async def check_active_quote(self, opportunity_id: UUID) -> Optional[Quote]:
+        """Check if opportunity has an active quote."""
+        return await self.quote_repo.get_active_quote_by_opportunity(opportunity_id)
     
     async def _to_response(self, quote: Quote) -> QuoteResponse:
         """Convert Quote model to QuoteResponse schema."""
         return QuoteResponse(
             id=quote.id,
-            engagement_id=quote.engagement_id,
+            opportunity_id=quote.opportunity_id,
             estimate_id=quote.estimate_id,
             quote_number=quote.quote_number,
             version=quote.version,
@@ -317,7 +316,7 @@ class QuoteService(BaseService):
             sent_date=quote.sent_date,
             notes=quote.notes,
             snapshot_data=quote.snapshot_data,
-            engagement_name=quote.engagement.name if quote.engagement else None,
+            opportunity_name=quote.opportunity.name if quote.opportunity else None,
             estimate_name=quote.estimate.name if quote.estimate else None,
         )
     

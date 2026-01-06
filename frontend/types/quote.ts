@@ -43,7 +43,7 @@ export interface QuoteLineItem {
 
 export interface Quote {
   id: string;
-  engagement_id: string;
+  opportunity_id: string;
   estimate_id: string;
   quote_number: string;
   version: number;
@@ -55,14 +55,14 @@ export interface Quote {
   sent_date?: string;
   notes?: string;
   snapshot_data?: Record<string, unknown>;
-  engagement_name?: string;
+  opportunity_name?: string;
   estimate_name?: string;
   line_items?: QuoteLineItem[];
   phases?: QuotePhase[];
 }
 
 export interface QuoteCreate {
-  engagement_id: string;
+  opportunity_id: string;
   estimate_id: string;
   notes?: string;
 }

@@ -161,7 +161,7 @@ class EstimateLineItemResponse(BaseModel):
 
 class EstimateBase(BaseModel):
     """Base estimate schema with common fields."""
-    engagement_id: UUID
+    opportunity_id: UUID
     name: Optional[str] = Field(None, min_length=0, max_length=255)  # Allow empty for auto-generation
     description: Optional[str] = Field(None, max_length=2000)
     active_version: bool = Field(default=False)
@@ -170,7 +170,7 @@ class EstimateBase(BaseModel):
 
 class EstimateCreate(BaseModel):
     """Schema for creating an estimate."""
-    engagement_id: UUID
+    opportunity_id: UUID
     name: Optional[str] = Field(None, min_length=0, max_length=255)  # Optional for auto-generation
     description: Optional[str] = Field(None, max_length=2000)
     active_version: Optional[bool] = Field(default=False)
@@ -188,9 +188,7 @@ class EstimateUpdate(BaseModel):
 class EstimateResponse(EstimateBase):
     """Schema for estimate response."""
     id: UUID
-    engagement_id: UUID
-    engagement_name: Optional[str] = None
-    opportunity_id: Optional[UUID] = None
+    opportunity_id: UUID
     opportunity_name: Optional[str] = None
     created_by: Optional[UUID] = None
     created_by_name: Optional[str] = None

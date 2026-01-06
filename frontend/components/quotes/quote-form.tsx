@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useCreateQuote } from "@/hooks/useQuotes";
-import { useEngagement, useEngagements } from "@/hooks/useEngagements";
+import { useOpportunity, useOpportunities } from "@/hooks/useOpportunities";
 import { useEstimates } from "@/hooks/useEstimates";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -16,24 +16,24 @@ export function QuoteForm() {
   const searchParams = useSearchParams();
   const createQuote = useCreateQuote();
   
-  const engagementIdParam = searchParams.get("engagement_id");
-  const [engagementId, setEngagementId] = useState<string>(engagementIdParam || "");
+  const opportunityIdParam = searchParams.get("opportunity_id");
+  const [opportunityId, setOpportunityId] = useState<string>(opportunityIdParam || "");
   const [estimateId, setEstimateId] = useState<string>("");
   const [notes, setNotes] = useState<string>("");
 
-  // Fetch all engagements for the dropdown
-  const { data: engagementsData } = useEngagements({ limit: 1000 });
+  // Fetch all opportunities for the dropdown
+  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
   
-  // Fetch selected engagement to get its active estimate
-  const { data: engagement } = useEngagement(engagementId, false, { enabled: !!engagementId });
+  // Fetch selected opportunity to get its active estimate
+  const { data: opportunity } = useOpportunity(opportunityId, false, { enabled: !!opportunityId });
   const { data: estimatesData } = useEstimates({
-    engagement_id: engagementId,
+    opportunity_id: opportunityId,
     limit: 100,
-  }, { enabled: !!engagementId });
+  }, { enabled: !!opportunityId });
 
-  // Set default estimate to active estimate when engagement changes
+  // Set default estimate to active estimate when opportunity changes
   useEffect(() => {
-    if (engagementId && estimatesData?.items) {
+    if (opportunityId && estimatesData?.items) {
       const activeEstimate = estimatesData.items.find((e) => e.active_version);
       if (activeEstimate) {
         setEstimateId(activeEstimate.id);
@@ -42,22 +42,22 @@ export function QuoteForm() {
         setEstimateId("");
       }
     } else {
-      // Reset estimate if no engagement selected
+      // Reset estimate if no opportunity selected
       setEstimateId("");
     }
-  }, [engagementId, estimatesData]);
+  }, [opportunityId, estimatesData]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!engagementId || !estimateId) {
-      alert("Please select an engagement and estimate");
+    if (!opportunityId || !estimateId) {
+      alert("Please select an opportunity and estimate");
       return;
     }
 
     try {
       const quoteData: QuoteCreate = {
-        engagement_id: engagementId,
+        opportunity_id: opportunityId,
         estimate_id: estimateId,
         notes: notes || undefined,
       };
@@ -78,24 +78,24 @@ export function QuoteForm() {
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <Label htmlFor="engagement_id">Engagement *</Label>
+            <Label htmlFor="opportunity_id">Opportunity *</Label>
             <Select
-              id="engagement_id"
-              value={engagementId}
-              onChange={(e) => setEngagementId(e.target.value)}
+              id="opportunity_id"
+              value={opportunityId}
+              onChange={(e) => setOpportunityId(e.target.value)}
               required
             >
-              <option value="">Select an engagement</option>
-              {engagementsData?.items?.map((eng) => (
-                <option key={eng.id} value={eng.id}>
-                  {eng.name}
-                  {eng.opportunity_name && ` - ${eng.opportunity_name}`}
+              <option value="">Select an opportunity</option>
+              {opportunitiesData?.items?.map((opp) => (
+                <option key={opp.id} value={opp.id}>
+                  {opp.name}
+                  {opp.account_name && ` - ${opp.account_name}`}
                 </option>
               ))}
             </Select>
-            {engagement && (
+            {opportunity && (
               <p className="text-sm text-gray-500 mt-1">
-                {engagement.opportunity_name && `Opportunity: ${engagement.opportunity_name}`}
+                {opportunity.account_name && `Account: ${opportunity.account_name}`}
               </p>
             )}
           </div>
@@ -105,14 +105,14 @@ export function QuoteForm() {
             {(() => {
               const activeEstimate = estimatesData?.items?.find((e) => e.active_version);
               
-              if (!engagementId) {
+              if (!opportunityId) {
                 return (
                   <select
                     id="estimate_id"
                     disabled
                     className="w-full border rounded px-3 py-2 bg-gray-100"
                   >
-                    <option value="">Select an engagement first</option>
+                    <option value="">Select an opportunity first</option>
                   </select>
                 );
               }
@@ -128,7 +128,7 @@ export function QuoteForm() {
                       <option value="">No active estimate found</option>
                     </select>
                     <p className="text-sm text-red-500 mt-1">
-                      This engagement does not have an active estimate. Please set an active estimate before creating a quote.
+                      This opportunity does not have an active estimate. Please set an active estimate before creating a quote.
                     </p>
                   </>
                 );
@@ -170,7 +170,7 @@ export function QuoteForm() {
           <div className="flex gap-2">
             <Button
               type="submit"
-              disabled={createQuote.isPending || !engagementId || !estimateId}
+              disabled={createQuote.isPending || !opportunityId || !estimateId}
             >
               {createQuote.isPending ? "Creating..." : "Create Quote"}
             </Button>

@@ -20,11 +20,11 @@ class QuoteRepository(BaseRepository[Quote]):
     
     def _base_query(self):
         """Base query with eager loading of relationships."""
-        from app.models.engagement import Engagement
+        from app.models.opportunity import Opportunity
         from app.models.estimate import Estimate
         
         return select(Quote).options(
-            selectinload(Quote.engagement).selectinload(Engagement.opportunity),
+            selectinload(Quote.opportunity).selectinload(Opportunity.account),
             selectinload(Quote.estimate),
             selectinload(Quote.created_by_employee),
         )
@@ -64,44 +64,44 @@ class QuoteRepository(BaseRepository[Quote]):
         result = await self.session.execute(query)
         return result.scalar_one()
     
-    async def get_active_quote_by_engagement(self, engagement_id: UUID) -> Optional[Quote]:
-        """Get active quote for an engagement."""
+    async def get_active_quote_by_opportunity(self, opportunity_id: UUID) -> Optional[Quote]:
+        """Get active quote for an opportunity."""
         query = self._base_query().where(
-            Quote.engagement_id == engagement_id,
+            Quote.opportunity_id == opportunity_id,
             Quote.is_active == True
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
-    async def list_by_engagement(
+    async def list_by_opportunity(
         self,
-        engagement_id: UUID,
+        opportunity_id: UUID,
         skip: int = 0,
         limit: int = 100,
     ) -> List[Quote]:
-        """List quotes by engagement."""
-        query = self._base_query().where(Quote.engagement_id == engagement_id)
+        """List quotes by opportunity."""
+        query = self._base_query().where(Quote.opportunity_id == opportunity_id)
         query = query.order_by(Quote.created_at.desc()).offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def deactivate_all_by_engagement(self, engagement_id: UUID) -> int:
-        """Deactivate all quotes for an engagement."""
+    async def deactivate_all_by_opportunity(self, opportunity_id: UUID) -> int:
+        """Deactivate all quotes for an opportunity."""
         from sqlalchemy import update
         
         result = await self.session.execute(
             update(Quote)
-            .where(Quote.engagement_id == engagement_id)
+            .where(Quote.opportunity_id == opportunity_id)
             .values(is_active=False)
         )
         await self.session.flush()
         return result.rowcount
     
-    async def get_max_version_by_engagement(self, engagement_id: UUID) -> int:
-        """Get the maximum version number for quotes of an engagement."""
+    async def get_max_version_by_opportunity(self, opportunity_id: UUID) -> int:
+        """Get the maximum version number for quotes of an opportunity."""
         result = await self.session.execute(
             select(func.max(Quote.version))
-            .where(Quote.engagement_id == engagement_id)
+            .where(Quote.opportunity_id == opportunity_id)
         )
         max_version = result.scalar_one_or_none()
         return max_version if max_version is not None else 0

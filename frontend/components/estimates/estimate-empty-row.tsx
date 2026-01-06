@@ -20,7 +20,7 @@ interface EstimateEmptyRowProps {
   currency: string;
   rowIndex: number;
   stableId: string; // Stable ID to prevent remounting
-  engagementDeliveryCenterId?: string; // Engagement Invoice Center (delivery_center_id)
+  opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
@@ -30,11 +30,11 @@ export function EstimateEmptyRow({
   currency,
   rowIndex: _rowIndex,
   stableId,
-  engagementDeliveryCenterId,
+  opportunityDeliveryCenterId,
   onContextMenu,
 }: EstimateEmptyRowProps) {
-  // Only show roles that have RoleRate associations with Engagement Invoice Center
-  const { data: rolesData } = useRolesForDeliveryCenter(engagementDeliveryCenterId);
+  // Only show roles that have RoleRate associations with Opportunity Invoice Center
+  const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: employeesData } = useEmployees({ limit: 100 });
   const createLineItem = useCreateLineItem();
@@ -79,7 +79,7 @@ export function EstimateEmptyRow({
     }
     return {
       role_id: "",
-      delivery_center_id: engagementDeliveryCenterId || "", // Always use Engagement Invoice Center (required)
+      delivery_center_id: opportunityDeliveryCenterId || "", // Always use Opportunity Invoice Center (required)
       employee_id: "",
       rate: "",
       cost: "",
@@ -132,7 +132,7 @@ export function EstimateEmptyRow({
   // Use String() comparison for cost/rate to handle string vs number differences
   const matchingExistingRecord = estimateDetail?.line_items?.find(item => 
     item.role_id === formData.role_id &&
-    item.delivery_center_id === engagementDeliveryCenterId &&
+    item.delivery_center_id === opportunityDeliveryCenterId &&
     String(item.cost) === String(formData.cost) &&
     String(item.rate) === String(formData.rate)
   );
@@ -304,7 +304,7 @@ export function EstimateEmptyRow({
         if (estimateDetail?.line_items) {
           const matchingItem = estimateDetail.line_items.find(item => 
             item.role_id === formData.role_id &&
-            item.delivery_center_id === engagementDeliveryCenterId &&
+            item.delivery_center_id === opportunityDeliveryCenterId &&
             item.cost === formData.cost &&
             item.rate === formData.rate
           );
@@ -326,7 +326,7 @@ export function EstimateEmptyRow({
         
         console.log("Checking if line item should be created:", {
           role_id: formData.role_id,
-          delivery_center_id: engagementDeliveryCenterId,
+          delivery_center_id: opportunityDeliveryCenterId,
           hasHours,
           hasRates,
           rate: formData.rate,
@@ -348,10 +348,10 @@ export function EstimateEmptyRow({
         setIsSaving(true);
         try {
           // Ensure rate and cost are always provided (backend requires them)
-          // delivery_center_id always comes from engagementDeliveryCenterId (required)
+          // delivery_center_id always comes from opportunityDeliveryCenterId (required)
           const createData: any = {
             role_id: formData.role_id,
-            delivery_center_id: engagementDeliveryCenterId, // Always use Engagement Invoice Center (required)
+            delivery_center_id: opportunityDeliveryCenterId, // Always use Opportunity Invoice Center (required)
             employee_id: formData.employee_id || undefined,
             rate: formData.rate || "0",
             cost: formData.cost || "0",
@@ -384,7 +384,7 @@ export function EstimateEmptyRow({
         }
       }
     }, 500); // 500ms debounce
-  }, [lineItemId, formData, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, engagementDeliveryCenterId, currency, weeklyHoursValues]);
+  }, [lineItemId, formData, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, opportunityDeliveryCenterId, currency, weeklyHoursValues]);
 
   // Track previous formData to detect what changed
   const prevFormDataRef = useRef<EstimateLineItemCreate>(formData);
@@ -488,7 +488,7 @@ export function EstimateEmptyRow({
   const prevEmployeeIdRef = useRef<string>(formData.employee_id || "");
   const lastPopulatedRoleDataRef = useRef<string>("");
 
-  // When Role is selected, update Cost and Rate based on Engagement Invoice Center & Role
+  // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role
   useEffect(() => {
     // Skip if we're currently saving, creating, or receiving backend updates
     if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
@@ -499,8 +499,8 @@ export function EstimateEmptyRow({
       return;
     }
 
-    // Need role_id, engagement delivery center, and selectedRoleData to proceed
-    if (!formData.role_id || !engagementDeliveryCenterId || !selectedRoleData) {
+    // Need role_id, opportunity delivery center, and selectedRoleData to proceed
+    if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData) {
       // If role changed but data not loaded yet, update ref
       if (formData.role_id !== prevRoleIdRef.current) {
         prevRoleIdRef.current = formData.role_id || "";
@@ -509,8 +509,8 @@ export function EstimateEmptyRow({
       return;
     }
 
-    // Check if we've already populated for this role+engagement+currency combination
-    const currentKey = `${formData.role_id}-${engagementDeliveryCenterId}-${currency}`;
+    // Check if we've already populated for this role+opportunity+currency combination
+    const currentKey = `${formData.role_id}-${opportunityDeliveryCenterId}-${currency}`;
     const roleChanged = formData.role_id !== prevRoleIdRef.current;
     
     // If role changed, reset the populated flag
@@ -525,7 +525,7 @@ export function EstimateEmptyRow({
 
     console.log("Role effect running - populating Cost & Rate", {
       role_id: formData.role_id,
-      engagementDeliveryCenterId,
+      opportunityDeliveryCenterId,
       currency,
       roleChanged,
       currentKey,
@@ -533,11 +533,11 @@ export function EstimateEmptyRow({
       role_rates_count: selectedRoleData?.role_rates?.length || 0,
     });
 
-    // Find the role rate that matches engagement delivery center and currency
+    // Find the role rate that matches opportunity delivery center and currency
     // Compare as strings to handle UUID string comparison
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
-        String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
         rate.default_currency === currency
     );
 
@@ -587,7 +587,7 @@ export function EstimateEmptyRow({
     
     prevRoleIdRef.current = formData.role_id || "";
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [formData.role_id, formData.employee_id, engagementDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef]);
+  }, [formData.role_id, formData.employee_id, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef]);
 
   // Track if we've already populated cost for this employee
   const lastPopulatedEmployeeRef = useRef<string>("");
@@ -619,12 +619,12 @@ export function EstimateEmptyRow({
 
     // If employee was cleared (set to empty), revert Cost to Role-based cost
     if (!currentEmployeeId) {
-      // Need role and engagement delivery center to get role-based cost
-      if (formData.role_id && engagementDeliveryCenterId && selectedRoleData) {
-        // Find the role rate that matches engagement delivery center and currency
+      // Need role and opportunity delivery center to get role-based cost
+      if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData) {
+        // Find the role rate that matches opportunity delivery center and currency
         const matchingRate = selectedRoleData.role_rates?.find(
           (rate) =>
-            String(rate.delivery_center_id) === String(engagementDeliveryCenterId) &&
+            String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
             rate.default_currency === currency
         );
 
@@ -667,9 +667,9 @@ export function EstimateEmptyRow({
       ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
       : null;
     
-    // Compare Engagement Invoice Center with Employee Delivery Center
-    const centersMatch = engagementDeliveryCenterId && employeeDeliveryCenterId 
-      ? engagementDeliveryCenterId === employeeDeliveryCenterId
+    // Compare Opportunity Invoice Center with Employee Delivery Center
+    const centersMatch = opportunityDeliveryCenterId && employeeDeliveryCenterId 
+      ? opportunityDeliveryCenterId === employeeDeliveryCenterId
       : false;
 
     // Determine which rate to use and whether to convert currency
@@ -696,7 +696,7 @@ export function EstimateEmptyRow({
         needsConversion: employeeCurrency.toUpperCase() !== currency.toUpperCase(),
       });
       
-      // Convert to Engagement Invoice Center Currency if different
+      // Convert to Opportunity Invoice Center Currency if different
       if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
         console.log("Converting currency:", {
           from: employeeCurrency,
@@ -733,7 +733,7 @@ export function EstimateEmptyRow({
     lastPopulatedEmployeeRef.current = currentEmployeeId;
 
     prevEmployeeIdRef.current = currentEmployeeId;
-  }, [formData.employee_id, formData.role_id, engagementDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef]);
+  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Ensure we have required fields and create line item if needed
@@ -993,7 +993,7 @@ export function EstimateEmptyRow({
                     // Use String() comparison for cost/rate to handle string vs number differences
                     const matchingItem = estimateDetail.line_items.find(item => 
                       item.role_id === formData.role_id &&
-                      item.delivery_center_id === engagementDeliveryCenterId &&
+                      item.delivery_center_id === opportunityDeliveryCenterId &&
                       String(item.cost) === String(formData.cost) &&
                       String(item.rate) === String(formData.rate)
                     );
@@ -1010,10 +1010,10 @@ export function EstimateEmptyRow({
                   // If we still don't have a line item, create one
                   if (!lineItemToUse && !effectiveLineItemId) {
                     try {
-                      // delivery_center_id always comes from engagementDeliveryCenterId (required)
+                      // delivery_center_id always comes from opportunityDeliveryCenterId (required)
                       const createData: any = {
                         role_id: formData.role_id,
-                        delivery_center_id: engagementDeliveryCenterId, // Always use Engagement Invoice Center (required)
+                        delivery_center_id: opportunityDeliveryCenterId, // Always use Opportunity Invoice Center (required)
                         employee_id: formData.employee_id || undefined,
                         rate: formData.rate || "0",
                         cost: formData.cost || "0",
@@ -1101,14 +1101,14 @@ export function EstimateEmptyRow({
         {/* AutoFill Dialog */}
         {isAutoFillOpen && (effectiveLineItem || (estimateDetail?.line_items?.find(item => 
           item.role_id === formData.role_id &&
-          item.delivery_center_id === engagementDeliveryCenterId &&
+          item.delivery_center_id === opportunityDeliveryCenterId &&
           String(item.cost) === String(formData.cost) &&
           String(item.rate) === String(formData.rate)
         ))) && (
           <AutoFillDialog
             lineItem={effectiveLineItem || estimateDetail!.line_items!.find(item => 
               item.role_id === formData.role_id &&
-              item.delivery_center_id === engagementDeliveryCenterId &&
+              item.delivery_center_id === opportunityDeliveryCenterId &&
               String(item.cost) === String(formData.cost) &&
               String(item.rate) === String(formData.rate)
             )!}
@@ -1166,8 +1166,8 @@ export function EstimateEmptyRow({
         const startDateNormalized = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate());
         const endDateNormalized = new Date(endDate.getFullYear(), endDate.getMonth(), endDate.getDate());
         const isWithinRange = weekStartNormalized <= endDateNormalized && weekEndNormalized >= startDateNormalized;
-        // delivery_center_id always comes from engagementDeliveryCenterId (required), so check that instead
-        const canEdit = formData.role_id && engagementDeliveryCenterId && isWithinRange;
+        // delivery_center_id always comes from opportunityDeliveryCenterId (required), so check that instead
+        const canEdit = formData.role_id && opportunityDeliveryCenterId && isWithinRange;
         
         return (
           <td

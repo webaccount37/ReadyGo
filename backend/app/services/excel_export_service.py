@@ -23,7 +23,7 @@ from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.delivery_center_repository import DeliveryCenterRepository
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
-from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours, EstimatePhase
 from app.models.delivery_center import DeliveryCenter
 from app.models.employee import Employee
@@ -42,7 +42,7 @@ class ExcelExportService:
         self.delivery_center_repo = DeliveryCenterRepository(session)
         self.employee_repo = EmployeeRepository(session)
         self.role_repo = RoleRepository(session)
-        self.engagement_repo = EngagementRepository(session)
+        self.opportunity_repo = OpportunityRepository(session)
     
     async def export_estimate_to_excel(self, estimate_id: UUID) -> io.BytesIO:
         """Export an estimate to Excel format with validation rules."""
@@ -51,36 +51,36 @@ class ExcelExportService:
         if not estimate:
             raise ValueError("Estimate not found")
         
-        # Get engagement for delivery center and currency
-        engagement = await self.engagement_repo.get(estimate.engagement_id)
-        if not engagement:
-            raise ValueError("Engagement not found")
+        # Get opportunity for delivery center and currency
+        opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
         
-        engagement_delivery_center_id = engagement.delivery_center_id
-        if not engagement_delivery_center_id:
-            raise ValueError("Engagement Invoice Center (delivery_center_id) is required")
+        opportunity_delivery_center_id = opportunity.delivery_center_id
+        if not opportunity_delivery_center_id:
+            raise ValueError("Opportunity Invoice Center (delivery_center_id) is required")
         
         # Get all delivery centers, employees, and roles for dropdowns
         all_delivery_centers = await self.delivery_center_repo.list_all()
         all_employees = await self.employee_repo.list(skip=0, limit=10000)
         
-        # Get roles filtered by engagement delivery center
+        # Get roles filtered by opportunity delivery center
         roles_result = await self.session.execute(
             select(Role)
             .join(RoleRate, Role.id == RoleRate.role_id)
-            .where(RoleRate.delivery_center_id == engagement_delivery_center_id)
+            .where(RoleRate.delivery_center_id == opportunity_delivery_center_id)
             .distinct()
         )
         filtered_roles = list(roles_result.scalars().all())
         
         # Generate weeks based on estimate line items
-        # If no line items, use engagement dates or default range
+        # If no line items, use opportunity dates or default range
         if estimate.line_items and len(estimate.line_items) > 0:
             weeks = self._generate_weeks_from_line_items(estimate.line_items)
         else:
-            # Use engagement dates or default range
-            if engagement.start_date and engagement.end_date:
-                weeks = self._generate_weeks_from_dates(engagement.start_date, engagement.end_date)
+            # Use opportunity dates or default range
+            if opportunity.start_date and opportunity.end_date:
+                weeks = self._generate_weeks_from_dates(opportunity.start_date, opportunity.end_date)
             else:
                 # Default to 1 year from today
                 from datetime import datetime
@@ -99,11 +99,11 @@ class ExcelExportService:
         metadata_ws.sheet_state = "hidden"
         
         # Write metadata
-        self._write_metadata(metadata_ws, estimate, engagement, weeks, all_delivery_centers, filtered_roles, all_employees)
+        self._write_metadata(metadata_ws, estimate, opportunity, weeks, all_delivery_centers, filtered_roles, all_employees)
         
         # Write header rows
         try:
-            self._write_headers(ws, estimate.phases, weeks, engagement.default_currency or "USD")
+            self._write_headers(ws, estimate.phases, weeks, opportunity.default_currency or "USD")
         except Exception as e:
             logger.error(f"Error writing headers: {e}", exc_info=True)
             raise ValueError(f"Failed to write headers: {str(e)}") from e
@@ -258,15 +258,15 @@ class ExcelExportService:
         cell = ws.cell(row=row, column=col)
         cell.value = value
     
-    def _write_metadata(self, ws, estimate: Estimate, engagement, weeks: List[date], 
+    def _write_metadata(self, ws, estimate: Estimate, opportunity, weeks: List[date], 
                         delivery_centers: List[DeliveryCenter], roles: List[Role], employees: List[Employee]):
         """Write metadata to hidden sheet."""
         ws["A1"] = "estimate_id"
         ws["B1"] = str(estimate.id)
-        ws["A2"] = "engagement_id"
-        ws["B2"] = str(estimate.engagement_id)
-        ws["A3"] = "engagement_delivery_center_id"
-        ws["B3"] = str(engagement.delivery_center_id)
+        ws["A2"] = "opportunity_id"
+        ws["B2"] = str(estimate.opportunity_id)
+        ws["A3"] = "opportunity_delivery_center_id"
+        ws["B3"] = str(opportunity.delivery_center_id)
         ws["A4"] = "week_start_dates"
         ws["B4"] = ",".join([w.isoformat() for w in weeks])
         
@@ -878,7 +878,7 @@ class ExcelExportService:
             dv.add(f"A{start_row}:A{max_validation_row}")
             ws.add_data_validation(dv)
         
-        # Role dropdown (Column B) - filtered by engagement delivery center
+        # Role dropdown (Column B) - filtered by opportunity delivery center
         role_names = [role.role_name for role in roles]
         if role_names:
             dv = DataValidation(type="list", formula1=f'"{",".join(role_names)}"', allow_blank=True)

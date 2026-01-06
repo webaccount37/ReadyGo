@@ -43,7 +43,7 @@ async def get_roles_for_delivery_center(
     """Get roles that have role_rates for a given delivery center.
     
     This endpoint is used to filter roles in the Estimate spreadsheet
-    to only show roles that have RoleRate associations with the Engagement Invoice Center.
+    to only show roles that have RoleRate associations with the Opportunity Invoice Center.
     """
     from app.services.estimate_service import EstimateService
     service = EstimateService(db)
@@ -65,7 +65,7 @@ async def create_estimate(
 async def list_estimates(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    engagement_id: UUID = Query(None),
+    opportunity_id: UUID = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> EstimateListResponse:
     """List estimates with optional filters."""
@@ -73,7 +73,7 @@ async def list_estimates(
     return await controller.list_estimates(
         skip=skip,
         limit=limit,
-        engagement_id=engagement_id,
+        opportunity_id=opportunity_id,
     )
 
 
@@ -132,7 +132,7 @@ async def set_active_version(
     estimate_id: UUID,
     db: AsyncSession = Depends(get_db),
 ) -> EstimateResponse:
-    """Set an estimate as the active version for its release."""
+    """Set an estimate as the active version for its opportunity."""
     controller = EstimateController(db)
     estimate = await controller.set_active_version(estimate_id)
     if not estimate:

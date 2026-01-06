@@ -127,7 +127,7 @@ function EmployeesPageContent() {
     }
   );
 
-  // Fetch employees with relationships for opportunities and engagements (for current page items)
+  // Fetch employees with relationships for opportunities (for current page items)
   const employeeIdsForRelationships = useMemo(() => (data?.items || []).map(emp => emp.id), [data]);
   const employeeRelationshipsQueries = useQueries({
     queries: employeeIdsForRelationships.map(id => ({
@@ -162,14 +162,9 @@ function EmployeesPageContent() {
       const ibr = employee.internal_bill_rate?.toString().toLowerCase() || "";
       const ebr = employee.external_bill_rate?.toString().toLowerCase() || "";
       
-      // Get opportunities and engagements from relationships queries
+      // Get opportunities from relationships queries
       const employeeData = employeeRelationshipsQueries.find(q => q.data?.id === employee.id)?.data;
       const opportunityNames = employeeData?.opportunities?.map(opp => opp.name.toLowerCase()).join(" ") || "";
-      const engagementNames = employeeData?.engagements?.map(eng => {
-        const engName = eng.name.toLowerCase();
-        const oppName = eng.opportunity_name?.toLowerCase() || "";
-        return `${engName} ${oppName}`;
-      }).join(" ") || "";
       
       return (
         name.includes(query) ||
@@ -182,8 +177,7 @@ function EmployeesPageContent() {
         icr.includes(query) ||
         ibr.includes(query) ||
         ebr.includes(query) ||
-        opportunityNames.includes(query) ||
-        engagementNames.includes(query)
+        opportunityNames.includes(query)
       );
     });
   }, [data, searchQuery, employeeRelationshipsQueries, deliveryCentersData]);
@@ -199,56 +193,10 @@ function EmployeesPageContent() {
     }).format(value);
   };
 
-  // Helper function to get opportunities and engagements data
-  const getOpportunitiesAndEngagements = (employeeId: string) => {
+  // Helper function to get opportunities data
+  const getOpportunities = (employeeId: string) => {
     const employeeData = employeeRelationshipsQueries.find(q => q.data?.id === employeeId)?.data;
-    return {
-      opportunities: employeeData?.opportunities || [],
-      engagements: employeeData?.engagements || [],
-    };
-  };
-
-  // Helper function to format opportunities and engagements for display
-  const getOpportunitiesAndEngagementsGrouped = (employeeId: string) => {
-    const { opportunities, engagements } = getOpportunitiesAndEngagements(employeeId);
-    
-    if (opportunities.length === 0 && engagements.length === 0) {
-      return { grouped: [], totalOpps: 0, totalEngs: 0 };
-    }
-
-    // Group engagements by opportunity
-    const engagementsByOpportunity: Record<string, Array<{ name: string; id: string }>> = {};
-    const opportunityMap: Record<string, { name: string; id: string }> = {};
-    
-    // Add all opportunities first
-    opportunities.forEach(opp => {
-      engagementsByOpportunity[opp.id] = [];
-      opportunityMap[opp.id] = { name: opp.name, id: opp.id };
-    });
-    
-    // Group engagements under their opportunities
-    engagements.forEach(eng => {
-      if (eng.opportunity_id && engagementsByOpportunity[eng.opportunity_id]) {
-        engagementsByOpportunity[eng.opportunity_id].push({ name: eng.name, id: eng.id });
-      } else if (eng.opportunity_id) {
-        // Opportunity not in list, create entry
-        engagementsByOpportunity[eng.opportunity_id] = [{ name: eng.name, id: eng.id }];
-        if (eng.opportunity_name) {
-          opportunityMap[eng.opportunity_id] = { name: eng.opportunity_name, id: eng.opportunity_id };
-        }
-      }
-    });
-
-    // Build grouped structure
-    const grouped = Object.keys(engagementsByOpportunity).map(oppId => ({
-      opportunity: opportunityMap[oppId] || { name: "Unknown Opportunity", id: oppId },
-      engagements: engagementsByOpportunity[oppId],
-    }));
-
-    const totalOpps = grouped.length;
-    const totalEngs = grouped.reduce((sum, item) => sum + item.engagements.length, 0);
-    
-    return { grouped, totalOpps, totalEngs };
+    return employeeData?.opportunities || [];
   };
 
   return (
@@ -313,7 +261,7 @@ function EmployeesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="External Bill Rate">EBR</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Timezone">TZ</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunities & Engagements">Opps/Engs</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunities">Opportunities</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
@@ -363,14 +311,14 @@ function EmployeesPageContent() {
                             </td>
                             <td className="p-1.5 max-w-[180px] text-xs" onClick={(e) => e.stopPropagation()}>
                               {(() => {
-                                const { grouped, totalOpps, totalEngs } = getOpportunitiesAndEngagementsGrouped(employee.id);
+                                const opportunities = getOpportunities(employee.id);
                                 
-                                if (totalOpps === 0 && totalEngs === 0) {
+                                if (opportunities.length === 0) {
                                   return <span className="text-gray-400">—</span>;
                                 }
 
                                 const isExpanded = expandedEmployeeId === employee.id;
-                                const summary = `${totalOpps} opp${totalOpps !== 1 ? 's' : ''}, ${totalEngs} eng${totalEngs !== 1 ? 's' : ''}`;
+                                const summary = `${opportunities.length} opp${opportunities.length !== 1 ? 's' : ''}`;
 
                                 return (
                                   <div className="relative" ref={popoverRef}>
@@ -380,7 +328,7 @@ function EmployeesPageContent() {
                                         setExpandedEmployeeId(isExpanded ? null : employee.id);
                                       }}
                                       className="flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded border border-blue-200 hover:border-blue-300 transition-colors"
-                                      title={`Click to ${isExpanded ? 'collapse' : 'expand'} opportunities and engagements`}
+                                      title={`Click to ${isExpanded ? 'collapse' : 'expand'} opportunities`}
                                     >
                                       <span>{summary}</span>
                                       {isExpanded ? (
@@ -393,21 +341,15 @@ function EmployeesPageContent() {
                                     {isExpanded && (
                                       <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-md shadow-lg p-2 max-w-[300px] max-h-[300px] overflow-y-auto">
                                         <div className="space-y-2 text-xs">
-                                          {grouped.map((item, idx) => (
-                                            <div key={idx} className="border-b border-gray-100 pb-1 last:border-0 last:pb-0">
+                                          {opportunities.map((opp) => (
+                                            <div key={opp.id} className="border-b border-gray-100 pb-1 last:border-0 last:pb-0">
                                               <div className="font-semibold text-blue-700 mb-1">
-                                                {item.opportunity.name}
+                                                {opp.name}
                                               </div>
-                                              {item.engagements.length > 0 ? (
-                                                <div className="pl-2 space-y-0.5">
-                                                  {item.engagements.map((eng) => (
-                                                    <div key={eng.id} className="text-gray-600">
-                                                      • {eng.name}
-                                                    </div>
-                                                  ))}
+                                              {opp.role_name && (
+                                                <div className="pl-2 text-gray-600 text-xs">
+                                                  Role: {opp.role_name}
                                                 </div>
-                                              ) : (
-                                                <div className="pl-2 text-gray-400 text-xs">No engagements</div>
                                               )}
                                             </div>
                                           ))}
@@ -539,16 +481,16 @@ function EmployeesPageContent() {
                               </div>
                             )}
                             {(() => {
-                              const { grouped, totalOpps, totalEngs } = getOpportunitiesAndEngagementsGrouped(employee.id);
-                              if (totalOpps === 0 && totalEngs === 0) return null;
+                              const opportunities = getOpportunities(employee.id);
+                              if (opportunities.length === 0) return null;
                               
                               const isExpanded = expandedEmployeeId === employee.id;
-                              const summary = `${totalOpps} opp${totalOpps !== 1 ? 's' : ''}, ${totalEngs} eng${totalEngs !== 1 ? 's' : ''}`;
+                              const summary = `${opportunities.length} opp${opportunities.length !== 1 ? 's' : ''}`;
 
                               return (
                                 <div>
                                   <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                    Opportunities & Engagements
+                                    Opportunities
                                   </div>
                                   <button
                                     onClick={(e) => {
@@ -567,21 +509,15 @@ function EmployeesPageContent() {
                                   
                                   {isExpanded && (
                                     <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded-md space-y-2 text-sm">
-                                      {grouped.map((item, idx) => (
-                                        <div key={idx} className="border-b border-gray-200 pb-2 last:border-0 last:pb-0">
+                                      {opportunities.map((opp) => (
+                                        <div key={opp.id} className="border-b border-gray-200 pb-2 last:border-0 last:pb-0">
                                           <div className="font-semibold text-blue-700 mb-1">
-                                            {item.opportunity.name}
+                                            {opp.name}
                                           </div>
-                                          {item.engagements.length > 0 ? (
-                                            <div className="pl-2 space-y-1">
-                                              {item.engagements.map((eng) => (
-                                                <div key={eng.id} className="text-gray-600">
-                                                  • {eng.name}
-                                                </div>
-                                              ))}
+                                          {opp.role_name && (
+                                            <div className="pl-2 text-gray-600 text-xs">
+                                              Role: {opp.role_name}
                                             </div>
-                                          ) : (
-                                            <div className="pl-2 text-gray-400 text-xs">No engagements</div>
                                           )}
                                         </div>
                                       ))}
