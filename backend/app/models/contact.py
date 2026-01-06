@@ -23,6 +23,7 @@ class Contact(Base):
     phone = Column(String(50), nullable=True)
     job_title = Column(String(100), nullable=True)
     is_primary = Column(String(10), default="false", nullable=False)  # Primary contact for the client
+    is_billing = Column(String(10), default="false", nullable=False)  # Billing contact for the client
     
     # Relationships
     account = relationship("Account", back_populates="contacts")

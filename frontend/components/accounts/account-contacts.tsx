@@ -28,6 +28,7 @@ export function AccountContacts({ accountId, readOnly = false }: AccountContacts
     phone: "",
     job_title: "",
     is_primary: false,
+    is_billing: false,
   });
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -43,6 +44,7 @@ export function AccountContacts({ accountId, readOnly = false }: AccountContacts
         phone: "",
         job_title: "",
         is_primary: false,
+        is_billing: false,
       });
       refetch();
     } catch (err) {
@@ -80,6 +82,61 @@ export function AccountContacts({ accountId, readOnly = false }: AccountContacts
 
   return (
     <div className="space-y-4">
+      {data?.items && data.items.length > 0 ? (
+        <div className="space-y-2">
+          {data.items.map((contact) => (
+            <div key={contact.id} className="p-3 border rounded">
+              {editingId === contact.id ? (
+                <ContactEditForm
+                  contact={contact}
+                  onSave={(data) => handleUpdate(contact.id, data)}
+                  onCancel={() => setEditingId(null)}
+                />
+              ) : (
+                <div className="flex justify-between items-start">
+                  <div>
+                    <div className="font-medium">
+                      {contact.first_name} {contact.last_name}
+                      {contact.is_primary && (
+                        <span className="ml-2 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-1 rounded font-medium">
+                          Primary
+                        </span>
+                      )}
+                      {contact.is_billing && (
+                        <span className="ml-2 text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-1 rounded font-medium">
+                          Billing
+                        </span>
+                      )}
+                    </div>
+                    {contact.job_title && (
+                      <div className="text-sm text-gray-600">{contact.job_title}</div>
+                    )}
+                    {contact.email && (
+                      <div className="text-sm text-gray-600">{contact.email}</div>
+                    )}
+                    {contact.phone && (
+                      <div className="text-sm text-gray-600">{contact.phone}</div>
+                    )}
+                  </div>
+                  {!readOnly && (
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setEditingId(contact.id)}>
+                        Edit
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => handleDelete(contact.id)}>
+                        Delete
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="text-sm text-gray-500">No contacts found.</div>
+      )}
+
       {!readOnly && (
         <div>
           {!isCreating ? (
@@ -143,6 +200,16 @@ export function AccountContacts({ accountId, readOnly = false }: AccountContacts
                 />
                 <Label htmlFor="is_primary">Primary Contact</Label>
               </div>
+              <div className="flex items-center space-x-2">
+                <input
+                  type="checkbox"
+                  id="is_billing"
+                  checked={formData.is_billing}
+                  onChange={(e) => setFormData({ ...formData, is_billing: e.target.checked })}
+                  className="h-4 w-4"
+                />
+                <Label htmlFor="is_billing">Billing Contact</Label>
+              </div>
               <div className="flex gap-2">
                 <Button type="submit" size="sm">Save</Button>
                 <Button type="button" size="sm" variant="outline" onClick={() => setIsCreating(false)}>
@@ -154,55 +221,6 @@ export function AccountContacts({ accountId, readOnly = false }: AccountContacts
         </div>
       )}
 
-      {data?.items && data.items.length > 0 ? (
-        <div className="space-y-2">
-          {data.items.map((contact) => (
-            <div key={contact.id} className="p-3 border rounded">
-              {editingId === contact.id ? (
-                <ContactEditForm
-                  contact={contact}
-                  onSave={(data) => handleUpdate(contact.id, data)}
-                  onCancel={() => setEditingId(null)}
-                />
-              ) : (
-                <div className="flex justify-between items-start">
-                  <div>
-                    <div className="font-medium">
-                      {contact.first_name} {contact.last_name}
-                      {contact.is_primary && (
-                        <span className="ml-2 text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
-                          Primary
-                        </span>
-                      )}
-                    </div>
-                    {contact.job_title && (
-                      <div className="text-sm text-gray-600">{contact.job_title}</div>
-                    )}
-                    {contact.email && (
-                      <div className="text-sm text-gray-600">{contact.email}</div>
-                    )}
-                    {contact.phone && (
-                      <div className="text-sm text-gray-600">{contact.phone}</div>
-                    )}
-                  </div>
-                  {!readOnly && (
-                    <div className="flex gap-2">
-                      <Button size="sm" variant="outline" onClick={() => setEditingId(contact.id)}>
-                        Edit
-                      </Button>
-                      <Button size="sm" variant="destructive" onClick={() => handleDelete(contact.id)}>
-                        Delete
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="text-sm text-gray-500">No contacts found.</div>
-      )}
     </div>
   );
 }
@@ -212,7 +230,7 @@ function ContactEditForm({
   onSave,
   onCancel,
 }: {
-  contact: { id: string; first_name: string; last_name: string; email?: string; phone?: string; job_title?: string; is_primary: boolean };
+  contact: { id: string; first_name: string; last_name: string; email?: string; phone?: string; job_title?: string; is_primary: boolean; is_billing: boolean };
   onSave: (data: ContactUpdate) => void;
   onCancel: () => void;
 }) {
@@ -223,6 +241,7 @@ function ContactEditForm({
     phone: contact.phone,
     job_title: contact.job_title,
     is_primary: contact.is_primary,
+    is_billing: contact.is_billing,
   });
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -286,6 +305,16 @@ function ContactEditForm({
           className="h-4 w-4"
         />
         <Label htmlFor="edit_is_primary">Primary Contact</Label>
+      </div>
+      <div className="flex items-center space-x-2">
+        <input
+          type="checkbox"
+          id="edit_is_billing"
+          checked={formData.is_billing}
+          onChange={(e) => setFormData({ ...formData, is_billing: e.target.checked })}
+          className="h-4 w-4"
+        />
+        <Label htmlFor="edit_is_billing">Billing Contact</Label>
       </div>
       <div className="flex gap-2">
         <Button type="submit" size="sm">Save</Button>

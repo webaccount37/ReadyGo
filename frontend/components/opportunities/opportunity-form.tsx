@@ -101,7 +101,7 @@ export function OpportunityForm({
     if (formData.account_id && accountsData?.items && !formData.billing_term_id) {
       const selectedAccount = accountsData.items.find(a => a.id === formData.account_id);
       if (selectedAccount?.billing_term_id) {
-        setFormData(prev => ({ ...prev, billing_term_id: selectedAccount.billing_term_id }));
+        setFormData(prev => ({ ...prev, billing_term_id: selectedAccount.billing_term_id! }));
       }
     }
   }, [formData.account_id, accountsData, formData.billing_term_id]);

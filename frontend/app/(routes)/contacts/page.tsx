@@ -16,6 +16,9 @@ import type { ContactCreate, ContactUpdate, Contact } from "@/types/contact";
 import { useAccounts } from "@/hooks/useAccounts";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
+import { getAccountTypeColor, getAccountTypeLabel } from "@/lib/utils/account-type";
+import type { AccountType } from "@/types/account";
+import Link from "next/link";
 
 export default function ContactsPage() {
   const [skip, setSkip] = useState(0);
@@ -150,16 +153,17 @@ export default function ContactsPage() {
                   {/* Desktop Table View */}
                   <div className="hidden md:block overflow-x-auto">
                     <table className="w-full">
-                      <thead>
-                        <tr className="border-b">
-                          <th className="text-left p-3 font-semibold">Name</th>
-                          <th className="text-left p-3 font-semibold">Account</th>
-                          <th className="text-left p-3 font-semibold">Email</th>
-                          <th className="text-left p-3 font-semibold">Phone</th>
-                          <th className="text-left p-3 font-semibold">Job Title</th>
-                          <th className="text-left p-3 font-semibold">Actions</th>
-                        </tr>
-                      </thead>
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left p-3 font-semibold">Name</th>
+                            <th className="text-left p-3 font-semibold">Account</th>
+                            <th className="text-left p-3 font-semibold">Type</th>
+                            <th className="text-left p-3 font-semibold">Email</th>
+                            <th className="text-left p-3 font-semibold">Phone</th>
+                            <th className="text-left p-3 font-semibold">Job Title</th>
+                            <th className="text-left p-3 font-semibold">Actions</th>
+                          </tr>
+                        </thead>
                       <tbody>
                       {filteredItems.map((contact) => (
                         <tr 
@@ -171,12 +175,35 @@ export default function ContactsPage() {
                             <div className="font-medium">
                               {highlightText(`${contact.first_name} ${contact.last_name}`, searchQuery)}
                             </div>
-                            {contact.is_primary && (
-                              <div className="text-xs text-blue-600">Primary</div>
-                            )}
+                            <div className="flex gap-1 mt-1">
+                              {contact.is_primary && (
+                                <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium">Primary</span>
+                              )}
+                              {contact.is_billing && (
+                                <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium">Billing</span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-3">
-                            <div className="text-sm">{highlightText(contact.account_name || getAccountName(contact.account_id), searchQuery)}</div>
+                            <Link
+                              href={`/accounts?account_id=${contact.account_id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center text-sm font-medium text-gray-900 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-md transition-colors duration-150 border-b border-dotted border-gray-400 hover:border-blue-500"
+                            >
+                              {highlightText(contact.account_name || getAccountName(contact.account_id), searchQuery)}
+                            </Link>
+                          </td>
+                          <td className="p-3">
+                            {contact.account_type ? (
+                              <span
+                                className={`px-2 py-1 text-xs rounded font-medium ${getAccountTypeColor(contact.account_type as AccountType).bg} ${getAccountTypeColor(contact.account_type as AccountType).text}`}
+                                style={{ backgroundColor: getAccountTypeColor(contact.account_type as AccountType).bgColor }}
+                              >
+                                {getAccountTypeLabel(contact.account_type as AccountType)}
+                              </span>
+                            ) : (
+                              <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">—</span>
+                            )}
                           </td>
                           <td className="p-3">
                             <div className="text-sm">{contact.email ? highlightText(contact.email, searchQuery) : "—"}</div>
@@ -236,18 +263,40 @@ export default function ContactsPage() {
                             <div className="text-sm font-medium">
                               {contact.first_name} {contact.last_name}
                             </div>
-                            {contact.is_primary && (
-                              <div className="text-xs text-blue-600 mt-1">Primary Contact</div>
-                            )}
+                            <div className="flex gap-1 mt-1">
+                              {contact.is_primary && (
+                                <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium">Primary</span>
+                              )}
+                              {contact.is_billing && (
+                                <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium">Billing</span>
+                              )}
+                            </div>
                           </div>
                           <div>
                             <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                               Account
                             </div>
-                            <div className="text-sm">
+                            <Link
+                              href={`/accounts?account_id=${contact.account_id}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="inline-flex items-center text-sm font-medium text-gray-900 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-md transition-colors duration-150 border-b border-dotted border-gray-400 hover:border-blue-500"
+                            >
                               {contact.account_name || getAccountName(contact.account_id)}
-                            </div>
+                            </Link>
                           </div>
+                          {contact.account_type ? (
+                            <div>
+                              <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                Type
+                              </div>
+                              <span
+                                className={`inline-block px-2 py-1 text-xs rounded font-medium ${getAccountTypeColor(contact.account_type as AccountType).bg} ${getAccountTypeColor(contact.account_type as AccountType).text}`}
+                                style={{ backgroundColor: getAccountTypeColor(contact.account_type as AccountType).bgColor }}
+                              >
+                                {getAccountTypeLabel(contact.account_type as AccountType)}
+                              </span>
+                            </div>
+                          ) : null}
                           {contact.email && (
                             <div>
                               <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
@@ -370,9 +419,14 @@ export default function ContactsPage() {
               <p className="text-sm text-gray-700">
                 {viewingContact.first_name} {viewingContact.last_name}
               </p>
-              {viewingContact.is_primary && (
-                <p className="text-xs text-blue-600 mt-1">Primary Contact</p>
-              )}
+              <div className="flex gap-1 mt-1">
+                {viewingContact.is_primary && (
+                  <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium">Primary Contact</span>
+                )}
+                {viewingContact.is_billing && (
+                  <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium">Billing Contact</span>
+                )}
+              </div>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-800">Account</p>

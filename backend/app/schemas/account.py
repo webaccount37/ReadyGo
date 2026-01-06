@@ -5,8 +5,9 @@ Account Pydantic schemas for request/response validation.
 from pydantic import BaseModel, Field
 from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
+from datetime import datetime
 
-from app.models.account import AccountStatus
+from app.models.account import AccountType
 
 if TYPE_CHECKING:
     from app.schemas.contact import ContactResponse
@@ -26,29 +27,29 @@ class BillingTermInfo(BaseModel):
 class AccountBase(BaseModel):
     """Base account schema with common fields."""
     company_name: str = Field(..., min_length=1, max_length=255)
+    type: AccountType = Field(..., description="Account type is required")
     industry: Optional[str] = Field(None, max_length=100)
-    street_address: str = Field(..., min_length=1, max_length=255, description="Street address is required")
-    city: str = Field(..., min_length=1, max_length=100, description="City is required")
-    region: str = Field(..., min_length=1, max_length=100, description="Region is required")
+    street_address: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=100)
+    region: Optional[str] = Field(None, max_length=100)
     country: str = Field(..., min_length=1, max_length=100, description="Country is required")
-    status: AccountStatus = AccountStatus.ACTIVE
     default_currency: str = "USD"
 
 
 class AccountCreate(AccountBase):
     """Schema for creating an account."""
-    billing_term_id: UUID = Field(..., description="Billing term ID is required")
+    billing_term_id: Optional[UUID] = Field(None, description="Billing term ID is optional")
 
 
 class AccountUpdate(BaseModel):
     """Schema for updating an account (all fields optional)."""
     company_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    type: Optional[AccountType] = None
     industry: Optional[str] = Field(None, max_length=100)
-    street_address: Optional[str] = Field(None, min_length=1, max_length=255)
-    city: Optional[str] = Field(None, min_length=1, max_length=100)
-    region: Optional[str] = Field(None, min_length=1, max_length=100)
+    street_address: Optional[str] = Field(None, max_length=255)
+    city: Optional[str] = Field(None, max_length=100)
+    region: Optional[str] = Field(None, max_length=100)
     country: Optional[str] = Field(None, min_length=1, max_length=100)
-    status: Optional[AccountStatus] = None
     billing_term_id: Optional[UUID] = None
     default_currency: Optional[str] = None
 
@@ -56,8 +57,11 @@ class AccountUpdate(BaseModel):
 class AccountResponse(AccountBase):
     """Schema for account response."""
     id: UUID
-    billing_term_id: UUID
+    billing_term_id: Optional[UUID] = None
     billing_term: Optional[BillingTermInfo] = None
+    created_at: datetime
+    contact_count: Optional[int] = None
+    opportunities_count: Optional[int] = None
     
     class Config:
         from_attributes = True

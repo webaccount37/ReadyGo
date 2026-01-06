@@ -114,4 +114,12 @@ class OpportunityRepository(BaseRepository[Opportunity]):
         )
         opportunity = result.scalar_one_or_none()
         return opportunity
+    
+    async def count_by_account(self, account_id: UUID) -> int:
+        """Count opportunities for an account."""
+        from sqlalchemy import func
+        result = await self.session.execute(
+            select(func.count(Opportunity.id)).where(Opportunity.account_id == account_id)
+        )
+        return result.scalar() or 0
 

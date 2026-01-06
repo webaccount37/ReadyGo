@@ -32,7 +32,6 @@ async def create_account(
 async def list_accounts(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
-    status: str = Query(None),
     region: str = Query(None),
     db: AsyncSession = Depends(get_db),
 ) -> AccountListResponse:
@@ -41,7 +40,6 @@ async def list_accounts(
     return await controller.list_accounts(
         skip=skip,
         limit=limit,
-        status=status,
         region=region,
     )
 

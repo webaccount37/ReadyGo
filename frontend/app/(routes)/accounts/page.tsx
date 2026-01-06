@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useAccounts,
   useCreateAccount,
   useUpdateAccount,
   useDeleteAccount,
+  useAccount,
 } from "@/hooks/useAccounts";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
@@ -16,14 +18,29 @@ import { AccountContacts } from "@/components/accounts/account-contacts";
 import type { AccountCreate, AccountUpdate, Account } from "@/types/account";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
+import { getAccountTypeColor, getAccountTypeLabel } from "@/lib/utils/account-type";
+import Link from "next/link";
 
-export default function AccountsPage() {
+function AccountsPageContent() {
+  const searchParams = useSearchParams();
+  const accountIdParam = searchParams.get("account_id");
+  
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<string | null>(null);
   const [viewingAccount, setViewingAccount] = useState<Account | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const { data: accountData } = useAccount(accountIdParam || "", false, {
+    enabled: !!accountIdParam,
+  });
+
+  useEffect(() => {
+    if (accountIdParam && accountData) {
+      setViewingAccount(accountData);
+    }
+  }, [accountIdParam, accountData]);
 
   const { data, isLoading, error, refetch } = useAccounts({ skip, limit });
   const createAccount = useCreateAccount();
@@ -41,14 +58,14 @@ export default function AccountsPage() {
       const city = (account.city || "").toLowerCase();
       const region = (account.region || "").toLowerCase();
       const country = (account.country || "").toLowerCase();
-      const status = (account.status || "").toLowerCase();
+      const type = (account.type || "").toLowerCase();
       return (
         company.includes(query) ||
         industry.includes(query) ||
         city.includes(query) ||
         region.includes(query) ||
         country.includes(query) ||
-        status.includes(query)
+        type.includes(query)
       );
     });
   }, [data, searchQuery]);
@@ -142,8 +159,10 @@ export default function AccountsPage() {
                         <thead>
                           <tr className="border-b">
                             <th className="text-left p-3 font-semibold">Company Name</th>
+                            <th className="text-left p-3 font-semibold">Type</th>
                             <th className="text-left p-3 font-semibold">Location</th>
-                            <th className="text-left p-3 font-semibold">Status</th>
+                            <th className="text-left p-3 font-semibold">Contacts</th>
+                            <th className="text-left p-3 font-semibold">Opportunities</th>
                             <th className="text-left p-3 font-semibold">Actions</th>
                           </tr>
                         </thead>
@@ -161,23 +180,44 @@ export default function AccountsPage() {
                                 )}
                               </td>
                               <td className="p-3">
+                                {account.type ? (
+                                  <span
+                                    className={`px-2 py-1 text-xs rounded font-medium ${getAccountTypeColor(account.type).bg} ${getAccountTypeColor(account.type).text}`}
+                                    style={{ backgroundColor: getAccountTypeColor(account.type).bgColor }}
+                                  >
+                                    {getAccountTypeLabel(account.type)}
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">
+                                    —
+                                  </span>
+                                )}
+                              </td>
+                              <td className="p-3">
                                 <div className="text-sm">
-                                  {highlightText(`${account.city}, ${account.region}`, searchQuery)}
+                                  {account.city && account.region
+                                    ? highlightText(`${account.city}, ${account.region}`, searchQuery)
+                                    : account.city || account.region || "—"}
                                 </div>
                                 <div className="text-sm text-gray-500">{highlightText(account.country, searchQuery)}</div>
                               </td>
                               <td className="p-3">
-                                <span
-                                  className={`px-2 py-1 text-xs rounded ${
-                                    account.status === "active"
-                                      ? "bg-green-100 text-green-800"
-                                      : account.status === "prospect"
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : "bg-gray-100 text-gray-800"
-                                  }`}
+                                <Link
+                                  href={`/contacts?account_id=${account.id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-blue-600 hover:text-blue-800 underline"
                                 >
-                                  {highlightText(account.status, searchQuery)}
-                                </span>
+                                  {account.contact_count ?? 0}
+                                </Link>
+                              </td>
+                              <td className="p-3">
+                                <Link
+                                  href={`/opportunities?account_id=${account.id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-blue-600 hover:text-blue-800 underline"
+                                >
+                                  {account.opportunities_count ?? 0}
+                                </Link>
                               </td>
                             <td className="p-3">
                               <div className="flex gap-2">
@@ -237,20 +277,23 @@ export default function AccountsPage() {
                                 <div className="text-sm font-medium">{highlightText(account.company_name, searchQuery)}</div>
                               </div>
                               <div className="text-sm text-gray-600">
-                                {highlightText(`${account.city}, ${account.region}`, searchQuery)}
+                                {account.city && account.region
+                                  ? highlightText(`${account.city}, ${account.region}`, searchQuery)
+                                  : account.city || account.region || "—"}
                               </div>
                               <div className="flex flex-wrap gap-2 text-xs">
-                                <span
-                                  className={`px-2 py-1 rounded ${
-                                    account.status === "active"
-                                      ? "bg-green-100 text-green-800"
-                                      : account.status === "prospect"
-                                      ? "bg-yellow-100 text-yellow-800"
-                                      : "bg-gray-100 text-gray-800"
-                                  }`}
-                                >
-                                  {highlightText(account.status, searchQuery)}
-                                </span>
+                                {account.type ? (
+                                  <span
+                                    className={`px-2 py-1 rounded font-medium ${getAccountTypeColor(account.type).bg} ${getAccountTypeColor(account.type).text}`}
+                                    style={{ backgroundColor: getAccountTypeColor(account.type).bgColor }}
+                                  >
+                                    {getAccountTypeLabel(account.type)}
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-1 rounded bg-gray-100 text-gray-800">
+                                    —
+                                  </span>
+                                )}
                                 <span className="px-2 py-1 rounded border border-gray-200 text-gray-700 bg-white">
                                   {account.default_currency}
                                 </span>
@@ -259,6 +302,22 @@ export default function AccountsPage() {
                                     {highlightText(account.industry, searchQuery)}
                                   </span>
                                 )}
+                              </div>
+                              <div className="flex gap-4 text-sm">
+                                <Link
+                                  href={`/contacts?account_id=${account.id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-blue-600 hover:text-blue-800 underline"
+                                >
+                                  Contacts: {account.contact_count ?? 0}
+                                </Link>
+                                <Link
+                                  href={`/opportunities?account_id=${account.id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-blue-600 hover:text-blue-800 underline"
+                                >
+                                  Opportunities: {account.opportunities_count ?? 0}
+                                </Link>
                               </div>
                               <div className="flex gap-2 pt-2">
                                 <Button
@@ -383,8 +442,17 @@ export default function AccountsPage() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <p className="text-sm font-semibold text-gray-800">Status</p>
-                <p className="text-sm text-gray-700">{viewingAccount.status}</p>
+                <p className="text-sm font-semibold text-gray-800">Type</p>
+                {viewingAccount.type ? (
+                  <span
+                    className={`inline-block px-2 py-1 text-xs rounded font-medium ${getAccountTypeColor(viewingAccount.type).bg} ${getAccountTypeColor(viewingAccount.type).text}`}
+                    style={{ backgroundColor: getAccountTypeColor(viewingAccount.type).bgColor }}
+                  >
+                    {getAccountTypeLabel(viewingAccount.type)}
+                  </span>
+                ) : (
+                  <span className="inline-block px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">—</span>
+                )}
               </div>
               <div>
                 <p className="text-sm font-semibold text-gray-800">Default Currency</p>
@@ -437,10 +505,13 @@ export default function AccountsPage() {
   );
 }
 
-
-
-
-
+export default function AccountsPage() {
+  return (
+    <Suspense fallback={<div className="text-gray-600">Loading accounts...</div>}>
+      <AccountsPageContent />
+    </Suspense>
+  );
+}
 
 
 

@@ -55,6 +55,16 @@ class ContactRepository(BaseRepository[Contact]):
             .where(Contact.account_id == account_id)
             .values(is_primary="false")
         )
+        await self.session.commit()
+    
+    async def clear_billing_contacts(self, account_id: UUID) -> None:
+        """Clear billing status for all contacts of an account."""
+        from sqlalchemy import update
+        await self.session.execute(
+            update(Contact)
+            .where(Contact.account_id == account_id)
+            .values(is_billing="false")
+        )
         await self.session.flush()
     
     async def list_all(

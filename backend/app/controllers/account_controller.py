@@ -31,14 +31,12 @@ class AccountController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None,
         region: Optional[str] = None,
     ) -> AccountListResponse:
         """List accounts with optional filters."""
         accounts, total = await self.account_service.list_accounts(
             skip=skip,
             limit=limit,
-            status=status,
             region=region,
         )
         return AccountListResponse(items=accounts, total=total)

@@ -22,13 +22,30 @@ class ContactService(BaseService):
         """Create a new contact."""
         contact_dict = contact_data.model_dump(exclude_unset=True)
         
+        # Check if this is the first contact for the account
+        existing_count = await self.contact_repo.count_by_account(contact_data.account_id)
+        is_first_contact = existing_count == 0
+        
         # Convert boolean is_primary to string
         if "is_primary" in contact_dict:
             contact_dict["is_primary"] = "true" if contact_dict["is_primary"] else "false"
+        else:
+            # Set first contact as primary automatically
+            contact_dict["is_primary"] = "true" if is_first_contact else "false"
+        
+        # Convert boolean is_billing to string
+        if "is_billing" in contact_dict:
+            contact_dict["is_billing"] = "true" if contact_dict["is_billing"] else "false"
+        else:
+            contact_dict["is_billing"] = "false"
         
         # If this contact is set as primary, clear other primary contacts
         if contact_dict.get("is_primary") == "true":
             await self.contact_repo.clear_primary_contacts(contact_data.account_id)
+        
+        # If this contact is set as billing, clear other billing contacts
+        if contact_dict.get("is_billing") == "true":
+            await self.contact_repo.clear_billing_contacts(contact_data.account_id)
         
         contact = await self.contact_repo.create(**contact_dict)
         await self.session.commit()
@@ -85,6 +102,13 @@ class ContactService(BaseService):
                 await self.contact_repo.clear_primary_contacts(contact.account_id)
             update_dict["is_primary"] = "true" if update_dict["is_primary"] else "false"
         
+        # Convert boolean is_billing to string
+        if "is_billing" in update_dict:
+            # If setting as billing, clear other billing contacts first
+            if update_dict["is_billing"]:
+                await self.contact_repo.clear_billing_contacts(contact.account_id)
+            update_dict["is_billing"] = "true" if update_dict["is_billing"] else "false"
+        
         updated = await self.contact_repo.update(contact_id, **update_dict)
         await self.session.commit()
         # Reload with account relationship
@@ -102,8 +126,11 @@ class ContactService(BaseService):
     def _to_response(self, contact) -> ContactResponse:
         """Convert contact model to response schema."""
         account_name = None
+        account_type = None
         if hasattr(contact, 'account') and contact.account:
             account_name = contact.account.company_name
+            if hasattr(contact.account, 'type'):
+                account_type = contact.account.type.value if hasattr(contact.account.type, 'value') else str(contact.account.type)
         
         return ContactResponse(
             id=contact.id,
@@ -114,6 +141,8 @@ class ContactService(BaseService):
             phone=contact.phone,
             job_title=contact.job_title,
             is_primary=contact.is_primary == "true",
+            is_billing=contact.is_billing == "true",
             account_name=account_name,
+            account_type=account_type,
         )
 

@@ -26,7 +26,6 @@ export function useAccounts(
   params?: {
     skip?: number;
     limit?: number;
-    status?: string;
     region?: string;
   },
   options?: Omit<UseQueryOptions<AccountListResponse>, "queryKey" | "queryFn">

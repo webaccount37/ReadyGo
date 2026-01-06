@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
-from app.models.account import Account, AccountStatus
+from app.models.account import Account
 
 
 class AccountRepository(BaseRepository[Account]):
@@ -51,18 +51,6 @@ class AccountRepository(BaseRepository[Account]):
         query = self._base_query().where(Account.company_name == company_name)
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
-    
-    async def list_by_status(
-        self,
-        status: AccountStatus,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> List[Account]:
-        """List accounts by status."""
-        query = self._base_query().where(Account.status == status)
-        query = query.offset(skip).limit(limit)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
     
     async def get_with_contacts(self, account_id: UUID) -> Optional[Account]:
         """Get account with contacts loaded."""

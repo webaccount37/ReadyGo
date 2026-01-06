@@ -43,9 +43,9 @@ const navGroups: NavGroup[] = [
   {
     title: "Client Management",
     items: [
-      { title: "Opportunities", href: "/opportunities", icon: Briefcase },
       { title: "Accounts", href: "/accounts", icon: Building2 },
       { title: "Contacts", href: "/contacts", icon: ContactRound },
+      { title: "Opportunities", href: "/opportunities", icon: Briefcase },
     ],
   },
   {
@@ -72,11 +72,11 @@ const navGroups: NavGroup[] = [
   {
     title: "Resources",
     items: [
-      { title: "Employees", href: "/employees", icon: Users },
-      { title: "Roles", href: "/roles", icon: Shield },
-      { title: "Delivery Centers", href: "/delivery-centers", icon: MapPin },
       { title: "Calendars", href: "/calendars", icon: Calendar },
       { title: "Currency Rates", href: "/currency-rates", icon: DollarSign },
+      { title: "Delivery Centers", href: "/delivery-centers", icon: MapPin },
+      { title: "Employees", href: "/employees", icon: Users },
+      { title: "Roles", href: "/roles", icon: Shield },
     ],
   },
   {

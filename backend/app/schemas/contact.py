@@ -15,6 +15,7 @@ class ContactBase(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     job_title: Optional[str] = Field(None, max_length=100)
     is_primary: bool = False
+    is_billing: bool = False
 
 
 class ContactCreate(ContactBase):
@@ -30,6 +31,7 @@ class ContactUpdate(BaseModel):
     phone: Optional[str] = Field(None, max_length=50)
     job_title: Optional[str] = Field(None, max_length=100)
     is_primary: Optional[bool] = None
+    is_billing: Optional[bool] = None
 
 
 class ContactResponse(ContactBase):
@@ -37,6 +39,7 @@ class ContactResponse(ContactBase):
     id: UUID
     account_id: UUID
     account_name: Optional[str] = None  # Company name from account relationship
+    account_type: Optional[str] = None  # Account type from account relationship
     
     class Config:
         from_attributes = True

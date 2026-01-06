@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import type { AccountCreate, AccountUpdate } from "@/types/account";
+import type { AccountCreate, AccountUpdate, AccountType } from "@/types/account";
 import { COUNTRIES } from "@/types/countries";
+import { CURRENCIES } from "@/types/currency";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 
 interface AccountFormProps {
@@ -18,11 +19,8 @@ interface AccountFormProps {
 
 interface FormErrors {
   company_name?: string;
-  street_address?: string;
-  city?: string;
-  region?: string;
+  type?: string;
   country?: string;
-  billing_term_id?: string;
 }
 
 export function AccountForm({
@@ -35,12 +33,12 @@ export function AccountForm({
 
   const [formData, setFormData] = useState<AccountCreate>({
     company_name: initialData?.company_name || "",
+    type: initialData?.type || "customer",
     industry: initialData?.industry || "",
     street_address: initialData?.street_address || "",
     city: initialData?.city || "",
     region: initialData?.region || "",
     country: initialData?.country || "",
-    status: initialData?.status || "active",
     billing_term_id: initialData?.billing_term_id || "",
     default_currency: initialData?.default_currency || "USD",
   });
@@ -53,20 +51,11 @@ export function AccountForm({
     if (!formData.company_name?.trim()) {
       newErrors.company_name = "Company name is required";
     }
-    if (!formData.street_address?.trim()) {
-      newErrors.street_address = "Street address is required";
-    }
-    if (!formData.city?.trim()) {
-      newErrors.city = "City is required";
-    }
-    if (!formData.region?.trim()) {
-      newErrors.region = "Region is required";
+    if (!formData.type) {
+      newErrors.type = "Account type is required";
     }
     if (!formData.country?.trim()) {
       newErrors.country = "Country is required";
-    }
-    if (!formData.billing_term_id) {
-      newErrors.billing_term_id = "Billing terms are required";
     }
 
     setErrors(newErrors);
@@ -85,14 +74,10 @@ export function AccountForm({
     } catch (err) {
       // Handle backend validation errors
       const errorMessage = err instanceof Error ? err.message : String(err);
-      if (errorMessage.includes("billing_term")) {
-        setErrors(prev => ({ ...prev, billing_term_id: "Billing terms are required" }));
-      } else if (errorMessage.includes("street_address")) {
-        setErrors(prev => ({ ...prev, street_address: "Street address is required" }));
-      } else if (errorMessage.includes("city")) {
-        setErrors(prev => ({ ...prev, city: "City is required" }));
-      } else if (errorMessage.includes("region")) {
-        setErrors(prev => ({ ...prev, region: "Region is required" }));
+      if (errorMessage.includes("company_name")) {
+        setErrors(prev => ({ ...prev, company_name: "Company name is required" }));
+      } else if (errorMessage.includes("type")) {
+        setErrors(prev => ({ ...prev, type: "Account type is required" }));
       } else if (errorMessage.includes("country")) {
         setErrors(prev => ({ ...prev, country: "Country is required" }));
       }
@@ -104,7 +89,7 @@ export function AccountForm({
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-1">
         <p className="text-sm font-semibold text-gray-800">Basics</p>
-        <p className="text-xs text-gray-500">Primary account identity and status.</p>
+        <p className="text-xs text-gray-500">Primary account identity.</p>
       </div>
 
       <div>
@@ -126,6 +111,27 @@ export function AccountForm({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
+          <Label htmlFor="type">Type *</Label>
+          <Select
+            id="type"
+            value={formData.type}
+            onChange={(e) => {
+              setFormData({ ...formData, type: e.target.value as AccountType });
+              if (errors.type) setErrors({ ...errors, type: undefined });
+            }}
+            required
+            className={errors.type ? "border-red-500" : ""}
+          >
+            <option value="customer">Customer</option>
+            <option value="vendor">Vendor</option>
+            <option value="partner">Partner</option>
+            <option value="network">Network</option>
+          </Select>
+          {errors.type && (
+            <p className="text-red-500 text-sm mt-1">{errors.type}</p>
+          )}
+        </div>
+        <div>
           <Label htmlFor="industry">Industry</Label>
           <Input
             id="industry"
@@ -135,23 +141,6 @@ export function AccountForm({
             }
           />
         </div>
-        <div>
-          <Label htmlFor="status">Status</Label>
-          <Select
-            id="status"
-            value={formData.status}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                status: e.target.value as AccountCreate["status"],
-              })
-            }
-          >
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-            <option value="prospect">Prospect</option>
-          </Select>
-        </div>
       </div>
 
       <div className="space-y-1 pt-2">
@@ -160,56 +149,38 @@ export function AccountForm({
       </div>
 
       <div>
-        <Label htmlFor="street_address">Street Address *</Label>
+        <Label htmlFor="street_address">Street Address</Label>
         <Input
           id="street_address"
-          value={formData.street_address}
+          value={formData.street_address || ""}
           onChange={(e) => {
             setFormData({ ...formData, street_address: e.target.value });
-            if (errors.street_address) setErrors({ ...errors, street_address: undefined });
           }}
-          required
           placeholder="123 Main Street"
-          className={errors.street_address ? "border-red-500" : ""}
         />
-        {errors.street_address && (
-          <p className="text-red-500 text-sm mt-1">{errors.street_address}</p>
-        )}
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
-          <Label htmlFor="city">City *</Label>
+          <Label htmlFor="city">City</Label>
           <Input
             id="city"
-            value={formData.city}
+            value={formData.city || ""}
             onChange={(e) => {
               setFormData({ ...formData, city: e.target.value });
-              if (errors.city) setErrors({ ...errors, city: undefined });
             }}
-            required
-            className={errors.city ? "border-red-500" : ""}
           />
-          {errors.city && (
-            <p className="text-red-500 text-sm mt-1">{errors.city}</p>
-          )}
         </div>
         <div>
-          <Label htmlFor="region">Region *</Label>
+          <Label htmlFor="region">Region</Label>
           <Input
             id="region"
-            value={formData.region}
+            value={formData.region || ""}
             onChange={(e) => {
               setFormData({ ...formData, region: e.target.value });
-              if (errors.region) setErrors({ ...errors, region: undefined });
             }}
-            required
             placeholder="State/Province"
-            className={errors.region ? "border-red-500" : ""}
           />
-          {errors.region && (
-            <p className="text-red-500 text-sm mt-1">{errors.region}</p>
-          )}
         </div>
         <div>
           <Label htmlFor="country">Country *</Label>
@@ -237,33 +208,36 @@ export function AccountForm({
       </div>
 
       <div className="space-y-1 pt-2">
-        <p className="text-sm font-semibold text-gray-800">Billing & Defaults</p>
+        <p className="text-sm font-semibold text-gray-800">Billing Defaults</p>
         <p className="text-xs text-gray-500">Select billing terms and default currency.</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
           <Label htmlFor="default_currency">Default Currency</Label>
-          <Input
+          <Select
             id="default_currency"
             value={formData.default_currency}
             onChange={(e) =>
               setFormData({ ...formData, default_currency: e.target.value })
             }
-          />
+          >
+            {CURRENCIES.map((c) => (
+              <option key={c.value} value={c.value}>
+                {c.label}
+              </option>
+            ))}
+          </Select>
         </div>
         <div>
-          <Label htmlFor="billing_term_id">Billing Terms *</Label>
+          <Label htmlFor="billing_term_id">Billing Terms</Label>
           <Select
             id="billing_term_id"
-            value={formData.billing_term_id}
+            value={formData.billing_term_id || ""}
             onChange={(e) => {
-              setFormData({ ...formData, billing_term_id: e.target.value });
-              if (errors.billing_term_id) setErrors({ ...errors, billing_term_id: undefined });
+              setFormData({ ...formData, billing_term_id: e.target.value || undefined });
             }}
-            required
             disabled={billingTermsLoading}
-            className={errors.billing_term_id ? "border-red-500" : ""}
           >
             <option value="">
               {billingTermsLoading ? "Loading..." : "Select billing terms"}
@@ -274,9 +248,6 @@ export function AccountForm({
               </option>
             ))}
           </Select>
-          {errors.billing_term_id && (
-            <p className="text-red-500 text-sm mt-1">{errors.billing_term_id}</p>
-          )}
         </div>
       </div>
 
