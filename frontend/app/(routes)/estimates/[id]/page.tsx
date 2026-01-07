@@ -3,6 +3,7 @@
 import { useParams } from "next/navigation";
 import { useEstimateDetail, useCloneEstimate, useCreateEstimate, useDeleteEstimate } from "@/hooks/useEstimates";
 import { useOpportunity, useUpdateOpportunity } from "@/hooks/useOpportunities";
+import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useRouter } from "next/navigation";
 import { EstimateSpreadsheet } from "@/components/estimates/estimate-spreadsheet";
 import { PhaseManagement } from "@/components/estimates/phase-management";
@@ -13,14 +14,77 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import Link from "next/link";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Lock, AlertTriangle } from "lucide-react";
+import { Lock, AlertTriangle, AlertCircle } from "lucide-react";
 import { CURRENCIES } from "@/types/currency";
+import { useQueryClient } from "@tanstack/react-query";
+import type { EstimateDetailResponse } from "@/types/estimate";
+
+// Helper function to clear stale cache entries
+function clearStaleCacheEntries(queryClient: ReturnType<typeof useQueryClient>, estimateId: string, actualLineItemIds: Set<string>) {
+  const cacheData = queryClient.getQueryData<EstimateDetailResponse>(["estimates", "detail", estimateId, true]);
+  if (cacheData && cacheData.line_items) {
+    // Filter out any line items that don't exist in the actual database response
+    const validLineItems = cacheData.line_items.filter(item => actualLineItemIds.has(item.id));
+    if (validLineItems.length !== cacheData.line_items.length) {
+      console.log(`Clearing ${cacheData.line_items.length - validLineItems.length} stale line items from cache`);
+      queryClient.setQueryData<EstimateDetailResponse>(
+        ["estimates", "detail", estimateId, true],
+        {
+          ...cacheData,
+          line_items: validLineItems,
+        }
+      );
+    }
+  }
+}
 
 export default function EstimateDetailPage() {
   const params = useParams();
   const router = useRouter();
   const estimateId = params.id as string;
-  const { data: estimate, isLoading, error } = useEstimateDetail(estimateId);
+  const queryClient = useQueryClient();
+  
+  // Force refetch on mount to ensure we have fresh data from database
+  const { data: estimate, isLoading, error } = useEstimateDetail(estimateId, {
+    refetchOnMount: "always", // Always refetch to ensure fresh data
+    refetchOnWindowFocus: false,
+    staleTime: 0, // Never consider data stale - always refetch
+  });
+  
+  // CRITICAL: Sync cache with database and clear stale data
+  useEffect(() => {
+    if (estimate && queryClient && typeof window !== "undefined") {
+      // Create set of actual line item IDs from database response
+      const actualLineItemIds = new Set(estimate.line_items?.map(item => item.id) || []);
+      
+      // Clear stale cache entries
+      clearStaleCacheEntries(queryClient, estimateId, actualLineItemIds);
+      
+      // Get all localStorage keys for this estimate
+      const keysToCheck: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && (key.includes(`-${estimateId}-`) || key.includes(`-${estimate.id}-`))) {
+          keysToCheck.push(key);
+        }
+      }
+      
+      // Check each key and remove if it references a line item that doesn't exist
+      keysToCheck.forEach(key => {
+        if (key.includes('line-item-id-')) {
+          const lineItemId = localStorage.getItem(key);
+          if (lineItemId && !actualLineItemIds.has(lineItemId)) {
+            console.log("Removing stale localStorage key:", key, "for non-existent lineItemId:", lineItemId);
+            localStorage.removeItem(key);
+            // Also remove associated empty-row data
+            const emptyRowKey = key.replace('line-item-id-', 'empty-row-');
+            localStorage.removeItem(emptyRowKey);
+          }
+        }
+      });
+    }
+  }, [estimate?.id, estimateId, queryClient]); // Only run when estimate ID changes
+  
   const cloneEstimate = useCloneEstimate();
   const createEstimate = useCreateEstimate();
   const deleteEstimate = useDeleteEstimate();
@@ -31,11 +95,25 @@ export default function EstimateDetailPage() {
   const { data: opportunity, refetch: refetchOpportunity } = useOpportunity(estimate?.opportunity_id || "", false);
   const updateOpportunity = useUpdateOpportunity();
   
+  // Fetch delivery centers to get names for display
+  const { data: deliveryCentersData } = useDeliveryCenters();
+  
+  // Helper function to get delivery center name from ID
+  const getDeliveryCenterName = (dcId: string | undefined): string => {
+    if (!dcId || !deliveryCentersData?.items) return dcId || "—";
+    const dc = deliveryCentersData.items.find(d => d.id === dcId);
+    return dc?.name || dcId;
+  };
+  
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [invoiceCurrency, setInvoiceCurrency] = useState<string>("");
   const [invoiceCustomer, setInvoiceCustomer] = useState<boolean>(true);
   const [billableExpenses, setBillableExpenses] = useState<boolean>(true);
+  
+  // Track original Invoice Center and Currency to detect changes
+  const [originalInvoiceCenterId, setOriginalInvoiceCenterId] = useState<string | undefined>(undefined);
+  const [originalInvoiceCurrency, setOriginalInvoiceCurrency] = useState<string | undefined>(undefined);
   
   // Initialize dates and currency from opportunity
   useEffect(() => {
@@ -47,6 +125,25 @@ export default function EstimateDetailPage() {
       setBillableExpenses(opportunity.billable_expenses !== undefined ? opportunity.billable_expenses : true);
     }
   }, [opportunity]);
+  
+  // Store original Invoice Center and Currency when estimate loads (reset when estimate changes)
+  useEffect(() => {
+    if (opportunity && estimate) {
+      setOriginalInvoiceCenterId(opportunity.delivery_center_id);
+      setOriginalInvoiceCurrency(opportunity.default_currency || "USD");
+    }
+  }, [estimate?.id, opportunity?.id]); // Reset when estimate or opportunity ID changes
+  
+  // Detect Invoice Center/Currency changes for active estimates
+  const hasInvoiceCenterOrCurrencyChange = useMemo(() => {
+    if (!opportunity || !estimate || estimate.is_locked) return false;
+    if (!originalInvoiceCenterId || !originalInvoiceCurrency) return false;
+    
+    const centerChanged = opportunity.delivery_center_id !== originalInvoiceCenterId;
+    const currencyChanged = (opportunity.default_currency || "USD") !== originalInvoiceCurrency;
+    
+    return centerChanged || currencyChanged;
+  }, [opportunity, estimate, originalInvoiceCenterId, originalInvoiceCurrency]);
 
   // Check for date mismatches
   const hasDateMismatch = useMemo(() => {
@@ -73,14 +170,23 @@ export default function EstimateDetailPage() {
       const updates: Record<string, unknown> = {};
       let hasChanges = false;
 
-      if (startDate && startDate !== opportunity.start_date) {
+      // Only update start_date if it's a valid non-empty string and different from current
+      if (startDate && startDate.trim() !== "" && startDate !== opportunity.start_date) {
         updates.start_date = startDate;
         hasChanges = true;
       }
-      if (endDate && endDate !== opportunity.end_date) {
+      // CRITICAL: end_date is required (NOT NULL constraint), so only update if we have a valid value
+      // Don't include it in updates if it's empty or null to avoid violating the constraint
+      // Also check that opportunity.end_date exists - if it's null in DB, we can't update to empty
+      if (endDate && 
+          endDate.trim() !== "" && 
+          opportunity.end_date && // Ensure opportunity has an end_date before comparing
+          endDate !== opportunity.end_date) {
         updates.end_date = endDate;
         hasChanges = true;
       }
+      // If endDate is empty or opportunity.end_date is null, don't include end_date in updates
+      // This preserves the existing value and avoids NOT NULL constraint violations
       if (invoiceCurrency && invoiceCurrency !== opportunity.default_currency) {
         updates.default_currency = invoiceCurrency;
         hasChanges = true;
@@ -138,14 +244,18 @@ export default function EstimateDetailPage() {
     try {
       const newEstimate = await createEstimate.mutateAsync({
         opportunity_id: estimate.opportunity_id,
-        name: "INITIAL", // Create INITIAL version (clear estimate)
+        name: "", // Empty name will trigger backend to create empty estimate
       });
-      // Redirect to the new estimate
+      // Invalidate all estimates to ensure fresh data
+      queryClient.invalidateQueries({ queryKey: ["estimates"] });
+      queryClient.removeQueries({ queryKey: ["estimates", "detail", newEstimate.id] });
+      // Redirect to the new estimate and force a fresh fetch
       router.push(`/estimates/${newEstimate.id}`);
+      // Force a page reload to ensure we get fresh empty data
+      window.location.href = `/estimates/${newEstimate.id}`;
     } catch (err) {
       console.error("Failed to create estimate:", err);
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    } finally {
       setIsCreating(false);
     }
   };
@@ -284,7 +394,7 @@ export default function EstimateDetailPage() {
             {opportunity?.delivery_center_id && (
               <div className="flex items-center">
                 <span className="font-semibold mr-2">Invoice Center:</span>
-                <span>{opportunity.delivery_center_id}</span>
+                <span>{getDeliveryCenterName(opportunity.delivery_center_id)}</span>
               </div>
             )}
             <div>
@@ -361,6 +471,24 @@ export default function EstimateDetailPage() {
       </Card>
 
       {/* Warning for date mismatches */}
+      {hasInvoiceCenterOrCurrencyChange && (
+        <Card className="mb-6 border-orange-200 bg-orange-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-orange-800">
+              <AlertCircle className="w-5 h-5" />
+              <div>
+                <p className="font-semibold">Invoice Center or Currency Changed</p>
+                <p className="text-sm">
+                  The Opportunity&apos;s Invoice Center or Invoice Currency has been updated. 
+                  Estimate line items may need currency conversion updates. 
+                  Please review all Cost and Rate values to ensure they reflect the new currency.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {hasDateMismatch && (
         <Card className="mb-6 border-yellow-200 bg-yellow-50">
           <CardContent className="p-4">

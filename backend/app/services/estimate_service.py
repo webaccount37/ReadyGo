@@ -177,6 +177,15 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get_with_line_items(estimate_id)
         if not estimate:
             return None
+        
+        # Explicitly reload line items to ensure all are loaded and sorted
+        # Sometimes selectinload doesn't load all items properly
+        line_items = await self.line_item_repo.list_by_estimate(estimate_id)
+        if line_items:
+            # Replace the relationship-loaded items with explicitly queried ones
+            estimate.line_items = line_items
+            logger.info(f"Explicitly loaded {len(line_items)} line items for estimate {estimate_id}")
+        
         return await self._to_detail_response(estimate)
     
     async def list_estimates(
@@ -324,9 +333,12 @@ class EstimateService(BaseService):
                     row_order=phase.row_order,
                 )
         
-        # Clone line items
-        if estimate.line_items:
-            for line_item in estimate.line_items:
+        # Clone line items - ensure they're sorted by row_order first
+        line_items_to_clone = list(estimate.line_items) if estimate.line_items else []
+        line_items_to_clone.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
+        
+        if line_items_to_clone:
+            for line_item in line_items_to_clone:
                 new_line_item_dict = {
                     "estimate_id": new_estimate.id,
                     "role_rates_id": line_item.role_rates_id,
@@ -357,6 +369,17 @@ class EstimateService(BaseService):
         new_estimate = await self.estimate_repo.get_with_line_items(new_estimate.id)
         if not new_estimate:
             raise ValueError("Failed to retrieve cloned estimate")
+        
+        # Explicitly reload line items to ensure all cloned items are loaded
+        line_items = await self.line_item_repo.list_by_estimate(new_estimate.id)
+        if line_items:
+            new_estimate.line_items = line_items
+            logger.info(f"Explicitly loaded {len(line_items)} line items for cloned estimate {new_estimate.id}")
+        
+        # Ensure line items are sorted by row_order before returning
+        if new_estimate.line_items:
+            new_estimate.line_items = sorted(new_estimate.line_items, key=lambda li: li.row_order if li.row_order is not None else 0)
+        
         return await self._to_detail_response(new_estimate)
     
     async def _get_default_rates_from_role_rate(
@@ -1135,14 +1158,25 @@ class EstimateService(BaseService):
                 line_items_attr = inspector.attrs.get("line_items")
                 if line_items_attr and line_items_attr.loaded_value is not None:
                     line_items_list = line_items_attr.loaded_value
+                    logger.info(f"Found {len(line_items_list) if line_items_list else 0} line items in relationship for estimate {estimate.id}")
                     if line_items_list:
-                        # Ensure we're iterating over EstimateLineItem objects, not weekly_hours
-                        estimate_dict["line_items"] = [
-                            self._line_item_to_response(li) 
-                            for li in line_items_list 
+                        # Filter to only EstimateLineItem objects and sort by row_order
+                        # This ensures all line items are included and properly ordered
+                        filtered_items = [
+                            li for li in line_items_list 
                             if isinstance(li, EstimateLineItem)
                         ]
-            except (AttributeError, KeyError, TypeError):
+                        logger.info(f"Filtered to {len(filtered_items)} EstimateLineItem objects (removed {len(line_items_list) - len(filtered_items)} non-line-item objects)")
+                        # Sort by row_order to ensure consistent ordering
+                        filtered_items.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
+                        logger.info(f"Line items row_order values: {[li.row_order for li in filtered_items]}")
+                        estimate_dict["line_items"] = [
+                            self._line_item_to_response(li) 
+                            for li in filtered_items
+                        ]
+                        logger.info(f"Converted {len(estimate_dict['line_items'])} line items to response format")
+            except (AttributeError, KeyError, TypeError) as e:
+                logger.error(f"Error processing line items: {e}", exc_info=True)
                 pass
         
         return EstimateResponse.model_validate(estimate_dict)

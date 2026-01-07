@@ -66,7 +66,11 @@ export function EstimateSpreadsheet({
       alert(`Failed to import estimate: ${error.message}`);
     },
   });
-  const { refetch } = useEstimateDetail(estimate.id);
+  // Force refetch to ensure we have fresh data from database
+  const { refetch } = useEstimateDetail(estimate.id, {
+    refetchOnMount: "always",
+    staleTime: 0,
+  });
   const [emptyRowIds] = useState<Set<string>>(() => {
     // Generate stable IDs for empty rows that persist across refetches
     const ids = new Set<string>();
@@ -83,7 +87,16 @@ export function EstimateSpreadsheet({
   } | null>(null);
   
   // Always show at least the specified number of empty rows
-  const existingLineItems = useMemo(() => estimate.line_items || [], [estimate.line_items]);
+  // Sort line items by row_order to ensure consistent ordering
+  // CRITICAL: Filter out any line items that might have been deleted but are still in cache
+  const existingLineItems = useMemo(() => {
+    const items = estimate.line_items || [];
+    // Filter to ensure we only show items that actually exist (have an id)
+    // Sort by row_order to ensure consistent ordering
+    return [...items]
+      .filter(item => item && item.id) // Ensure item exists and has an ID
+      .sort((a, b) => (a.row_order || 0) - (b.row_order || 0));
+  }, [estimate.line_items]);
   // Calculate empty rows needed - maintain a minimum number of empty rows
   // When items are created, we don't want to immediately add a new empty row
   // So we show empty rows based on the initial count, not dynamically adding more

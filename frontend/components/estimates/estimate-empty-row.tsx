@@ -64,8 +64,11 @@ export function EstimateEmptyRow({
   const isReceivingBackendUpdateRef = useRef(false);
 
   // Fetch estimate detail to get the line item when it's created
+  // Force refetch to ensure we have fresh data from database
   const { data: estimateDetail } = useEstimateDetail(estimateId, {
     enabled: true, // Always fetch to check for existing line items
+    refetchOnMount: "always",
+    staleTime: 0, // Never consider data stale
   });
 
   // Use a ref to persist formData across refetches, initialized from localStorage if available
@@ -115,6 +118,10 @@ export function EstimateEmptyRow({
   // Don't clear based on matching - that would clear other rows incorrectly
   const isRenderedAsLineItemRow = lineItemId && estimateDetail?.line_items?.some(item => item.id === lineItemId);
   
+  // CRITICAL: Check if lineItemId exists in localStorage but NOT in database (stale data)
+  // This happens when a line item is deleted but localStorage still has the old ID
+  const hasStaleLineItemId = lineItemId && estimateDetail && !estimateDetail.line_items?.some(item => item.id === lineItemId);
+  
   // Clear formData and lineItemId ONLY if this specific row's lineItemId is already rendered
   // This prevents the empty row from showing duplicate data when the line item is rendered as EstimateLineItemRow
   useEffect(() => {
@@ -129,6 +136,133 @@ export function EstimateEmptyRow({
       }
     }
   }, [isRenderedAsLineItemRow, lineItemId, stableId, estimateId, _rowIndex, estimateDetail]);
+  
+  // CRITICAL: Clear stale lineItemId from localStorage if it doesn't exist in database
+  useEffect(() => {
+    if (hasStaleLineItemId && lineItemId) {
+      console.log("Detected stale lineItemId in localStorage that doesn't exist in database, clearing:", lineItemId);
+      setLineItemId(null);
+      setFormData(getInitialFormData());
+      if (typeof window !== "undefined") {
+        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+        localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+      }
+    }
+  }, [hasStaleLineItemId, lineItemId, stableId, estimateId, _rowIndex]);
+  
+  // CRITICAL: Check if this row's formData matches a line item that doesn't exist
+  // This handles cases where form data was saved but the line item creation failed
+  // IMPORTANT: Only run when estimateDetail changes, NOT when formData changes (to avoid clearing during editing)
+  useEffect(() => {
+    // Skip cleanup if we're currently saving or creating - don't interfere with active operations
+    if (isSaving || isCreatingRef.current) {
+      return;
+    }
+    
+    // Skip cleanup if we have a lineItemId that exists in the database - this row is valid
+    if (lineItemId && estimateDetail?.line_items?.some(item => item.id === lineItemId)) {
+      return;
+    }
+    
+    // Only check if we have form data but no lineItemId (meaning it's not a saved record)
+    if (!lineItemId && formData.role_id && estimateDetail && estimateDetail.line_items) {
+      // Check if there's a line item matching this form data
+      // Use more lenient matching - check role and employee first, then rate/cost
+      const matchingItem = estimateDetail.line_items.find(item => {
+        const roleMatches = item.role_id === formData.role_id;
+        const employeeMatches = (item.employee_id || null) === (formData.employee_id || null);
+        const rateMatches = formData.rate ? Math.abs(parseFloat(String(item.rate)) - parseFloat(String(formData.rate))) < 0.01 : true;
+        const costMatches = formData.cost ? Math.abs(parseFloat(String(item.cost)) - parseFloat(String(formData.cost))) < 0.01 : true;
+        
+        return roleMatches && employeeMatches && rateMatches && costMatches;
+      });
+      
+      // If no matching item exists AND we have meaningful data, this form data is stale
+      // But only clear if the data looks "complete" (has both role and some other field)
+      // This prevents clearing data that's still being entered
+      const hasCompleteData = formData.role_id && (formData.rate || formData.cost || formData.employee_id);
+      if (!matchingItem && hasCompleteData) {
+        // Add a small delay to avoid clearing data that's about to be saved
+        const timeoutId = setTimeout(() => {
+          // Double-check we're still not saving/creating and still no match
+          if (!isSaving && !isCreatingRef.current && !lineItemId && estimateDetail && estimateDetail.line_items) {
+            const stillNoMatch = !estimateDetail.line_items.some(item => {
+              const roleMatches = item.role_id === formData.role_id;
+              const employeeMatches = (item.employee_id || null) === (formData.employee_id || null);
+              return roleMatches && employeeMatches;
+            });
+            
+            if (stillNoMatch) {
+              console.log("Clearing stale form data - no matching database record found:", {
+                role_id: formData.role_id,
+                rate: formData.rate,
+                cost: formData.cost,
+                employee_id: formData.employee_id,
+                database_line_items_count: estimateDetail.line_items.length
+              });
+              setFormData(getInitialFormData());
+              if (typeof window !== "undefined") {
+                localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+                localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+              }
+            }
+          }
+        }, 2000); // 2 second delay to allow saves to complete
+        
+        return () => clearTimeout(timeoutId);
+      }
+    }
+  }, [estimateDetail?.line_items, lineItemId, stableId, estimateId, _rowIndex, opportunityDeliveryCenterId]); // Only depend on estimateDetail changes, not formData (isSaving checked inside effect)
+  
+  // CRITICAL: Also run cleanup on mount and when estimateDetail first loads
+  // This ensures stale form data is cleared even if it was loaded before estimateDetail
+  // But only run once per estimate load, and skip if actively saving/creating
+  useEffect(() => {
+    // Skip cleanup if we're currently saving or creating
+    if (isSaving || isCreatingRef.current) {
+      return;
+    }
+    
+    if (estimateDetail && estimateDetail.line_items && !lineItemId) {
+      // If we have form data but no lineItemId, check if it matches any database record
+      // Only check if we have "complete" data (role + something else) to avoid clearing partial entries
+      const hasCompleteData = formData.role_id && (formData.rate || formData.cost || formData.employee_id);
+      if (hasCompleteData) {
+        const hasMatch = estimateDetail.line_items.some(item => {
+          const roleMatches = item.role_id === formData.role_id;
+          const employeeMatches = (item.employee_id || null) === (formData.employee_id || null);
+          return roleMatches && employeeMatches;
+        });
+        
+        if (!hasMatch) {
+          // Add delay to avoid clearing data that's about to be saved
+          const timeoutId = setTimeout(() => {
+            if (!isSaving && !isCreatingRef.current && !lineItemId && estimateDetail && estimateDetail.line_items) {
+              const stillNoMatch = !estimateDetail.line_items.some(item => {
+                const roleMatches = item.role_id === formData.role_id;
+                const employeeMatches = (item.employee_id || null) === (formData.employee_id || null);
+                return roleMatches && employeeMatches;
+              });
+              
+              if (stillNoMatch) {
+                console.log("Mount cleanup: Clearing stale form data - no matching database record:", {
+                  formData: { role_id: formData.role_id, employee_id: formData.employee_id, rate: formData.rate, cost: formData.cost },
+                  database_count: estimateDetail.line_items.length
+                });
+                setFormData(getInitialFormData());
+                if (typeof window !== "undefined") {
+                  localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+                  localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+                }
+              }
+            }
+          }, 2000); // 2 second delay
+          
+          return () => clearTimeout(timeoutId);
+        }
+      }
+    }
+  }, [estimateDetail?.id]); // Run when estimateDetail first loads (isSaving checked inside effect)
 
   // The effective line item ID is simply the lineItemId we have stored
   // This ensures each row only operates on its own database record
@@ -136,7 +270,13 @@ export function EstimateEmptyRow({
   const effectiveLineItem = lineItem || null;
   
   // For Delete button: show if this row has a database record
-  // Check both lineItemId and if a matching record exists in estimateDetail
+  // CRITICAL: Must verify the line item actually exists in the database, not just in localStorage
+  // Check if lineItemId exists AND is found in estimateDetail.line_items
+  const existingLineItemById = effectiveLineItemId 
+    ? estimateDetail?.line_items?.find(item => item.id === effectiveLineItemId)
+    : null;
+  
+  // Also check for matching record by field values (for backwards compatibility)
   // Use String() comparison for cost/rate to handle string vs number differences
   const matchingExistingRecord = estimateDetail?.line_items?.find(item => 
     item.role_id === formData.role_id &&
@@ -145,8 +285,9 @@ export function EstimateEmptyRow({
     String(item.rate) === String(formData.rate)
   );
   
-  const hasDatabaseRecord = effectiveLineItemId !== null || matchingExistingRecord !== undefined;
-  const recordIdForDelete = effectiveLineItemId || matchingExistingRecord?.id || null;
+  // Only show Delete if we have a valid database record (not just localStorage)
+  const hasDatabaseRecord = existingLineItemById !== null || matchingExistingRecord !== undefined;
+  const recordIdForDelete = existingLineItemById?.id || matchingExistingRecord?.id || null;
 
   // Debug logging
   useEffect(() => {
@@ -209,287 +350,175 @@ export function EstimateEmptyRow({
   const isCreatingRef = useRef(false);
   const lastSavedDataRef = useRef<Partial<EstimateLineItemCreate>>({});
 
-  // Auto-save function with debouncing - only saves meaningful changes
-  const autoSave = useCallback(async (changedFields?: Set<string>) => {
-    // Don't save if we're already saving or creating
+  // Track previous saved data to prevent unnecessary saves
+  const prevSavedDataRef = useRef<Partial<EstimateLineItemCreate>>({});
+
+  // SIMPLE: Save immediately when ANY field changes - no debounce, no complex logic
+  const saveToDatabase = useCallback(async () => {
+    // Skip if already saving/creating
     if (isSaving || isCreatingRef.current) {
       return;
     }
 
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
+    // Check if data actually changed compared to last saved
+    const currentData = {
+      role_id: formData.role_id,
+      delivery_center_id: formData.delivery_center_id,
+      employee_id: formData.employee_id,
+      rate: formData.rate,
+      cost: formData.cost,
+      start_date: formData.start_date,
+      end_date: formData.end_date,
+    };
 
-    saveTimeoutRef.current = setTimeout(async () => {
-      // If we have a line item ID, update it
-      if (lineItemId) {
-        if (!formData.role_id || !formData.delivery_center_id) {
-          return; // Don't save if required fields are missing
-        }
+    const hasChanges = 
+      prevSavedDataRef.current.role_id !== currentData.role_id ||
+      prevSavedDataRef.current.delivery_center_id !== currentData.delivery_center_id ||
+      prevSavedDataRef.current.employee_id !== currentData.employee_id ||
+      prevSavedDataRef.current.rate !== currentData.rate ||
+      prevSavedDataRef.current.cost !== currentData.cost ||
+      prevSavedDataRef.current.start_date !== currentData.start_date ||
+      prevSavedDataRef.current.end_date !== currentData.end_date;
 
-        // Only update if meaningful fields changed (not cost/rate if they're auto-calculated)
-        const updateData: Partial<EstimateLineItemUpdate> = {};
-        let hasChanges = false;
+    // If we have a line item ID, UPDATE it immediately
+    if (lineItemId) {
+      if (!formData.role_id) {
+        return; // Can't update without role_id
+      }
 
-        // Only include fields that actually changed
-        if (changedFields) {
-          if (changedFields.has("role_id")) {
-            updateData.role_id = formData.role_id;
-            hasChanges = true;
-          }
-          if (changedFields.has("delivery_center_id")) {
-            updateData.delivery_center_id = formData.delivery_center_id;
-            hasChanges = true;
-          }
-          if (changedFields.has("employee_id")) {
-            // Send null when clearing employee_id to properly remove the association
-            updateData.employee_id = formData.employee_id || null;
-            hasChanges = true;
-          }
-          if (changedFields.has("start_date")) {
-            updateData.start_date = formData.start_date;
-            hasChanges = true;
-          }
-          if (changedFields.has("end_date")) {
-            updateData.end_date = formData.end_date;
-            hasChanges = true;
-          }
-          // Only include cost/rate if they were manually changed (not auto-calculated)
-          if (changedFields.has("cost") && formData.cost) {
-            updateData.cost = formData.cost;
-            hasChanges = true;
-          }
-          if (changedFields.has("rate") && formData.rate) {
-            updateData.rate = formData.rate;
-            hasChanges = true;
-          }
-        } else {
-          // Fallback: compare with last saved data
-          if (formData.role_id !== lastSavedDataRef.current.role_id) {
-            updateData.role_id = formData.role_id;
-            hasChanges = true;
-          }
-          if (formData.delivery_center_id !== lastSavedDataRef.current.delivery_center_id) {
-            updateData.delivery_center_id = formData.delivery_center_id;
-            hasChanges = true;
-          }
-          if (formData.employee_id !== lastSavedDataRef.current.employee_id) {
-            // Send null when clearing employee_id to properly remove the association
-            updateData.employee_id = formData.employee_id || null;
-            hasChanges = true;
-          }
-          if (formData.start_date !== lastSavedDataRef.current.start_date) {
-            updateData.start_date = formData.start_date;
-            hasChanges = true;
-          }
-          if (formData.end_date !== lastSavedDataRef.current.end_date) {
-            updateData.end_date = formData.end_date;
-            hasChanges = true;
-          }
-        }
+      // Skip if nothing changed
+      if (!hasChanges) {
+        return;
+      }
 
-        if (!hasChanges) {
-          return; // No changes to save
-        }
-
-        setIsSaving(true);
-        try {
-          await updateLineItem.mutateAsync({
-            estimateId,
-            lineItemId,
-            data: updateData as any,
-          });
-          // Update last saved data
-          lastSavedDataRef.current = { ...formData };
-        } catch (err) {
-          console.error("Failed to auto-save line item:", err);
-        } finally {
-          setIsSaving(false);
-        }
-      } else if (formData.role_id && !isCreatingRef.current && !lineItemId) {
-        // Before creating, check if a matching line item already exists
-        // This prevents duplicates when Role is selected and Cost/Rate are auto-populated
-        if (estimateDetail?.line_items) {
-          const matchingItem = estimateDetail.line_items.find(item => 
-            item.role_id === formData.role_id &&
-            item.delivery_center_id === opportunityDeliveryCenterId &&
-            item.cost === formData.cost &&
-            item.rate === formData.rate
-          );
-          
-          if (matchingItem) {
-            // Found existing line item - use it instead of creating duplicate
-            console.log("Found existing line item, using it instead of creating:", matchingItem.id);
-            setLineItemId(matchingItem.id);
-            lastSavedDataRef.current = { ...formData };
-            return; // Don't create a new one
-          }
-        }
-        
-        // Create line item when Role is selected and we have meaningful data (hours or cost/rate)
-        // Cost/Rate are auto-populated when Role is selected, so they should trigger creation
-        const hasHours = weeklyHoursValues.size > 0 && Array.from(weeklyHoursValues.values()).some(h => h && parseFloat(h) > 0);
-        const hasRates = (formData.rate && formData.rate !== "0" && formData.rate !== "") || 
-                         (formData.cost && formData.cost !== "0" && formData.cost !== "");
-        
-        console.log("Checking if line item should be created:", {
+      setIsSaving(true);
+      try {
+        const updateData: Partial<EstimateLineItemUpdate> = {
           role_id: formData.role_id,
-          delivery_center_id: opportunityDeliveryCenterId,
-          hasHours,
-          hasRates,
-          rate: formData.rate,
-          cost: formData.cost,
-          willCreate: hasHours || hasRates,
+          delivery_center_id: formData.delivery_center_id || opportunityDeliveryCenterId,
+          employee_id: formData.employee_id || null,
+          rate: formData.rate || "0",
+          cost: formData.cost || "0",
+          start_date: formData.start_date,
+          end_date: formData.end_date,
+          billable: invoiceCustomer ? (formData.billable ?? true) : false,
+          billable_expense_percentage: billableExpenses ? (formData.billable_expense_percentage || "0") : "0",
+        };
+
+        await updateLineItem.mutateAsync({
+          estimateId,
+          lineItemId,
+          data: updateData as any,
         });
         
-        if (!hasHours && !hasRates) {
-          // Don't create line item yet - wait for user to enter hours or rates
+        // Update saved data reference - DON'T invalidate queries to prevent refetch loop
+        prevSavedDataRef.current = { ...currentData };
+        lastSavedDataRef.current = { ...formData };
+        console.log("Line item updated:", lineItemId);
+      } catch (err) {
+        console.error("Failed to update line item:", err);
+        // CRITICAL: Update saved data ref even on error to prevent infinite retry loop
+        // This prevents the useEffect from seeing the same data and trying to save again
+        prevSavedDataRef.current = { ...currentData };
+        lastSavedDataRef.current = { ...formData };
+      } finally {
+        setIsSaving(false);
+      }
+      return;
+    }
+
+    // If we DON'T have a line item ID but have role_id, CREATE it immediately
+    if (!lineItemId && formData.role_id) {
+      // Check for existing matching item
+      if (estimateDetail?.line_items) {
+        const matchingItem = estimateDetail.line_items.find(item => 
+          item.role_id === formData.role_id &&
+          item.delivery_center_id === opportunityDeliveryCenterId
+        );
+        
+        if (matchingItem) {
+          console.log("Found existing line item:", matchingItem.id);
+          setLineItemId(matchingItem.id);
+          prevSavedDataRef.current = { ...currentData };
+          lastSavedDataRef.current = { ...formData };
           return;
+        }
+      }
+
+      isCreatingRef.current = true;
+      setIsSaving(true);
+      
+      try {
+        const createData: any = {
+          role_id: formData.role_id,
+          delivery_center_id: opportunityDeliveryCenterId,
+          employee_id: formData.employee_id || undefined,
+          rate: formData.rate || "0",
+          cost: formData.cost || "0",
+          currency: currency, // Always use the opportunity currency passed as prop, not formData.currency
+          start_date: formData.start_date,
+          end_date: formData.end_date,
+          billable: invoiceCustomer ? (formData.billable ?? true) : false,
+          billable_expense_percentage: billableExpenses ? (formData.billable_expense_percentage || "0") : "0",
+        };
+        
+        if (!createData.employee_id) {
+          delete createData.employee_id;
         }
         
-        // Create new line item if we have required fields and meaningful data
-        // Double-check we're not already creating and don't have a line item ID
-        if (isCreatingRef.current || lineItemId) {
-          return;
-        }
-        isCreatingRef.current = true;
-        setIsSaving(true);
-        try {
-          // Ensure rate and cost are always provided (backend requires them)
-          // delivery_center_id always comes from opportunityDeliveryCenterId (required)
-          const createData: any = {
-            role_id: formData.role_id,
-            delivery_center_id: opportunityDeliveryCenterId, // Always use Opportunity Invoice Center (required)
-            employee_id: formData.employee_id || undefined,
-            rate: formData.rate || "0",
-            cost: formData.cost || "0",
-            currency: formData.currency || currency,
-            start_date: formData.start_date,
-            end_date: formData.end_date,
-            billable: invoiceCustomer ? (formData.billable ?? true) : false,
-          };
-          // Remove undefined/empty employee_id - backend expects valid UUID or omitted
-          if (!createData.employee_id) {
-            delete createData.employee_id;
-          }
-          const newLineItem = await createLineItem.mutateAsync({
-            estimateId,
-            data: createData,
-          });
-          setLineItemId(newLineItem.id);
-          // Update last saved data
-          lastSavedDataRef.current = { ...formData };
-          // Invalidate to refresh the list - this will cause the component to re-render
-          // and this empty row will be replaced by the actual line item row
-          queryClient.invalidateQueries({
-            queryKey: ["estimates", "detail", estimateId, true],
-          });
-        } catch (err) {
-          console.error("Failed to create line item:", err);
-          isCreatingRef.current = false;
-        } finally {
-          setIsSaving(false);
-        }
+        console.log("Creating line item:", createData);
+        const newLineItem = await createLineItem.mutateAsync({
+          estimateId,
+          data: createData,
+        });
+        
+        console.log("Line item created:", newLineItem.id);
+        setLineItemId(newLineItem.id);
+        prevSavedDataRef.current = { ...currentData };
+        lastSavedDataRef.current = { ...formData };
+        
+        // Only invalidate on create (not update) to prevent refetch loops
+        await queryClient.invalidateQueries({
+          queryKey: ["estimates", "detail", estimateId, true],
+        });
+      } catch (err) {
+        console.error("Failed to create line item:", err);
+        // CRITICAL: Update saved data ref even on error to prevent infinite retry loop
+        // This prevents the useEffect from seeing the same data and trying to save again
+        prevSavedDataRef.current = { ...currentData };
+        lastSavedDataRef.current = { ...formData };
+        // Don't clear formData or lineItemId on error - let user see the error and fix it
+      } finally {
+        isCreatingRef.current = false;
+        setIsSaving(false);
       }
-    }, 500); // 500ms debounce
-  }, [lineItemId, formData, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, opportunityDeliveryCenterId, currency, weeklyHoursValues]);
+      return;
+    }
+  }, [lineItemId, formData.role_id, formData.delivery_center_id, formData.employee_id, formData.rate, formData.cost, formData.start_date, formData.end_date, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, opportunityDeliveryCenterId, currency, invoiceCustomer, billableExpenses]);
 
-  // Track previous formData to detect what changed
-  const prevFormDataRef = useRef<EstimateLineItemCreate>(formData);
-
-  // Auto-save when meaningful form data changes (not cost/rate unless manually changed)
+  // SIMPLE: Save to database immediately when ANY field in formData changes
   useEffect(() => {
-    // Skip if we're currently saving, creating, or receiving backend updates
+    // Skip if saving/creating or receiving backend update
     if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      prevFormDataRef.current = { ...formData };
       return;
     }
 
-    // Only trigger autoSave if we have role_id (delivery_center_id is optional)
-    if (!formData.role_id) {
-      prevFormDataRef.current = { ...formData };
-      return;
+    // Save immediately - no debounce, no complex logic
+    // If we have lineItemId -> update
+    // If we have role_id but no lineItemId -> create
+    // Otherwise -> wait for role_id
+    if (lineItemId || formData.role_id) {
+      console.log("FormData changed - saving to database:", { 
+        hasLineItemId: !!lineItemId, 
+        hasRoleId: !!formData.role_id,
+        formData: { role_id: formData.role_id, cost: formData.cost, rate: formData.rate, employee_id: formData.employee_id }
+      });
+      saveToDatabase();
     }
+  }, [formData.role_id, formData.delivery_center_id, formData.employee_id, formData.cost, formData.rate, formData.start_date, formData.end_date, lineItemId, saveToDatabase]);
 
-    // Detect which fields changed
-    const changedFields = new Set<string>();
-    if (prevFormDataRef.current.role_id !== formData.role_id) {
-      changedFields.add("role_id");
-    }
-    if (prevFormDataRef.current.delivery_center_id !== formData.delivery_center_id) {
-      changedFields.add("delivery_center_id");
-    }
-    if (prevFormDataRef.current.employee_id !== formData.employee_id) {
-      changedFields.add("employee_id");
-    }
-    if (prevFormDataRef.current.start_date !== formData.start_date) {
-      changedFields.add("start_date");
-    }
-    if (prevFormDataRef.current.end_date !== formData.end_date) {
-      changedFields.add("end_date");
-    }
-    // Track cost/rate changes - always track if they changed (for creation, we need to know)
-    // If we don't have a line item yet, cost/rate changes should trigger creation
-    if (prevFormDataRef.current.cost !== formData.cost && formData.cost) {
-      changedFields.add("cost");
-    }
-    if (prevFormDataRef.current.rate !== formData.rate && formData.rate) {
-      changedFields.add("rate");
-    }
-
-    // Auto-save if meaningful fields changed
-    // Include cost/rate changes if:
-    // 1. We don't have a line item yet (need to create) OR
-    // 2. We have a line item and cost/rate were manually changed
-    const hasMeaningfulChanges = changedFields.has("role_id") ||
-      changedFields.has("delivery_center_id") ||
-      changedFields.has("employee_id") ||
-      changedFields.has("start_date") ||
-      changedFields.has("end_date");
-
-    // Cost/rate changes trigger creation if no line item exists, or update if line item exists
-    const hasCostRateChange = (changedFields.has("cost") && formData.cost) ||
-      (changedFields.has("rate") && formData.rate);
-    
-    const shouldTriggerAutoSave = hasMeaningfulChanges || 
-      (hasCostRateChange && !lineItemId) || // Cost/rate changes trigger creation
-      (hasCostRateChange && lineItemId);    // Cost/rate changes trigger update
-
-    if (shouldTriggerAutoSave) {
-      console.log("Auto-save triggered with changes:", Array.from(changedFields), { hasLineItem: !!lineItemId });
-      autoSave(changedFields);
-    }
-
-    // Update previous formData
-    prevFormDataRef.current = { ...formData };
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-      if (hoursSaveTimeoutRef.current) {
-        clearTimeout(hoursSaveTimeoutRef.current);
-      }
-    };
-  }, [formData.role_id, formData.delivery_center_id, formData.employee_id, formData.start_date, formData.end_date, autoSave, isSaving, lineItemId]);
-
-  // Handle manual cost/rate changes separately (only for updates, not creates)
-  useEffect(() => {
-    // Only handle cost/rate changes if we have a line item ID (update, not create)
-    if (!lineItemId || isSaving || isCreatingRef.current) {
-      return;
-    }
-
-    const costChanged = prevFormDataRef.current.cost !== formData.cost && formData.cost;
-    const rateChanged = prevFormDataRef.current.rate !== formData.rate && formData.rate;
-
-    if (costChanged || rateChanged) {
-      const changedFields = new Set<string>();
-      if (costChanged) changedFields.add("cost");
-      if (rateChanged) changedFields.add("rate");
-      autoSave(changedFields);
-    }
-  }, [formData.cost, formData.rate, lineItemId, autoSave, isSaving]);
+  // REMOVED: Separate cost/rate handler - now handled by main auto-save useEffect
+  // This was preventing saves when lineItemId didn't exist yet
 
   // Track previous role and employee to detect changes
   const prevRoleIdRef = useRef<string>(formData.role_id || "");
@@ -645,16 +674,24 @@ export function EstimateEmptyRow({
     if (!currentEmployeeId) {
       // Need role and opportunity delivery center to get role-based cost
       if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData) {
-        // Find the role rate that matches opportunity delivery center and currency
+        // Find the role rate that matches opportunity invoice center
         const matchingRate = selectedRoleData.role_rates?.find(
           (rate) =>
-            String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
-            rate.default_currency === currency
+            String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
         );
 
         let newCost: string;
         if (matchingRate) {
-          newCost = String(matchingRate.internal_cost_rate || "0");
+          let baseCost = matchingRate.internal_cost_rate || 0;
+          const roleRateCurrency = matchingRate.default_currency || currency;
+          
+          // Apply currency conversion: convert if currencies don't match
+          if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+            baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+          }
+          
+          // Round to 2 decimal places
+          newCost = parseFloat(baseCost.toFixed(2)).toString();
         } else {
           // Fallback to role default rates if no matching rate found
           // Use selectedRoleData which has full role info including defaults
@@ -899,7 +936,12 @@ export function EstimateEmptyRow({
       <td className="sticky left-0 z-10 bg-white border border-gray-300 px-2 py-1">
         <Select
           value={formData.role_id}
-          onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
+          onChange={async (e) => {
+            const newRoleId = e.target.value;
+            console.log("Role onChange - setting role_id:", newRoleId, "hasLineItemId:", !!lineItemId);
+            setFormData({ ...formData, role_id: newRoleId });
+            // The useEffect will detect the change and call saveToDatabase automatically
+          }}
           className="text-xs h-7 w-full"
         >
           <option value="">Select...</option>
@@ -938,7 +980,9 @@ export function EstimateEmptyRow({
             step="0.01"
             value={formData.cost || ""}
             onChange={(e) => {
-              setFormData({ ...formData, cost: e.target.value });
+              const newCost = e.target.value;
+              console.log("Cost changed:", { old: formData.cost, new: newCost, hasRoleId: !!formData.role_id, hasLineItemId: !!lineItemId });
+              setFormData({ ...formData, cost: newCost });
             }}
             placeholder="Auto"
             className="text-xs h-7 flex-1"
@@ -955,7 +999,9 @@ export function EstimateEmptyRow({
             step="0.01"
             value={formData.rate || ""}
             onChange={(e) => {
-              setFormData({ ...formData, rate: e.target.value });
+              const newRate = e.target.value;
+              console.log("Rate changed:", { old: formData.rate, new: newRate, hasRoleId: !!formData.role_id, hasLineItemId: !!lineItemId });
+              setFormData({ ...formData, rate: newRate });
             }}
             placeholder="Auto"
             className="text-xs h-7 flex-1"

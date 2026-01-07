@@ -220,6 +220,12 @@ class OpportunityService(BaseService):
         fields_set = getattr(opportunity_data, 'model_fields_set', None)
         update_dict = opportunity_data.model_dump(exclude_unset=True, exclude_none=False)
         
+        # CRITICAL: end_date is required (NOT NULL constraint), so never set it to None
+        # Remove end_date from update_dict if it's None (even if it was explicitly set in the request)
+        # This prevents violating the NOT NULL constraint
+        if 'end_date' in update_dict and update_dict['end_date'] is None:
+            del update_dict['end_date']
+        
         if active_quote:
             # Fields that cannot be changed when locked by active quote
             locked_fields = {
@@ -240,18 +246,6 @@ class OpportunityService(BaseService):
                     f"Cannot update locked fields: {', '.join(attempted_locked_fields)}. "
                     f"Deactivate the quote to unlock."
                 )
-        
-        # If end_date was explicitly provided in the request (even if None), include it in the update
-        # This allows clearing the field by setting it to None
-        if fields_set and 'end_date' in fields_set:
-            # Get the actual value (which might be None to clear the field)
-            update_dict['end_date'] = opportunity_data.end_date
-        elif fields_set is None:
-            # Fallback for Pydantic v1 or if model_fields_set is not available
-            # Check if end_date is in the model dump without exclude_unset
-            all_fields = opportunity_data.model_dump(exclude_unset=False, exclude_none=False)
-            if 'end_date' in all_fields:
-                update_dict['end_date'] = all_fields['end_date']
         
         start_date = update_dict.get('start_date', opportunity.start_date)
         end_date = update_dict.get('end_date', opportunity.end_date)
@@ -320,6 +314,10 @@ class OpportunityService(BaseService):
         if 'close_date' in update_dict or current_deal_creation_date:
             close_date = update_dict.get('close_date', opportunity.close_date)
             update_dict['deal_length'] = self.calculate_deal_length(current_deal_creation_date, close_date)
+        
+        # Final safeguard: Ensure end_date is never None before updating (NOT NULL constraint)
+        if 'end_date' in update_dict and update_dict['end_date'] is None:
+            del update_dict['end_date']
         
         updated = await self.opportunity_repo.update(opportunity_id, **update_dict)
         await self.session.commit()

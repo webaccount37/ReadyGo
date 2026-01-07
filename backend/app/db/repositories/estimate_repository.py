@@ -2,6 +2,7 @@
 Estimate repository for database operations.
 """
 
+import logging
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.estimate import Estimate
+
+logger = logging.getLogger(__name__)
 
 
 class EstimateRepository(BaseRepository[Estimate]):
@@ -83,12 +86,15 @@ class EstimateRepository(BaseRepository[Estimate]):
         from app.models.role import Role
         from app.models.delivery_center import DeliveryCenter
         
+        # CRITICAL: Use a single selectinload for line_items with all nested relationships chained
+        # Multiple selectinload calls on the same relationship can cause issues
         result = await self.session.execute(
             select(Estimate)
             .options(
                 selectinload(Estimate.opportunity).selectinload(Opportunity.account),
                 selectinload(Estimate.created_by_employee),
                 selectinload(Estimate.phases),
+                # Single selectinload with all nested relationships chained
                 selectinload(Estimate.line_items)
                 .selectinload(EstimateLineItem.role_rate)
                 .selectinload(RoleRate.role),
@@ -102,7 +108,19 @@ class EstimateRepository(BaseRepository[Estimate]):
             )
             .where(Estimate.id == estimate_id)
         )
-        return result.scalar_one_or_none()
+        estimate = result.scalar_one_or_none()
+        
+        # CRITICAL: Always reload line items directly from database to ensure we get all records
+        # Don't trust the relationship-loaded collection - it may be incomplete
+        if estimate:
+            from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
+            line_item_repo = EstimateLineItemRepository(self.session)
+            actual_line_items = await line_item_repo.list_by_estimate(estimate_id)
+            # Replace relationship-loaded items with actual database records
+            estimate.line_items = actual_line_items
+            logger.info(f"Reloaded {len(actual_line_items)} line items from database for estimate {estimate_id}")
+        
+        return estimate
     
     async def create(self, **kwargs) -> Estimate:
         """Create a new estimate."""

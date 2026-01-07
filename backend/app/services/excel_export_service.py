@@ -51,6 +51,18 @@ class ExcelExportService:
         if not estimate:
             raise ValueError("Estimate not found")
         
+        # Explicitly reload line items to ensure all are loaded
+        from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
+        line_item_repo = EstimateLineItemRepository(self.session)
+        line_items = await line_item_repo.list_by_estimate(estimate_id)
+        if line_items:
+            estimate.line_items = line_items
+            logger.info(f"Explicitly loaded {len(line_items)} line items for Excel export of estimate {estimate_id}")
+        
+        # Ensure line items are sorted by row_order
+        if estimate.line_items:
+            estimate.line_items = sorted(estimate.line_items, key=lambda li: li.row_order if li.row_order is not None else 0)
+        
         # Get opportunity for delivery center and currency
         opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
         if not opportunity:

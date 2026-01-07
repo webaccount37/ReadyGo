@@ -459,7 +459,7 @@ export function EstimateLineItemRow({
       return;
     }
 
-    // Find the role rate that matches opportunity delivery center (may have different currency)
+    // Find the role rate that matches opportunity invoice center
     // Compare as strings to handle UUID string comparison
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
@@ -468,34 +468,34 @@ export function EstimateLineItemRow({
 
     let newCost: string;
     let newRate: string;
-    let roleRateCurrency: string = currency;
 
     if (matchingRate) {
       // Get rates from role rate
+      // Centers already match (we found matchingRate by matching delivery_center_id)
       let baseCost = matchingRate.internal_cost_rate || 0;
       let baseRate = matchingRate.external_rate || 0;
-      roleRateCurrency = matchingRate.default_currency || currency;
+      const roleRateCurrency = matchingRate.default_currency || currency;
       
-      // Check if currency conversion is needed: Role Rate Default Currency <> Opportunity Invoice Currency
+      // Apply currency conversion: convert if currencies don't match
+      // Rate always uses external_rate, Cost always uses internal_cost_rate
       if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
-        // Convert both cost and rate
-        baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
         baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+        baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
       }
       
       // Round to 2 decimal places
       newCost = parseFloat(baseCost.toFixed(2)).toString();
       newRate = parseFloat(baseRate.toFixed(2)).toString();
+    } else {
+      // Fallback to role default rates if no matching rate found
+      // Use selectedRoleData which has full role info including defaults
+      if (selectedRoleData) {
+        const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+        const fallbackRate = selectedRoleData.role_external_rate || 0;
+        // Round to 2 decimal places
+        newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+        newRate = parseFloat(fallbackRate.toFixed(2)).toString();
       } else {
-        // Fallback to role default rates if no matching rate found
-        // Use selectedRoleData which has full role info including defaults
-        if (selectedRoleData) {
-          const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
-          const fallbackRate = selectedRoleData.role_external_rate || 0;
-          // Round to 2 decimal places
-          newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-          newRate = parseFloat(fallbackRate.toFixed(2)).toString();
-        } else {
         prevRoleRef.current = roleValue;
         return;
       }
@@ -591,7 +591,11 @@ export function EstimateLineItemRow({
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
     const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
     
-    // Choose rate based on delivery center match
+    // Apply currency conversion rules for Employee Cost
+    // Centers match AND currencies match → use internal_cost_rate, NO conversion
+    // Centers match BUT currencies mismatch → use internal_cost_rate, WITH conversion
+    // Centers don't match BUT currencies match → use internal_bill_rate, NO conversion
+    // Centers don't match AND currencies mismatch → use internal_bill_rate, WITH conversion
     if (centersMatch) {
       // Centers match: use internal_cost_rate
       employeeCost = selectedEmployeeData.internal_cost_rate || 0;

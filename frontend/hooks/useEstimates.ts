@@ -203,7 +203,8 @@ export function useCreateLineItem(
   options?: UseMutationOptions<
     EstimateLineItemResponse,
     Error,
-    { estimateId: string; data: EstimateLineItemCreate }
+    { estimateId: string; data: EstimateLineItemCreate },
+    { previousEstimate: EstimateDetailResponse | undefined }
   >
 ) {
   const queryClient = useQueryClient();
@@ -211,23 +212,47 @@ export function useCreateLineItem(
   return useMutation<
     EstimateLineItemResponse,
     Error,
-    { estimateId: string; data: EstimateLineItemCreate }
+    { estimateId: string; data: EstimateLineItemCreate },
+    { previousEstimate: EstimateDetailResponse | undefined }
   >({
     mutationFn: ({ estimateId, data }) =>
       estimatesApi.createLineItem(estimateId, data),
-    onSuccess: (data, variables) => {
-      // Optimistically update the cache
+    onMutate: async ({ estimateId }) => {
+      // Cancel any outgoing refetches
+      await queryClient.cancelQueries({
+        queryKey: QUERY_KEYS.detail(estimateId, true),
+      });
+
+      // Snapshot the previous value for rollback
+      const previousEstimate = queryClient.getQueryData<EstimateDetailResponse>(
+        QUERY_KEYS.detail(estimateId, true)
+      );
+
+      return { previousEstimate };
+    },
+    onSuccess: (data, variables, context) => {
+      // Update cache with the response from server (not optimistic)
       queryClient.setQueryData<EstimateDetailResponse>(
         QUERY_KEYS.detail(variables.estimateId, true),
         (old) => {
           if (!old) return old;
+          // Check if item already exists (avoid duplicates)
+          const exists = old.line_items?.some(item => item.id === data.id);
+          if (exists) {
+            // Update existing item
+            return {
+              ...old,
+              line_items: old.line_items?.map(item => item.id === data.id ? data : item) || [],
+            };
+          }
+          // Add new item
           return {
             ...old,
             line_items: [...(old.line_items || []), data],
           };
         }
       );
-      // Also invalidate to ensure consistency
+      // Invalidate to ensure consistency with backend
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.detail(variables.estimateId, true),
       });
@@ -237,6 +262,20 @@ export function useCreateLineItem(
       // Invalidate opportunities since line items affect opportunity employee relationships
       queryClient.invalidateQueries({
         queryKey: ["opportunities"],
+      });
+    },
+    onError: (err, variables, context) => {
+      console.error("Create line item error:", err);
+      // Rollback on error
+      if (context?.previousEstimate) {
+        queryClient.setQueryData(
+          QUERY_KEYS.detail(variables.estimateId, true),
+          context.previousEstimate
+        );
+      }
+      // Force refetch to sync with database
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.detail(variables.estimateId, true),
       });
     },
     ...options,
