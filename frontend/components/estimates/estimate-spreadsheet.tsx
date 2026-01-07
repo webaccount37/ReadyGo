@@ -14,7 +14,9 @@ interface EstimateSpreadsheetProps {
   startDate?: string;
   endDate?: string;
   opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
-  opportunityCurrency?: string; // Opportunity default_currency
+  opportunityCurrency?: string; // Opportunity Invoice Currency (default_currency)
+  invoiceCustomer?: boolean;
+  billableExpenses?: boolean;
   readOnly?: boolean;
 }
 
@@ -24,6 +26,8 @@ export function EstimateSpreadsheet({
   endDate,
   opportunityDeliveryCenterId,
   opportunityCurrency,
+  invoiceCustomer = true,
+  billableExpenses = true,
   readOnly = false
 }: EstimateSpreadsheetProps) {
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
@@ -567,6 +571,8 @@ export function EstimateSpreadsheet({
                     currency={opportunityCurrency || estimate.currency || "USD"}
                     estimateId={estimate.id}
                     opportunityDeliveryCenterId={opportunityDeliveryCenterId}
+                    invoiceCustomer={invoiceCustomer}
+                    billableExpenses={billableExpenses}
                     onContextMenu={(e) => handleContextMenu(e, index)}
                     readOnly={readOnly}
                   />
@@ -584,6 +590,10 @@ export function EstimateSpreadsheet({
                       rowIndex={existingLineItems.length + index}
                       stableId={stableId}
                       opportunityDeliveryCenterId={opportunityDeliveryCenterId}
+                      startDate={startDate}
+                      endDate={endDate}
+                      invoiceCustomer={invoiceCustomer}
+                      billableExpenses={billableExpenses}
                       onContextMenu={(e) =>
                         handleContextMenu(e, existingLineItems.length + index)
                       }

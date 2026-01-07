@@ -2,16 +2,19 @@
 
 import { useParams } from "next/navigation";
 import { useEstimateDetail, useCloneEstimate, useCreateEstimate, useDeleteEstimate } from "@/hooks/useEstimates";
-import { useOpportunity } from "@/hooks/useOpportunities";
+import { useOpportunity, useUpdateOpportunity } from "@/hooks/useOpportunities";
 import { useRouter } from "next/navigation";
 import { EstimateSpreadsheet } from "@/components/estimates/estimate-spreadsheet";
 import { PhaseManagement } from "@/components/estimates/phase-management";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import Link from "next/link";
-import { useState, useEffect } from "react";
-import { Lock } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Lock, AlertTriangle } from "lucide-react";
+import { CURRENCIES } from "@/types/currency";
 
 export default function EstimateDetailPage() {
   const params = useParams();
@@ -25,18 +28,91 @@ export default function EstimateDetailPage() {
   const [isCreating, setIsCreating] = useState(false);
   
   // Fetch opportunity data for start/end dates and delivery center
-  const { data: opportunity } = useOpportunity(estimate?.opportunity_id || "", false);
+  const { data: opportunity, refetch: refetchOpportunity } = useOpportunity(estimate?.opportunity_id || "", false);
+  const updateOpportunity = useUpdateOpportunity();
   
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
+  const [invoiceCurrency, setInvoiceCurrency] = useState<string>("");
+  const [invoiceCustomer, setInvoiceCustomer] = useState<boolean>(true);
+  const [billableExpenses, setBillableExpenses] = useState<boolean>(true);
   
-  // Initialize dates from opportunity
+  // Initialize dates and currency from opportunity
   useEffect(() => {
     if (opportunity) {
       setStartDate(opportunity.start_date || "");
       setEndDate(opportunity.end_date || "");
+      setInvoiceCurrency(opportunity.default_currency || "USD");
+      setInvoiceCustomer(opportunity.invoice_customer !== undefined ? opportunity.invoice_customer : true);
+      setBillableExpenses(opportunity.billable_expenses !== undefined ? opportunity.billable_expenses : true);
     }
   }, [opportunity]);
+
+  // Check for date mismatches
+  const hasDateMismatch = useMemo(() => {
+    if (!estimate?.line_items || !startDate || !endDate) return false;
+    const oppStart = new Date(startDate);
+    const oppEnd = new Date(endDate);
+    return estimate.line_items.some(item => {
+      const itemStart = new Date(item.start_date);
+      const itemEnd = new Date(item.end_date);
+      return itemStart < oppStart || itemEnd > oppEnd;
+    });
+  }, [estimate?.line_items, startDate, endDate]);
+
+  // Auto-save opportunity fields when they change
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!opportunity || !estimate) return;
+    
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+    
+    saveTimeoutRef.current = setTimeout(async () => {
+      const updates: Record<string, unknown> = {};
+      let hasChanges = false;
+
+      if (startDate && startDate !== opportunity.start_date) {
+        updates.start_date = startDate;
+        hasChanges = true;
+      }
+      if (endDate && endDate !== opportunity.end_date) {
+        updates.end_date = endDate;
+        hasChanges = true;
+      }
+      if (invoiceCurrency && invoiceCurrency !== opportunity.default_currency) {
+        updates.default_currency = invoiceCurrency;
+        hasChanges = true;
+      }
+      if (invoiceCustomer !== opportunity.invoice_customer) {
+        updates.invoice_customer = invoiceCustomer;
+        hasChanges = true;
+      }
+      if (billableExpenses !== opportunity.billable_expenses) {
+        updates.billable_expenses = billableExpenses;
+        hasChanges = true;
+      }
+
+      if (hasChanges) {
+        try {
+          await updateOpportunity.mutateAsync({
+            id: opportunity.id,
+            data: updates,
+          });
+          await refetchOpportunity();
+        } catch (err) {
+          console.error("Failed to update opportunity:", err);
+        }
+      }
+    }, 500);
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [startDate, endDate, invoiceCurrency, invoiceCustomer, billableExpenses, opportunity, estimate, updateOpportunity, refetchOpportunity]);
 
   const handleDuplicate = async () => {
     setIsCloning(true);
@@ -62,7 +138,7 @@ export default function EstimateDetailPage() {
     try {
       const newEstimate = await createEstimate.mutateAsync({
         opportunity_id: estimate.opportunity_id,
-        name: "", // Will be auto-generated by backend as "VERSION [INCREMENT]"
+        name: "INITIAL", // Create INITIAL version (clear estimate)
       });
       // Redirect to the new estimate
       router.push(`/estimates/${newEstimate.id}`);
@@ -163,7 +239,7 @@ export default function EstimateDetailPage() {
           <Button onClick={handleNew} variant="outline" disabled={isCreating} title="">
             {isCreating ? "Creating..." : "NEW"}
           </Button>
-          <Button onClick={handleDuplicate} variant="outline" disabled={isCloning || estimate.is_locked} title={estimate.is_locked ? "Active estimate is locked by active quote" : ""}>
+          <Button onClick={handleDuplicate} variant="outline" disabled={isCloning} title="">
             {isCloning ? "Duplicating..." : "DUPLICATE"}
           </Button>
           {!estimate.active_version && (
@@ -205,38 +281,76 @@ export default function EstimateDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-            {estimate.currency && (
-              <div className="flex items-center">
-                <span className="font-semibold mr-2">Currency:</span>
-                <span>{estimate.currency}</span>
-              </div>
-            )}
             {opportunity?.delivery_center_id && (
               <div className="flex items-center">
                 <span className="font-semibold mr-2">Invoice Center:</span>
                 <span>{opportunity.delivery_center_id}</span>
               </div>
             )}
-            {opportunity?.default_currency && (
-              <div className="flex items-center">
-                <span className="font-semibold mr-2">Opportunity Default Currency:</span>
-                <span>{opportunity.default_currency}</span>
-              </div>
-            )}
-            {startDate && (
-              <div className="flex items-center">
-                <span className="font-semibold mr-2">Start Date:</span>
-                <span>{startDate}</span>
-                <span className="text-xs text-gray-500 ml-2">(from opportunity)</span>
-              </div>
-            )}
-            {endDate && (
-              <div className="flex items-center">
-                <span className="font-semibold mr-2">End Date:</span>
-                <span>{endDate}</span>
-                <span className="text-xs text-gray-500 ml-2">(from opportunity)</span>
-              </div>
-            )}
+            <div>
+              <Label htmlFor="invoice_currency">Invoice Currency</Label>
+              <Select
+                id="invoice_currency"
+                value={invoiceCurrency}
+                onChange={(e) => setInvoiceCurrency(e.target.value)}
+                disabled={estimate.is_locked}
+                className="mt-1"
+              >
+                {CURRENCIES.map((c) => (
+                  <option key={c.value} value={c.value}>
+                    {c.label}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="start_date">Start Date</Label>
+              <Input
+                id="start_date"
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                disabled={estimate.is_locked}
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="end_date">End Date</Label>
+              <Input
+                id="end_date"
+                type="date"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+                disabled={estimate.is_locked}
+                className="mt-1"
+              />
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="invoice_customer"
+                checked={invoiceCustomer}
+                onChange={(e) => setInvoiceCustomer(e.target.checked)}
+                disabled={estimate.is_locked}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <Label htmlFor="invoice_customer" className="cursor-pointer">
+                Invoice Customer?
+              </Label>
+            </div>
+            <div className="flex items-center space-x-2">
+              <input
+                type="checkbox"
+                id="billable_expenses"
+                checked={billableExpenses}
+                onChange={(e) => setBillableExpenses(e.target.checked)}
+                disabled={estimate.is_locked}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+              />
+              <Label htmlFor="billable_expenses" className="cursor-pointer">
+                Billable Expenses?
+              </Label>
+            </div>
             {estimate.description && (
               <div className="col-span-2">
                 <span className="font-semibold">Description:</span> {estimate.description}
@@ -246,6 +360,23 @@ export default function EstimateDetailPage() {
         </CardContent>
       </Card>
 
+      {/* Warning for date mismatches */}
+      {hasDateMismatch && (
+        <Card className="mb-6 border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-yellow-800">
+              <AlertTriangle className="w-5 h-5" />
+              <div>
+                <p className="font-semibold">Date Range Warning</p>
+                <p className="text-sm">
+                  Some estimate rows have start or end dates that are outside the Opportunity date range.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <PhaseManagement estimateId={estimate.id} readOnly={estimate.is_locked || false} />
 
       <EstimateSpreadsheet 
@@ -253,7 +384,9 @@ export default function EstimateDetailPage() {
         startDate={startDate} 
         endDate={endDate}
         opportunityDeliveryCenterId={opportunity?.delivery_center_id}
-        opportunityCurrency={opportunity?.default_currency}
+        opportunityCurrency={invoiceCurrency}
+        invoiceCustomer={invoiceCustomer}
+        billableExpenses={billableExpenses}
         readOnly={estimate.is_locked || false}
       />
     </div>

@@ -159,12 +159,12 @@ export function useUnlinkEmployeeFromOpportunity(
     mutationFn: ({ employeeId, opportunityId }) =>
       employeesApi.unlinkEmployeeFromOpportunity(employeeId, opportunityId),
     onSuccess: (_, variables) => {
+      // Invalidate all employee queries
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       // Specifically invalidate the employee detail query with relationships
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.employeeId, true) });
       // Invalidate opportunity queries since unlinking removes estimate line items
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
-      queryClient.invalidateQueries({ queryKey: ["opportunities", "detail", variables.opportunityId] });
       // Invalidate estimates since unlinking removes line items
       queryClient.invalidateQueries({ queryKey: ["estimates"] });
     },

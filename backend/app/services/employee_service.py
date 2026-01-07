@@ -520,9 +520,9 @@ class EmployeeService(BaseService):
         opportunity_id: UUID,
         employee_ids: List[UUID],
     ) -> bool:
-        """Unlink employees from an opportunity by removing estimate line items."""
+        """Unlink employees from an opportunity by clearing employee_id from estimate line items."""
         from sqlalchemy import select
-        from app.models.estimate import Estimate
+        from app.models.estimate import Estimate, EstimateLineItem
         
         # Get active estimate for this opportunity
         estimate_result = await self.session.execute(
@@ -536,7 +536,7 @@ class EmployeeService(BaseService):
         active_estimate = estimate_result.scalar_one_or_none()
         
         if active_estimate:
-            # Delete line items for these employees
+            # Clear employee_id from line items (don't delete the row)
             line_items_result = await self.session.execute(
                 select(EstimateLineItem).where(
                     and_(
@@ -547,7 +547,9 @@ class EmployeeService(BaseService):
             )
             line_items = line_items_result.scalars().all()
             for li in line_items:
-                await self.session.delete(li)
+                li.employee_id = None
+                # Recalculate cost based on role rate since employee is removed
+                # This will be handled by the frontend/API when the line item is updated
         
         await self.session.commit()
         return True

@@ -155,20 +155,31 @@ export function EmployeeRelationships({
 
     if (!selectedOpportunity.delivery_center_id) return;
 
-    // Find the role rate that matches opportunity invoice center and currency
+    // Find the role rate that matches opportunity invoice center (may have different currency)
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
-        String(rate.delivery_center_id) === String(selectedOpportunity.delivery_center_id) &&
-        rate.default_currency === (selectedOpportunity.default_currency || "USD")
+        String(rate.delivery_center_id) === String(selectedOpportunity.delivery_center_id)
     );
 
     let newRate: string;
+    let roleRateCurrency: string = selectedOpportunity.default_currency || "USD";
 
     if (matchingRate) {
-      newRate = String(matchingRate.external_rate || "0");
+      let baseRate = matchingRate.external_rate || 0;
+      roleRateCurrency = matchingRate.default_currency || "USD";
+      const opportunityCurrency = selectedOpportunity.default_currency || "USD";
+      
+      // Check if currency conversion is needed: Role Rate Currency <> Opportunity Invoice Currency
+      if (roleRateCurrency.toUpperCase() !== opportunityCurrency.toUpperCase()) {
+        baseRate = convertCurrency(baseRate, roleRateCurrency, opportunityCurrency);
+      }
+      
+      // Round to 2 decimal places
+      newRate = parseFloat(baseRate.toFixed(2)).toString();
     } else {
       // Fallback to role default rate if no matching rate found
-      newRate = String(selectedRoleData.role_external_rate || "0");
+      const fallbackRate = selectedRoleData.role_external_rate || 0;
+      newRate = parseFloat(fallbackRate.toFixed(2)).toString();
     }
 
     // Update Project Rate only (Rate always comes from Role)
@@ -198,23 +209,26 @@ export function EmployeeRelationships({
     let employeeCost: number;
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
     const opportunityCurrency = selectedOpportunity.default_currency || "USD";
+    const currenciesMatch = employeeCurrency.toUpperCase() === opportunityCurrency.toUpperCase();
 
+    // Choose rate based on delivery center match
     if (centersMatch) {
-      // Centers match: use internal_cost_rate with NO currency conversion
+      // Centers match: use internal_cost_rate
       employeeCost = selectedEmployeeData.internal_cost_rate || 0;
     } else {
-      // Centers don't match: use internal_bill_rate with currency conversion
+      // Centers don't match: use internal_bill_rate
       employeeCost = selectedEmployeeData.internal_bill_rate || 0;
-      
-      // Convert to Opportunity Invoice Center Currency if different
-      if (employeeCurrency.toUpperCase() !== opportunityCurrency.toUpperCase()) {
-        employeeCost = convertCurrency(employeeCost, employeeCurrency, opportunityCurrency);
-      }
+    }
+    
+    // Convert to Opportunity Invoice Currency if currencies differ
+    if (!currenciesMatch) {
+      employeeCost = convertCurrency(employeeCost, employeeCurrency, opportunityCurrency);
     }
 
+    // Round to 2 decimal places
     setOpportunityFormData((prev) => ({
       ...prev,
-      project_cost: String(employeeCost),
+      project_cost: parseFloat(employeeCost.toFixed(2)).toString(),
     }));
   }, [employee?.id, selectedEmployeeData, selectedOpportunity, deliveryCentersData]);
 
@@ -447,7 +461,7 @@ export function EmployeeRelationships({
                               setOpportunityFormData({
                                 ...opportunityFormData,
                                 delivery_center: dc,
-                                role_id: "",
+                                // Payable Center is metadata only - do not clear Role
                               });
                             }}
                             className="w-full"
@@ -504,7 +518,9 @@ export function EmployeeRelationships({
                         </div>
                         
                         <div>
-                          <Label htmlFor="opportunity-cost">Project Cost</Label>
+                          <Label htmlFor="opportunity-cost">
+                            Project Cost ({selectedOpportunity?.default_currency || "USD"})
+                          </Label>
                           <Input
                             id="opportunity-cost"
                             type="number"
@@ -518,7 +534,9 @@ export function EmployeeRelationships({
                         </div>
 
                         <div>
-                          <Label htmlFor="opportunity-rate">Project Rate *</Label>
+                          <Label htmlFor="opportunity-rate">
+                            Project Rate ({selectedOpportunity?.default_currency || "USD"}) *
+                          </Label>
                           <Input
                             id="opportunity-rate"
                             type="number"

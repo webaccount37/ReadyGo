@@ -22,8 +22,8 @@ class OpportunityBase(BaseModel):
     parent_opportunity_id: Optional[UUID] = None
     account_id: UUID
     start_date: date
-    end_date: Optional[date] = None
-    status: OpportunityStatus = OpportunityStatus.DISCOVERY
+    end_date: date
+    status: OpportunityStatus = OpportunityStatus.QUALIFIED
     billing_term_id: UUID
     description: Optional[str] = Field(None, max_length=2000)
     utilization: Optional[float] = Field(None, ge=0, le=100)
@@ -47,9 +47,6 @@ class OpportunityBase(BaseModel):
     deal_length: Optional[int] = None  # Calculated in days
     forecast_value: Optional[Decimal] = None  # Calculated: probability * deal_value
     forecast_value_usd: Optional[Decimal] = None  # Calculated: probability * deal_value_usd
-    project_start_month: Optional[int] = Field(None, ge=1, le=12)  # 1-12
-    project_start_year: Optional[int] = Field(None, ge=1000, le=9999)  # 4-digit year
-    project_duration_months: Optional[int] = Field(None, ge=1, le=12)  # 1-12
 
 
 class OpportunityCreate(OpportunityBase):
@@ -84,7 +81,7 @@ class OpportunityUpdate(BaseModel):
     parent_opportunity_id: Optional[UUID] = None
     account_id: Optional[UUID] = None
     start_date: Optional[date] = None
-    end_date: Optional[date] = None
+    end_date: Optional[date] = None  # Note: Required on create, but optional on update to allow partial updates
     status: Optional[OpportunityStatus] = None
     billing_term_id: Optional[UUID] = None
     description: Optional[str] = Field(None, max_length=2000)
@@ -98,13 +95,9 @@ class OpportunityUpdate(BaseModel):
     attributes: Optional[dict] = None
     
     # New deal/forecast fields (most are read-only, but allow updates for editable ones)
-    win_probability: Optional[WinProbability] = None
     accountability: Optional[Accountability] = None
     strategic_importance: Optional[StrategicImportance] = None
     deal_value: Optional[Decimal] = None  # Editable
-    project_start_month: Optional[int] = Field(None, ge=1, le=12)  # 1-12
-    project_start_year: Optional[int] = Field(None, ge=1000, le=9999)  # 4-digit year
-    project_duration_months: Optional[int] = Field(None, ge=1, le=36)  # 1-36
     # Note: probability, deal_value_usd, close_date, deal_length, forecast_value, 
     # forecast_value_usd, deal_creation_date are read-only and calculated
     

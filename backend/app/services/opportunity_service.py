@@ -36,7 +36,6 @@ class OpportunityService(BaseService):
     def calculate_probability_from_status(status: OpportunityStatus) -> float:
         """Calculate probability percentage based on status."""
         probability_map = {
-            OpportunityStatus.DISCOVERY: 10.0,
             OpportunityStatus.QUALIFIED: 25.0,
             OpportunityStatus.PROPOSAL: 50.0,
             OpportunityStatus.NEGOTIATION: 80.0,
@@ -80,12 +79,10 @@ class OpportunityService(BaseService):
             raise ValueError("End date must be after start date")
         
         opportunity_dict = opportunity_data.model_dump(exclude_unset=True)
-        # end_date can now be None (nullable in database)
+        # end_date is required (non-nullable in database)
         
         # Normalize enum values to ensure they're lowercase strings
         # This handles cases where the frontend sends uppercase values
-        if 'win_probability' in opportunity_dict and isinstance(opportunity_dict['win_probability'], str):
-            opportunity_dict['win_probability'] = opportunity_dict['win_probability'].lower()
         if 'accountability' in opportunity_dict and isinstance(opportunity_dict['accountability'], str):
             opportunity_dict['accountability'] = opportunity_dict['accountability'].lower()
         if 'strategic_importance' in opportunity_dict and isinstance(opportunity_dict['strategic_importance'], str):
@@ -95,7 +92,7 @@ class OpportunityService(BaseService):
         opportunity_dict['deal_creation_date'] = date.today()
         
         # Calculate probability from status
-        status = opportunity_dict.get('status', OpportunityStatus.DISCOVERY)
+        status = opportunity_dict.get('status', OpportunityStatus.QUALIFIED)
         opportunity_dict['probability'] = self.calculate_probability_from_status(status)
         
         # Calculate deal_value_usd if deal_value is provided
@@ -265,8 +262,6 @@ class OpportunityService(BaseService):
         
         # Normalize enum values to ensure they're lowercase strings
         # This handles cases where the frontend sends uppercase values
-        if 'win_probability' in update_dict and isinstance(update_dict['win_probability'], str):
-            update_dict['win_probability'] = update_dict['win_probability'].lower()
         if 'accountability' in update_dict and isinstance(update_dict['accountability'], str):
             update_dict['accountability'] = update_dict['accountability'].lower()
         if 'strategic_importance' in update_dict and isinstance(update_dict['strategic_importance'], str):
@@ -457,7 +452,6 @@ class OpportunityService(BaseService):
             "account_name": account_name,
             # New deal/forecast fields
             "probability": float(opportunity.probability) if opportunity.probability is not None else None,
-            "win_probability": opportunity.win_probability.value if opportunity.win_probability and hasattr(opportunity.win_probability, 'value') else (str(opportunity.win_probability).lower() if opportunity.win_probability else None),
             "accountability": opportunity.accountability.value if opportunity.accountability and hasattr(opportunity.accountability, 'value') else (str(opportunity.accountability).lower() if opportunity.accountability else None),
             "strategic_importance": opportunity.strategic_importance.value if opportunity.strategic_importance and hasattr(opportunity.strategic_importance, 'value') else (str(opportunity.strategic_importance).lower() if opportunity.strategic_importance else None),
             "deal_creation_date": opportunity.deal_creation_date.isoformat() if opportunity.deal_creation_date else None,
@@ -467,9 +461,6 @@ class OpportunityService(BaseService):
             "deal_length": opportunity.deal_length,
             "forecast_value": str(opportunity.forecast_value) if opportunity.forecast_value is not None else None,
             "forecast_value_usd": str(opportunity.forecast_value_usd) if opportunity.forecast_value_usd is not None else None,
-            "project_start_month": opportunity.project_start_month,
-            "project_start_year": opportunity.project_start_year,
-            "project_duration_months": opportunity.project_duration_months,
         }
         
         if include_relationships:

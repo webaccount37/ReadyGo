@@ -67,7 +67,10 @@ export function useCreateOpportunity(
   return useMutation<OpportunityResponse, Error, OpportunityCreate>({
     mutationFn: (data) => opportunitiesApi.createOpportunity(data),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+      // Invalidate all opportunity queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      // Invalidate accounts since new opportunity might affect account display
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -84,8 +87,13 @@ export function useUpdateOpportunity(
   return useMutation<OpportunityResponse, Error, { id: string; data: OpportunityUpdate }>({
     mutationFn: ({ id, data }) => opportunitiesApi.updateOpportunity(id, data),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(data.id) });
+      // Invalidate all opportunity queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      // Invalidate related estimates and quotes
+      queryClient.invalidateQueries({ queryKey: ["estimates"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      // Invalidate accounts since opportunity changes might affect account display
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -102,8 +110,14 @@ export function useDeleteOpportunity(
   return useMutation<void, Error, string>({
     mutationFn: (id) => opportunitiesApi.deleteOpportunity(id),
     onSuccess: (_, id) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+      // Invalidate all opportunity queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       queryClient.removeQueries({ queryKey: QUERY_KEYS.detail(id) });
+      // Invalidate related estimates and quotes
+      queryClient.invalidateQueries({ queryKey: ["estimates"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      // Invalidate accounts
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });

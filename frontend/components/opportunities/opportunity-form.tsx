@@ -30,6 +30,7 @@ interface FormErrors {
   start_date?: string;
   end_date?: string;
   delivery_center_id?: string;
+  default_currency?: string;
   billing_term_id?: string;
 }
 
@@ -60,7 +61,7 @@ export function OpportunityForm({
     account_id: initialData?.account_id || "",
     start_date: initialData?.start_date || "",
     end_date: initialData?.end_date || "",
-    status: initialData?.status || "discovery",
+    status: initialData?.status || "qualified",
     billing_term_id: initialData?.billing_term_id || "",
     description: initialData?.description || "",
     utilization: initialData?.utilization,
@@ -71,19 +72,59 @@ export function OpportunityForm({
     invoice_customer: initialData?.invoice_customer !== undefined ? initialData.invoice_customer : true,
     billable_expenses: initialData?.billable_expenses !== undefined ? initialData.billable_expenses : true,
     // New deal/forecast fields
-    win_probability: initialData?.win_probability,
     accountability: initialData?.accountability,
     strategic_importance: initialData?.strategic_importance,
     deal_value: initialData?.deal_value,
-    project_start_month: initialData?.project_start_month,
-    project_start_year: initialData?.project_start_year,
-    project_duration_months: initialData?.project_duration_months,
   });
 
-  // State for calculated Deal Value (USD)
+  // State for calculated Deal Value (USD) and Forecast Values
   const [dealValueUsd, setDealValueUsd] = useState<string>(
     initialData && 'deal_value_usd' in initialData ? (initialData as Opportunity).deal_value_usd || "" : ""
   );
+  const [forecastValue, setForecastValue] = useState<string>(
+    initialData && 'forecast_value' in initialData ? (initialData as Opportunity).forecast_value || "" : ""
+  );
+  const [forecastValueUsd, setForecastValueUsd] = useState<string>(
+    initialData && 'forecast_value_usd' in initialData ? (initialData as Opportunity).forecast_value_usd || "" : ""
+  );
+
+  // Update formData when initialData changes (e.g., after an update)
+  useEffect(() => {
+    if (initialData) {
+      setFormData((prev) => ({
+        ...prev,
+        name: initialData.name || prev.name,
+        parent_opportunity_id: initialData.parent_opportunity_id ?? prev.parent_opportunity_id,
+        account_id: initialData.account_id || prev.account_id,
+        start_date: initialData.start_date || prev.start_date,
+        end_date: initialData.end_date || prev.end_date,
+        status: initialData.status || prev.status,
+        billing_term_id: initialData.billing_term_id || prev.billing_term_id,
+        description: initialData.description ?? prev.description,
+        utilization: initialData.utilization ?? prev.utilization,
+        margin: initialData.margin ?? prev.margin,
+        default_currency: initialData.default_currency || prev.default_currency || "USD",
+        delivery_center_id: initialData.delivery_center_id || prev.delivery_center_id,
+        opportunity_owner_id: initialData.opportunity_owner_id ?? prev.opportunity_owner_id,
+        invoice_customer: initialData.invoice_customer !== undefined ? initialData.invoice_customer : prev.invoice_customer,
+        billable_expenses: initialData.billable_expenses !== undefined ? initialData.billable_expenses : prev.billable_expenses,
+        accountability: initialData.accountability ?? prev.accountability,
+        strategic_importance: initialData.strategic_importance ?? prev.strategic_importance,
+        deal_value: initialData.deal_value ?? prev.deal_value,
+      }));
+
+      // Update calculated values if they exist in initialData
+      if ('deal_value_usd' in initialData) {
+        setDealValueUsd((initialData as Opportunity).deal_value_usd || "");
+      }
+      if ('forecast_value' in initialData) {
+        setForecastValue((initialData as Opportunity).forecast_value || "");
+      }
+      if ('forecast_value_usd' in initialData) {
+        setForecastValueUsd((initialData as Opportunity).forecast_value_usd || "");
+      }
+    }
+  }, [initialData]);
 
   // Update currency rates cache when rates are fetched
   useEffect(() => {
@@ -96,25 +137,82 @@ export function OpportunityForm({
     }
   }, [currencyRatesData]);
 
-  // Auto-default billing terms when account is selected
+  // Auto-update billing terms when account changes
   useEffect(() => {
-    if (formData.account_id && accountsData?.items && !formData.billing_term_id) {
+    if (formData.account_id && accountsData?.items) {
       const selectedAccount = accountsData.items.find(a => a.id === formData.account_id);
       if (selectedAccount?.billing_term_id) {
         setFormData(prev => ({ ...prev, billing_term_id: selectedAccount.billing_term_id! }));
       }
     }
-  }, [formData.account_id, accountsData, formData.billing_term_id]);
+  }, [formData.account_id, accountsData]);
 
-  // Auto-update default currency when delivery center changes
+  // Sync formData when initialData changes (e.g., after an update)
   useEffect(() => {
+    if (initialData && 'id' in initialData) {
+      // Only sync if we have an ID (editing existing opportunity)
+      const oppData = initialData as Opportunity;
+      setFormData((prev) => ({
+        ...prev,
+        default_currency: oppData.default_currency || prev.default_currency || "USD",
+        // Sync other fields that might have changed
+        name: oppData.name || prev.name,
+        account_id: oppData.account_id || prev.account_id,
+        delivery_center_id: oppData.delivery_center_id || prev.delivery_center_id,
+        billing_term_id: oppData.billing_term_id || prev.billing_term_id,
+        invoice_customer: oppData.invoice_customer !== undefined ? oppData.invoice_customer : prev.invoice_customer,
+        billable_expenses: oppData.billable_expenses !== undefined ? oppData.billable_expenses : prev.billable_expenses,
+        deal_value: oppData.deal_value ?? prev.deal_value,
+      }));
+
+      // Update calculated values if they exist in initialData
+      if ('deal_value_usd' in oppData) {
+        setDealValueUsd(oppData.deal_value_usd || "");
+      }
+      if ('forecast_value' in oppData) {
+        setForecastValue(oppData.forecast_value || "");
+      }
+      if ('forecast_value_usd' in oppData) {
+        setForecastValueUsd(oppData.forecast_value_usd || "");
+      }
+    }
+  }, [
+    initialData && 'id' in initialData ? (initialData as Opportunity).id : undefined,
+    initialData && 'id' in initialData ? (initialData as Opportunity).default_currency : initialData?.default_currency,
+    initialData?.name,
+    initialData?.account_id,
+    initialData?.delivery_center_id,
+    initialData?.billing_term_id,
+    initialData?.invoice_customer,
+    initialData?.billable_expenses,
+    initialData?.deal_value,
+  ]);
+
+  // Auto-update default currency based on Account or Invoice Center
+  // Only runs when account/delivery center changes, NOT when initialData changes
+  useEffect(() => {
+    // Skip auto-populate if we're editing an existing opportunity (has ID)
+    // The currency should come from initialData sync, not auto-populate
+    if (initialData && 'id' in initialData) {
+      return;
+    }
+
+    if (formData.account_id && accountsData?.items) {
+      const selectedAccount = accountsData.items.find(a => a.id === formData.account_id);
+      // Priority: Account Default Currency > Invoice Center Default Currency
+      if (selectedAccount?.default_currency) {
+        setFormData(prev => ({ ...prev, default_currency: selectedAccount.default_currency }));
+        return; // Don't check Invoice Center if Account has default currency
+      }
+    }
+    // If no Account Default Currency, use Invoice Center Default Currency
     if (formData.delivery_center_id && deliveryCentersData?.items) {
       const selectedDeliveryCenter = deliveryCentersData.items.find(dc => dc.id === formData.delivery_center_id);
       if (selectedDeliveryCenter?.default_currency) {
         setFormData(prev => ({ ...prev, default_currency: selectedDeliveryCenter.default_currency }));
       }
     }
-  }, [formData.delivery_center_id, deliveryCentersData]);
+  }, [formData.account_id, formData.delivery_center_id, accountsData, deliveryCentersData, initialData]);
 
   // Auto-calculate Deal Value (USD) when Deal Value or Default Currency changes
   useEffect(() => {
@@ -134,11 +232,10 @@ export function OpportunityForm({
       setDealValueUsd("");
     }
   }, [formData.deal_value, formData.default_currency]);
-  
+
   // Calculate probability from status
   const calculateProbability = (status: string): number => {
     const probabilityMap: Record<string, number> = {
-      discovery: 10,
       qualified: 25,
       proposal: 50,
       negotiation: 80,
@@ -147,29 +244,30 @@ export function OpportunityForm({
     return probabilityMap[status] || 0;
   };
   
-  const probability = useMemo(() => calculateProbability(formData.status || "discovery"), [formData.status]);
+  const probability = useMemo(() => calculateProbability(formData.status || "qualified"), [formData.status]);
+
+  // Auto-calculate Forecast Values when Status, Default Currency, Probability, or Deal Value changes
+  useEffect(() => {
+    const currentProbability = probability;
+    const dealValueNum = formData.deal_value ? parseFloat(formData.deal_value) : 0;
+    const dealValueUsdNum = dealValueUsd ? parseFloat(dealValueUsd) : 0;
+
+    if (currentProbability > 0 && dealValueNum > 0) {
+      const forecast = (dealValueNum * currentProbability / 100).toFixed(2);
+      setForecastValue(forecast);
+    } else {
+      setForecastValue("");
+    }
+
+    if (currentProbability > 0 && dealValueUsdNum > 0) {
+      const forecastUsd = (dealValueUsdNum * currentProbability / 100).toFixed(2);
+      setForecastValueUsd(forecastUsd);
+    } else {
+      setForecastValueUsd("");
+    }
+  }, [formData.status, formData.default_currency, probability, formData.deal_value, dealValueUsd]);
 
   const [errors, setErrors] = useState<FormErrors>({});
-
-  // Filter employees by selected delivery center
-  const filteredEmployees = useMemo(() => {
-    if (!formData.delivery_center_id || !employeesData?.items || !deliveryCentersData?.items) {
-      return [];
-    }
-    
-    const selectedDeliveryCenter = deliveryCentersData.items.find(
-      (dc) => dc.id === formData.delivery_center_id
-    );
-    
-    if (!selectedDeliveryCenter) {
-      return [];
-    }
-
-    return employeesData.items.filter((emp) => {
-      // Employees have delivery_center as a code string, match it to the selected delivery center code
-      return emp.delivery_center === selectedDeliveryCenter.code;
-    });
-  }, [formData.delivery_center_id, employeesData, deliveryCentersData]);
 
   const validateForm = (): boolean => {
     const newErrors: FormErrors = {};
@@ -183,11 +281,17 @@ export function OpportunityForm({
     if (!formData.start_date) {
       newErrors.start_date = "Start date is required";
     }
+    if (!formData.end_date) {
+      newErrors.end_date = "End date is required";
+    }
     if (formData.start_date && formData.end_date && formData.end_date < formData.start_date) {
       newErrors.end_date = "End date must be after start date";
     }
     if (!formData.delivery_center_id) {
       newErrors.delivery_center_id = "Invoice center is required";
+    }
+    if (!formData.default_currency) {
+      newErrors.default_currency = "Invoice currency is required";
     }
     if (!formData.billing_term_id) {
       newErrors.billing_term_id = "Billing terms are required";
@@ -306,8 +410,8 @@ export function OpportunityForm({
               status: e.target.value as OpportunityCreate["status"],
             })
           }
+          className="[&>option[value='qualified']]:bg-cyan-100 [&>option[value='qualified']]:text-cyan-800 [&>option[value='proposal']]:bg-yellow-100 [&>option[value='proposal']]:text-yellow-800 [&>option[value='negotiation']]:bg-orange-100 [&>option[value='negotiation']]:text-orange-800 [&>option[value='won']]:bg-green-100 [&>option[value='won']]:text-green-800 [&>option[value='lost']]:bg-red-100 [&>option[value='lost']]:text-red-800 [&>option[value='cancelled']]:bg-gray-100 [&>option[value='cancelled']]:text-gray-800"
         >
-          <option value="discovery">Discovery</option>
           <option value="qualified">Qualified</option>
           <option value="proposal">Proposal</option>
           <option value="negotiation">Negotiation</option>
@@ -325,11 +429,13 @@ export function OpportunityForm({
             value={formData.delivery_center_id}
             onChange={(e) => {
               const selectedDc = deliveryCentersData?.items.find(dc => dc.id === e.target.value);
+              // Only update currency if Account doesn't have a default currency
+              const selectedAccount = accountsData?.items.find(a => a.id === formData.account_id);
+              const newCurrency = selectedAccount?.default_currency || selectedDc?.default_currency || formData.default_currency;
               setFormData({ 
                 ...formData, 
                 delivery_center_id: e.target.value,
-                opportunity_owner_id: undefined, // Reset opportunity owner when invoice center changes
-                default_currency: selectedDc?.default_currency || formData.default_currency,
+                default_currency: newCurrency,
               });
               if (errors.delivery_center_id) setErrors({ ...errors, delivery_center_id: undefined });
             }}
@@ -352,15 +458,18 @@ export function OpportunityForm({
           )}
         </div>
         <div>
-          <Label htmlFor="default_currency">Default Currency</Label>
+          <Label htmlFor="default_currency">Invoice Currency *</Label>
           <Select
             id="default_currency"
             value={formData.default_currency}
-            onChange={(e) =>
-              setFormData({ ...formData, default_currency: e.target.value })
-            }
+            onChange={(e) => {
+              setFormData({ ...formData, default_currency: e.target.value });
+              if (errors.default_currency) setErrors({ ...errors, default_currency: undefined });
+            }}
+            required
             disabled={hasActiveQuote}
-            title={hasActiveQuote ? "Cannot change default currency when quote is active" : ""}
+            className={errors.default_currency ? "border-red-500" : ""}
+            title={hasActiveQuote ? "Cannot change invoice currency when quote is active" : ""}
           >
             {CURRENCIES.map((c) => (
               <option key={c.value} value={c.value}>
@@ -368,6 +477,9 @@ export function OpportunityForm({
               </option>
             ))}
           </Select>
+          {errors.default_currency && (
+            <p className="text-red-500 text-sm mt-1">{errors.default_currency}</p>
+          )}
         </div>
       </div>
 
@@ -392,15 +504,16 @@ export function OpportunityForm({
           )}
         </div>
         <div>
-          <Label htmlFor="end_date">End Date</Label>
+          <Label htmlFor="end_date">End Date *</Label>
           <Input
             id="end_date"
             type="date"
             value={formData.end_date || ""}
             onChange={(e) => {
-              setFormData({ ...formData, end_date: e.target.value || undefined });
+              setFormData({ ...formData, end_date: e.target.value || "" });
               if (errors.end_date) setErrors({ ...errors, end_date: undefined });
             }}
+            required
             disabled={hasActiveQuote}
             className={errors.end_date ? "border-red-500" : ""}
             title={hasActiveQuote ? "Cannot change end date when quote is active" : ""}
@@ -435,17 +548,11 @@ export function OpportunityForm({
                 opportunity_owner_id: e.target.value || undefined,
               })
             }
-            disabled={!formData.delivery_center_id || hasActiveQuote}
-            title={hasActiveQuote ? "Cannot change opportunity owner when quote is active" : !formData.delivery_center_id ? "Select delivery center first" : ""}
+            disabled={hasActiveQuote}
+            title={hasActiveQuote ? "Cannot change opportunity owner when quote is active" : ""}
           >
-            <option value="">
-              {!formData.delivery_center_id 
-                ? "Select delivery center first" 
-                : filteredEmployees.length === 0
-                ? "No employees available"
-                : "Select opportunity owner"}
-            </option>
-            {filteredEmployees.map((emp) => (
+            <option value="">Select opportunity owner</option>
+            {employeesData?.items?.map((emp) => (
               <option key={emp.id} value={emp.id}>
                 {emp.first_name} {emp.last_name}
               </option>
@@ -453,97 +560,91 @@ export function OpportunityForm({
           </Select>
         </div>
         <div>
-          <Label htmlFor="billing_term_id">Billing Terms *</Label>
-          <Select
-            id="billing_term_id"
-            value={formData.billing_term_id}
-            onChange={(e) => {
-              setFormData({ ...formData, billing_term_id: e.target.value });
-              if (errors.billing_term_id) setErrors({ ...errors, billing_term_id: undefined });
-            }}
-            required
-            disabled={billingTermsLoading || hasActiveQuote}
-            className={errors.billing_term_id ? "border-red-500" : ""}
-            title={hasActiveQuote ? "Cannot change billing terms when quote is active" : ""}
-          >
-            <option value="">
-              {billingTermsLoading ? "Loading..." : "Select billing terms"}
-            </option>
-            {billingTermsData?.items.map((term) => (
-              <option key={term.id} value={term.id}>
-                {term.name}
-              </option>
-            ))}
-          </Select>
-          {errors.billing_term_id && (
-            <p className="text-red-500 text-sm mt-1">{errors.billing_term_id}</p>
-          )}
+          <Label htmlFor="probability">Probability</Label>
+          <Input
+            id="probability"
+            type="text"
+            value={`${probability}%`}
+            readOnly
+            className="bg-gray-100 cursor-not-allowed"
+          />
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="invoice_customer"
-            checked={formData.invoice_customer}
-            onChange={(e) =>
-              setFormData({ ...formData, invoice_customer: e.target.checked })
-            }
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <Label htmlFor="invoice_customer" className="cursor-pointer">
-            Invoice Customer?
-          </Label>
-        </div>
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            id="billable_expenses"
-            checked={formData.billable_expenses}
-            onChange={(e) =>
-              setFormData({ ...formData, billable_expenses: e.target.checked })
-            }
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <Label htmlFor="billable_expenses" className="cursor-pointer">
-            Billable Expenses?
-          </Label>
-        </div>
-      </div>
-
-      {/* Deal/Forecast Fields Section */}
+      {/* Deal Information Section */}
       <div className="border-t pt-4 space-y-4">
-        <h3 className="text-lg font-semibold">Deal & Forecast Information</h3>
+        <h3 className="text-lg font-semibold">Deal Information</h3>
         
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="billable_expenses"
+              checked={formData.billable_expenses}
+              onChange={(e) =>
+                setFormData({ ...formData, billable_expenses: e.target.checked })
+              }
+              disabled={hasActiveQuote}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <Label htmlFor="billable_expenses" className="cursor-pointer">
+              Billable Expenses?
+            </Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              id="invoice_customer"
+              checked={formData.invoice_customer}
+              onChange={(e) =>
+                setFormData({ ...formData, invoice_customer: e.target.checked })
+              }
+              disabled={hasActiveQuote}
+              className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+            />
+            <Label htmlFor="invoice_customer" className="cursor-pointer">
+              Invoice Customer?
+            </Label>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="probability">Probability</Label>
+            <Label htmlFor="deal_creation_date">Deal Creation Date</Label>
             <Input
-              id="probability"
-              type="text"
-              value={`${probability}%`}
+              id="deal_creation_date"
+              type="date"
+              value={initialData && 'deal_creation_date' in initialData ? (initialData as Opportunity).deal_creation_date || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
           </div>
           <div>
-            <Label htmlFor="win_probability">Win Probability</Label>
+            <Label htmlFor="billing_term_id">Billing Terms *</Label>
             <Select
-              id="win_probability"
-              value={formData.win_probability || ""}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  win_probability: e.target.value as OpportunityCreate["win_probability"] || undefined,
-                })
-              }
+              id="billing_term_id"
+              value={formData.billing_term_id}
+              onChange={(e) => {
+                setFormData({ ...formData, billing_term_id: e.target.value });
+                if (errors.billing_term_id) setErrors({ ...errors, billing_term_id: undefined });
+              }}
+              required
+              disabled={billingTermsLoading || hasActiveQuote}
+              className={errors.billing_term_id ? "border-red-500" : ""}
+              title={hasActiveQuote ? "Cannot change billing terms when quote is active" : ""}
             >
-              <option value="">Select...</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
+              <option value="">
+                {billingTermsLoading ? "Loading..." : "Select billing terms"}
+              </option>
+              {billingTermsData?.items.map((term) => (
+                <option key={term.id} value={term.id}>
+                  {term.name}
+                </option>
+              ))}
             </Select>
+            {errors.billing_term_id && (
+              <p className="text-red-500 text-sm mt-1">{errors.billing_term_id}</p>
+            )}
           </div>
         </div>
 
@@ -590,15 +691,33 @@ export function OpportunityForm({
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <Label htmlFor="deal_creation_date">Deal Creation Date</Label>
+            <Label htmlFor="close_date">Close Date</Label>
             <Input
-              id="deal_creation_date"
+              id="close_date"
               type="date"
-              value={initialData && 'deal_creation_date' in initialData ? (initialData as Opportunity).deal_creation_date || "" : ""}
+              value={initialData && 'close_date' in initialData ? (initialData as Opportunity).close_date || "" : ""}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
           </div>
+          <div>
+            <Label htmlFor="deal_length">Deal Length (days)</Label>
+            <Input
+              id="deal_length"
+              type="text"
+              value={initialData && 'deal_length' in initialData ? (initialData as Opportunity).deal_length?.toString() || "" : ""}
+              readOnly
+              className="bg-gray-100 cursor-not-allowed"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Forecast Information Section */}
+      <div className="border-t pt-4 space-y-4">
+        <h3 className="text-lg font-semibold">Forecast Information</h3>
+        
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="deal_value">Deal Value</Label>
             <Input
@@ -615,9 +734,6 @@ export function OpportunityForm({
               placeholder="0.00"
             />
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="deal_value_usd">Deal Value (USD)</Label>
             <Input
@@ -628,111 +744,28 @@ export function OpportunityForm({
               className="bg-gray-100 cursor-not-allowed"
             />
           </div>
-          <div>
-            <Label htmlFor="close_date">Close Date</Label>
-            <Input
-              id="close_date"
-              type="date"
-              value={initialData && 'close_date' in initialData ? (initialData as Opportunity).close_date || "" : ""}
-              readOnly
-              className="bg-gray-100 cursor-not-allowed"
-            />
-          </div>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="deal_length">Deal Length (days)</Label>
-            <Input
-              id="deal_length"
-              type="text"
-              value={initialData && 'deal_length' in initialData ? (initialData as Opportunity).deal_length?.toString() || "" : ""}
-              readOnly
-              className="bg-gray-100 cursor-not-allowed"
-            />
-          </div>
           <div>
             <Label htmlFor="forecast_value">Forecast Value</Label>
             <Input
               id="forecast_value"
               type="text"
-              value={initialData && 'forecast_value' in initialData ? (initialData as Opportunity).forecast_value || "" : ""}
+              value={forecastValue}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
           </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="forecast_value_usd">Forecast Value (USD)</Label>
             <Input
               id="forecast_value_usd"
               type="text"
-              value={initialData && 'forecast_value_usd' in initialData ? (initialData as Opportunity).forecast_value_usd || "" : ""}
+              value={forecastValueUsd}
               readOnly
               className="bg-gray-100 cursor-not-allowed"
             />
-          </div>
-          <div>
-            <Label htmlFor="project_start_month">Project Start Month</Label>
-            <Select
-              id="project_start_month"
-              value={formData.project_start_month || ""}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  project_start_month: e.target.value ? parseInt(e.target.value) : undefined,
-                })
-              }
-            >
-              <option value="">Select...</option>
-              {Array.from({ length: 12 }, (_, i) => i + 1).map((month) => (
-                <option key={month} value={month}>
-                  {new Date(2000, month - 1).toLocaleString('default', { month: 'long' })}
-                </option>
-              ))}
-            </Select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="project_start_year">Project Start Year</Label>
-            <Input
-              id="project_start_year"
-              type="number"
-              min="1000"
-              max="9999"
-              value={formData.project_start_year || ""}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  project_start_year: e.target.value ? parseInt(e.target.value) : undefined,
-                })
-              }
-              placeholder="YYYY"
-            />
-          </div>
-          <div>
-            <Label htmlFor="project_duration_months">Project Duration (Months)</Label>
-            <Select
-              id="project_duration_months"
-              value={formData.project_duration_months || ""}
-              onChange={(e) =>
-                setFormData({
-                  ...formData,
-                  project_duration_months: e.target.value ? parseInt(e.target.value) : undefined,
-                })
-              }
-            >
-              <option value="">Select...</option>
-              {Array.from({ length: 36 }, (_, i) => i + 1).map((month) => (
-                <option key={month} value={month}>
-                  {month}
-                </option>
-              ))}
-            </Select>
           </div>
         </div>
       </div>

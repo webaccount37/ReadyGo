@@ -21,6 +21,10 @@ interface EstimateEmptyRowProps {
   rowIndex: number;
   stableId: string; // Stable ID to prevent remounting
   opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
+  startDate?: string; // Opportunity start date
+  endDate?: string; // Opportunity end date
+  invoiceCustomer?: boolean;
+  billableExpenses?: boolean;
   onContextMenu?: (e: React.MouseEvent) => void;
 }
 
@@ -31,6 +35,10 @@ export function EstimateEmptyRow({
   rowIndex: _rowIndex,
   stableId,
   opportunityDeliveryCenterId,
+  startDate: opportunityStartDate,
+  endDate: opportunityEndDate,
+  invoiceCustomer = true,
+  billableExpenses = true,
   onContextMenu,
 }: EstimateEmptyRowProps) {
   // Only show roles that have RoleRate associations with Opportunity Invoice Center
@@ -84,11 +92,11 @@ export function EstimateEmptyRow({
       rate: "",
       cost: "",
       currency: currency,
-      start_date: new Date().toISOString().split("T")[0],
-      end_date: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+      start_date: opportunityStartDate || new Date().toISOString().split("T")[0],
+      end_date: opportunityEndDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
         .toISOString()
         .split("T")[0],
-      billable: true,
+      billable: invoiceCustomer, // Default to invoiceCustomer value
       billable_expense_percentage: "0",
     };
   };
@@ -358,7 +366,7 @@ export function EstimateEmptyRow({
             currency: formData.currency || currency,
             start_date: formData.start_date,
             end_date: formData.end_date,
-            billable: formData.billable ?? true,
+            billable: invoiceCustomer ? (formData.billable ?? true) : false,
           };
           // Remove undefined/empty employee_id - backend expects valid UUID or omitted
           if (!createData.employee_id) {
@@ -533,26 +541,42 @@ export function EstimateEmptyRow({
       role_rates_count: selectedRoleData?.role_rates?.length || 0,
     });
 
-    // Find the role rate that matches opportunity delivery center and currency
+    // Find the role rate that matches opportunity delivery center (may have different currency)
     // Compare as strings to handle UUID string comparison
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
-        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
-        rate.default_currency === currency
+        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
     );
 
     let newCost: string;
     let newRate: string;
+    let roleRateCurrency: string = currency;
 
     if (matchingRate) {
-      newCost = String(matchingRate.internal_cost_rate || "0");
-      newRate = String(matchingRate.external_rate || "0");
+      // Get rates from role rate
+      let baseCost = matchingRate.internal_cost_rate || 0;
+      let baseRate = matchingRate.external_rate || 0;
+      roleRateCurrency = matchingRate.default_currency || currency;
+      
+      // Check if currency conversion is needed: Role Rate Default Currency <> Opportunity Invoice Currency
+      if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+        // Convert both cost and rate
+        baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+        baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+      }
+      
+      // Round to 2 decimal places
+      newCost = parseFloat(baseCost.toFixed(2)).toString();
+      newRate = parseFloat(baseRate.toFixed(2)).toString();
     } else {
       // Fallback to role default rates if no matching rate found
       // Use selectedRoleData which has full role info including defaults
       if (selectedRoleData) {
-        newCost = String(selectedRoleData.role_internal_cost_rate || "0");
-        newRate = String(selectedRoleData.role_external_rate || "0");
+        const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+        const fallbackRate = selectedRoleData.role_external_rate || 0;
+        // Round to 2 decimal places
+        newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+        newRate = parseFloat(fallbackRate.toFixed(2)).toString();
       } else {
         prevRoleIdRef.current = formData.role_id || "";
         return;
@@ -635,7 +659,9 @@ export function EstimateEmptyRow({
           // Fallback to role default rates if no matching rate found
           // Use selectedRoleData which has full role info including defaults
           if (selectedRoleData) {
-            newCost = String(selectedRoleData.role_internal_cost_rate || "0");
+            const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+            // Round to 2 decimal places
+            newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {
             prevEmployeeIdRef.current = currentEmployeeId;
             return;
@@ -675,43 +701,32 @@ export function EstimateEmptyRow({
     // Determine which rate to use and whether to convert currency
     let employeeCost: number;
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
     
+    // Choose rate based on delivery center match
     if (centersMatch) {
-      // Centers match: use internal_cost_rate with NO currency conversion
+      // Centers match: use internal_cost_rate
       employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-      console.log("Employee effect running - centers match, using internal_cost_rate without conversion", {
-        employee_id: currentEmployeeId,
-        originalCost: employeeCost,
-        employeeCurrency,
-        target_currency: currency,
-      });
     } else {
-      // Centers don't match: use internal_bill_rate with currency conversion
+      // Centers don't match: use internal_bill_rate
       employeeCost = selectedEmployeeData.internal_bill_rate || 0;
-      console.log("Employee effect running - centers don't match, using internal_bill_rate with conversion", {
-        employee_id: currentEmployeeId,
-        originalCost: employeeCost,
-        employeeCurrency,
-        target_currency: currency,
-        needsConversion: employeeCurrency.toUpperCase() !== currency.toUpperCase(),
-      });
-      
-      // Convert to Opportunity Invoice Center Currency if different
-      if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
-        console.log("Converting currency:", {
-          from: employeeCurrency,
-          to: currency,
-          originalAmount: employeeCost,
-        });
-        const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
-        console.log("Conversion result:", {
-          convertedAmount: convertedCost,
-        });
-        employeeCost = convertedCost;
-      }
     }
     
-    const newCost = String(employeeCost);
+    // Convert to Opportunity Invoice Currency if currencies differ
+    if (!currenciesMatch) {
+      const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
+      console.log("Converting currency:", {
+        from: employeeCurrency,
+        to: currency,
+        originalAmount: employeeCost,
+        convertedAmount: convertedCost,
+      });
+      // Round to 2 decimal places
+      employeeCost = parseFloat(convertedCost.toFixed(2));
+    }
+    
+    // Round to 2 decimal places
+    const newCost = parseFloat(employeeCost.toFixed(2)).toString();
     console.log("Updating Cost from Employee:", {
       centersMatch,
       rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
@@ -1020,8 +1035,8 @@ export function EstimateEmptyRow({
                         currency: formData.currency || currency,
                         start_date: formData.start_date,
                         end_date: formData.end_date,
-                        billable: formData.billable ?? true,
-                        billable_expense_percentage: formData.billable_expense_percentage || "0",
+                        billable: invoiceCustomer ? (formData.billable ?? true) : false,
+                        billable_expense_percentage: billableExpenses ? (formData.billable_expense_percentage || "0") : "0",
                       };
                       // Remove undefined/empty employee_id - backend expects valid UUID or omitted
                       if (!createData.employee_id) {
@@ -1125,8 +1140,9 @@ export function EstimateEmptyRow({
       <td className="border border-gray-300 px-2 py-1 text-center">
         <input
           type="checkbox"
-          checked={formData.billable ?? true}
+          checked={formData.billable ?? invoiceCustomer}
           onChange={(e) => setFormData({ ...formData, billable: e.target.checked })}
+          disabled={!invoiceCustomer}
           className="h-4 w-4"
         />
       </td>
@@ -1140,8 +1156,12 @@ export function EstimateEmptyRow({
             min="0"
             max="100"
             value={formData.billable_expense_percentage || "0"}
-            onChange={(e) => setFormData({ ...formData, billable_expense_percentage: e.target.value })}
+            onChange={(e) => {
+              const newValue = billableExpenses ? e.target.value : "0";
+              setFormData({ ...formData, billable_expense_percentage: newValue });
+            }}
             placeholder="0"
+            disabled={!billableExpenses}
             className="text-xs h-7 flex-1"
           />
           <span className="text-[10px] text-gray-500">%</span>

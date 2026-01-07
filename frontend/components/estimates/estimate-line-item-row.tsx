@@ -21,6 +21,8 @@ interface EstimateLineItemRowProps {
   currency: string;
   estimateId: string;
   opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
+  invoiceCustomer?: boolean;
+  billableExpenses?: boolean;
   onContextMenu?: (e: React.MouseEvent) => void;
   readOnly?: boolean;
 }
@@ -31,6 +33,8 @@ export function EstimateLineItemRow({
   currency,
   estimateId,
   opportunityDeliveryCenterId,
+  invoiceCustomer = true,
+  billableExpenses = true,
   onContextMenu,
   readOnly = false,
 }: EstimateLineItemRowProps) {
@@ -449,37 +453,49 @@ export function EstimateLineItemRow({
     // Check if we've already populated for this role+opportunity+currency combination
     const currentKey = `${roleValue}-${opportunityDeliveryCenterId}-${currency}`;
     
-    // Reset the populated flag when role changes
-    lastPopulatedRoleDataRef.current = "";
-    
-    // Skip if we've already populated for this exact combination
+    // Skip if we've already populated for this exact combination (unless role changed)
     if (lastPopulatedRoleDataRef.current === currentKey) {
       prevRoleRef.current = roleValue;
       return;
     }
 
-    // Find the role rate that matches opportunity delivery center and currency
+    // Find the role rate that matches opportunity delivery center (may have different currency)
     // Compare as strings to handle UUID string comparison
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
-        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
-        rate.default_currency === currency
+        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
     );
 
     let newCost: string;
     let newRate: string;
+    let roleRateCurrency: string = currency;
 
     if (matchingRate) {
-      // Update both cost and rate from the role rate
-      newCost = String(matchingRate.internal_cost_rate || "0");
-      newRate = String(matchingRate.external_rate || "0");
-    } else {
-      // Fallback to role default rates if no matching rate found
-      // Use selectedRoleData which has full role info including defaults
-      if (selectedRoleData) {
-        newCost = String(selectedRoleData.role_internal_cost_rate || "0");
-        newRate = String(selectedRoleData.role_external_rate || "0");
+      // Get rates from role rate
+      let baseCost = matchingRate.internal_cost_rate || 0;
+      let baseRate = matchingRate.external_rate || 0;
+      roleRateCurrency = matchingRate.default_currency || currency;
+      
+      // Check if currency conversion is needed: Role Rate Default Currency <> Opportunity Invoice Currency
+      if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+        // Convert both cost and rate
+        baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+        baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+      }
+      
+      // Round to 2 decimal places
+      newCost = parseFloat(baseCost.toFixed(2)).toString();
+      newRate = parseFloat(baseRate.toFixed(2)).toString();
       } else {
+        // Fallback to role default rates if no matching rate found
+        // Use selectedRoleData which has full role info including defaults
+        if (selectedRoleData) {
+          const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+          const fallbackRate = selectedRoleData.role_external_rate || 0;
+          // Round to 2 decimal places
+          newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+          newRate = parseFloat(fallbackRate.toFixed(2)).toString();
+        } else {
         prevRoleRef.current = roleValue;
         return;
       }
@@ -528,12 +544,16 @@ export function EstimateLineItemRow({
 
         let newCost: string;
         if (matchingRate) {
-          newCost = String(matchingRate.internal_cost_rate || "0");
+          const matchingCost = matchingRate.internal_cost_rate || 0;
+          // Round to 2 decimal places
+          newCost = parseFloat(matchingCost.toFixed(2)).toString();
         } else {
           // Fallback to role default rates if no matching rate found
           // Use selectedRoleData which has full role info including defaults
           if (selectedRoleData) {
-            newCost = String(selectedRoleData.role_internal_cost_rate || "0");
+            const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+            // Round to 2 decimal places
+            newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {
             prevEmployeeRef.current = employeeValue;
             return;
@@ -569,39 +589,24 @@ export function EstimateLineItemRow({
     // Determine which rate to use and whether to convert currency
     let employeeCost: number;
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
     
+    // Choose rate based on delivery center match
     if (centersMatch) {
-      // Centers match: use internal_cost_rate with NO currency conversion
+      // Centers match: use internal_cost_rate
       employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-      console.log("Employee effect (line item row) - centers match, using internal_cost_rate without conversion", {
-        originalCost: employeeCost,
-        employeeCurrency,
-        targetCurrency: currency,
-      });
     } else {
-      // Centers don't match: use internal_bill_rate with currency conversion
+      // Centers don't match: use internal_bill_rate
       employeeCost = selectedEmployeeData.internal_bill_rate || 0;
-      console.log("Employee effect (line item row) - centers don't match, using internal_bill_rate with conversion", {
-        originalCost: employeeCost,
-        employeeCurrency,
-        targetCurrency: currency,
-        needsConversion: employeeCurrency.toUpperCase() !== currency.toUpperCase(),
-      });
-      
-      // Convert to Opportunity Invoice Center Currency if different
-      if (employeeCurrency.toUpperCase() !== currency.toUpperCase()) {
-        const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
-        console.log("Currency conversion result:", {
-          from: employeeCurrency,
-          to: currency,
-          original: employeeCost,
-          converted: convertedCost,
-        });
-        employeeCost = convertedCost;
-      }
     }
     
-    const newCost = String(employeeCost);
+    // Convert to Opportunity Invoice Currency if currencies differ
+    if (!currenciesMatch) {
+      employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
+    }
+    
+    // Round to 2 decimal places
+    const newCost = parseFloat(employeeCost.toFixed(2)).toString();
     console.log("Updating Cost from Employee (line item row):", {
       centersMatch,
       rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
@@ -697,7 +702,7 @@ export function EstimateLineItemRow({
               const newValue = e.target.value;
               setDeliveryCenterValue(newValue);
               // Payable Center (delivery_center_id) can be updated independently
-              // Backend will handle it using current role_id and Opportunity Invoice Center for rate lookup
+              // Do NOT clear role when Payable Center changes
               handleFieldUpdate(
                 "delivery_center_id",
                 newValue,

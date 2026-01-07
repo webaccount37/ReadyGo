@@ -2,8 +2,7 @@
  * Opportunity types matching backend schemas.
  */
 
-export type OpportunityStatus = "discovery" | "qualified" | "proposal" | "negotiation" | "won" | "lost" | "cancelled";
-export type WinProbability = "low" | "medium" | "high";
+export type OpportunityStatus = "qualified" | "proposal" | "negotiation" | "won" | "lost" | "cancelled";
 export type Accountability = "full_ownership" | "mgmt_accountable" | "mgmt_advisory" | "staff_aug_limited";
 export type StrategicImportance = "critical" | "high" | "medium" | "low";
 
@@ -42,7 +41,6 @@ export interface Opportunity {
   employees?: OpportunityEmployee[];
   // New deal/forecast fields
   probability?: number;
-  win_probability?: WinProbability;
   accountability?: Accountability;
   strategic_importance?: StrategicImportance;
   deal_creation_date?: string;
@@ -52,9 +50,6 @@ export interface Opportunity {
   deal_length?: number;
   forecast_value?: string;
   forecast_value_usd?: string;
-  project_start_month?: number;
-  project_start_year?: number;
-  project_duration_months?: number;
 }
 
 export interface OpportunityCreate {
@@ -62,7 +57,7 @@ export interface OpportunityCreate {
   parent_opportunity_id?: string;
   account_id: string;
   start_date: string;
-  end_date?: string;
+  end_date: string;
   status?: OpportunityStatus;
   billing_term_id: string;
   description?: string;
@@ -75,13 +70,9 @@ export interface OpportunityCreate {
   billable_expenses?: boolean;
   attributes?: Record<string, unknown>;
   // New deal/forecast fields (most are read-only, but allow setting editable ones)
-  win_probability?: WinProbability;
   accountability?: Accountability;
   strategic_importance?: StrategicImportance;
   deal_value?: string;
-  project_start_month?: number;
-  project_start_year?: number;
-  project_duration_months?: number;
 }
 
 export interface OpportunityUpdate {
@@ -102,13 +93,9 @@ export interface OpportunityUpdate {
   billable_expenses?: boolean;
   attributes?: Record<string, unknown>;
   // New deal/forecast fields (most are read-only, but allow updates for editable ones)
-  win_probability?: WinProbability;
   accountability?: Accountability;
   strategic_importance?: StrategicImportance;
   deal_value?: string;
-  project_start_month?: number;
-  project_start_year?: number;
-  project_duration_months?: number;
 }
 
 export type OpportunityResponse = Opportunity;

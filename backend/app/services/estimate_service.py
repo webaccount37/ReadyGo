@@ -330,6 +330,7 @@ class EstimateService(BaseService):
                 new_line_item_dict = {
                     "estimate_id": new_estimate.id,
                     "role_rates_id": line_item.role_rates_id,
+                    "payable_center_id": line_item.payable_center_id,  # Copy Payable Center
                     "employee_id": line_item.employee_id,
                     "rate": line_item.rate,
                     "cost": line_item.cost,

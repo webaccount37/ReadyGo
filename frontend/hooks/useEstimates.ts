@@ -96,8 +96,11 @@ export function useCreateEstimate(
 
   return useMutation<EstimateResponse, Error, EstimateCreate>({
     mutationFn: (data) => estimatesApi.createEstimate(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+    onSuccess: (data) => {
+      // Invalidate all estimate queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      // Invalidate related opportunities
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -118,8 +121,10 @@ export function useUpdateEstimate(
   return useMutation<EstimateResponse, Error, { id: string; data: EstimateUpdate }>({
     mutationFn: ({ id, data }) => estimatesApi.updateEstimate(id, data),
     onSuccess: (data) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(data.id) });
+      // Invalidate all estimate queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      // Invalidate related opportunities
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -153,8 +158,11 @@ export function useDeleteEstimate(
   return useMutation<void, Error, string>({
     mutationFn: (id) => estimatesApi.deleteEstimate(id),
     onSuccess: (_, id) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+      // Invalidate all estimate queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       queryClient.removeQueries({ queryKey: QUERY_KEYS.detail(id) });
+      // Invalidate related opportunities
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -179,7 +187,10 @@ export function useCloneEstimate(
   >({
     mutationFn: ({ estimateId, newName }) => estimatesApi.cloneEstimate(estimateId, newName),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+      // Invalidate all estimate queries
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      // Invalidate related opportunities
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -222,6 +233,10 @@ export function useCreateLineItem(
       });
       queryClient.invalidateQueries({
         queryKey: QUERY_KEYS.totals(variables.estimateId),
+      });
+      // Invalidate opportunities since line items affect opportunity employee relationships
+      queryClient.invalidateQueries({
+        queryKey: ["opportunities"],
       });
     },
     ...options,
@@ -268,6 +283,10 @@ export function useUpdateLineItem(
         });
         queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.totals(variables.estimateId),
+        });
+        // Invalidate opportunities since line items affect opportunity employee relationships
+        queryClient.invalidateQueries({
+          queryKey: ["opportunities"],
         });
       }, 100);
     },

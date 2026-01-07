@@ -241,15 +241,6 @@ function OpportunitiesPageContent() {
       const dealValueNum = opportunity.deal_value_usd ? String(opportunity.deal_value_usd).toLowerCase() : "";
       const forecastValueNum = opportunity.forecast_value_usd ? String(opportunity.forecast_value_usd).toLowerCase() : "";
       
-      // Project fields
-      const projectYear = opportunity.project_start_year ? String(opportunity.project_start_year).toLowerCase() : "";
-      const projectMonth = opportunity.project_start_month 
-        ? formatMonth(opportunity.project_start_month).toLowerCase()
-        : "";
-      const projectDuration = opportunity.project_duration_months 
-        ? `${opportunity.project_duration_months} months`.toLowerCase()
-        : "";
-      
       // Count fields
       const employeeCount = String(employeeCounts[opportunity.id] ?? 0).toLowerCase();
       
@@ -268,9 +259,6 @@ function OpportunitiesPageContent() {
         forecastValue.includes(query) ||
         dealValueNum.includes(query) ||
         forecastValueNum.includes(query) ||
-        projectYear.includes(query) ||
-        projectMonth.includes(query) ||
-        projectDuration.includes(query) ||
         employeeCount.includes(query)
       );
     });
@@ -393,12 +381,10 @@ function OpportunitiesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Parent Opportunity Name">Parent</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Status">Status</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Start Date">Start</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="End Date">End</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Invoice Center">IC</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Deal Value (USD)">Deal $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Forecast Value (USD)">Forecast $</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Start Year">Year</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Start Month">Mo</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Project Duration (Months)">Dur</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
@@ -420,8 +406,28 @@ function OpportunitiesPageContent() {
                                 ) : null}
                               </div>
                             </td>
-                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getAccountName(opportunity.account_id)}>{highlightText(getAccountName(opportunity.account_id), searchQuery)}</td>
-                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>{getParentOpportunityName(opportunity.parent_opportunity_id)}</td>
+                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getAccountName(opportunity.account_id)}>
+                              <Link
+                                href={`/accounts?search=${encodeURIComponent(getAccountName(opportunity.account_id))}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                {highlightText(getAccountName(opportunity.account_id), searchQuery)}
+                              </Link>
+                            </td>
+                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>
+                              {opportunity.parent_opportunity_id ? (
+                                <Link
+                                  href={`/opportunities?search=${encodeURIComponent(getParentOpportunityName(opportunity.parent_opportunity_id))}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  {getParentOpportunityName(opportunity.parent_opportunity_id)}
+                                </Link>
+                              ) : (
+                                "None"
+                              )}
+                            </td>
                             <td className="p-1.5">
                               <span
                                 className={`px-1 py-0.5 text-xs rounded whitespace-nowrap ${
@@ -448,7 +454,20 @@ function OpportunitiesPageContent() {
                                 ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
                                 : "—"}
                             </td>
-                            <td className="p-1.5 max-w-[80px] truncate text-xs" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>{getDeliveryCenterName(opportunity.delivery_center_id)}</td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.end_date ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
+                              {opportunity.end_date
+                                ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+                                : "—"}
+                            </td>
+                            <td className="p-1.5 max-w-[80px] truncate text-xs" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>
+                              <Link
+                                href={`/delivery-centers?search=${encodeURIComponent(getDeliveryCenterName(opportunity.delivery_center_id))}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                {getDeliveryCenterName(opportunity.delivery_center_id)}
+                              </Link>
+                            </td>
                             <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.deal_value_usd ? formatCurrency(opportunity.deal_value_usd, "USD") : "—"}>
                               {opportunity.deal_value_usd
                                 ? formatCurrency(opportunity.deal_value_usd, "USD")
@@ -459,9 +478,6 @@ function OpportunitiesPageContent() {
                                 ? formatCurrency(opportunity.forecast_value_usd, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_start_year ? String(opportunity.project_start_year) : "—"}>{opportunity.project_start_year || "—"}</td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_start_month ? formatMonth(opportunity.project_start_month) : "—"}>{opportunity.project_start_month ? formatMonth(opportunity.project_start_month).substring(0, 3) : "—"}</td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.project_duration_months ? `${opportunity.project_duration_months} months` : "—"}>{opportunity.project_duration_months || "—"}</td>
                             <td className="p-1.5 whitespace-nowrap text-xs">
                               <Link
                                 href={`/employees?search=${encodeURIComponent(opportunity.name)}`}
@@ -801,10 +817,6 @@ function OpportunitiesPageContent() {
                       : "—"}
                   </p>
                 </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Win Probability</p>
-                  <p className="text-sm text-gray-700">{formatEnumValue(opportunityToView.win_probability)}</p>
-                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -876,25 +888,6 @@ function OpportunitiesPageContent() {
                     {opportunityToView.forecast_value_usd
                       ? formatCurrency(opportunityToView.forecast_value_usd, "USD")
                       : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Project Start Month</p>
-                  <p className="text-sm text-gray-700">{formatMonth(opportunityToView.project_start_month)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Project Start Year</p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.project_start_year || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Project Duration (Months)</p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.project_duration_months || "—"}
                   </p>
                 </div>
               </div>
