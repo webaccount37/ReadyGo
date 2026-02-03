@@ -174,6 +174,7 @@ class EstimateCreate(BaseModel):
     name: Optional[str] = Field(None, min_length=0, max_length=255)  # Optional for auto-generation
     description: Optional[str] = Field(None, max_length=2000)
     active_version: Optional[bool] = Field(default=False)
+    copy_line_items: Optional[bool] = Field(default=True)  # Whether to copy line items from active estimate
     attributes: Optional[dict] = None
 
 

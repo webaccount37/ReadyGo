@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useContacts,
   useCreateContact,
@@ -20,13 +21,22 @@ import { getAccountTypeColor, getAccountTypeLabel } from "@/lib/utils/account-ty
 import type { AccountType } from "@/types/account";
 import Link from "next/link";
 
-export default function ContactsPage() {
+function ContactsPageContent() {
+  const searchParams = useSearchParams();
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingContact, setEditingContact] = useState<string | null>(null);
   const [viewingContact, setViewingContact] = useState<Contact | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Initialize search query from URL parameter
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const { data, isLoading, error, refetch } = useContacts({ skip, limit });
   const createContact = useCreateContact();
@@ -186,9 +196,9 @@ export default function ContactsPage() {
                           </td>
                           <td className="p-3">
                             <Link
-                              href={`/accounts?account_id=${contact.account_id}`}
+                              href={`/accounts?search=${encodeURIComponent(contact.account_name || getAccountName(contact.account_id))}`}
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center text-sm font-medium text-gray-900 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-md transition-colors duration-150 border-b border-dotted border-gray-400 hover:border-blue-500"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
                             >
                               {highlightText(contact.account_name || getAccountName(contact.account_id), searchQuery)}
                             </Link>
@@ -277,9 +287,9 @@ export default function ContactsPage() {
                               Account
                             </div>
                             <Link
-                              href={`/accounts?account_id=${contact.account_id}`}
+                              href={`/accounts?search=${encodeURIComponent(contact.account_name || getAccountName(contact.account_id))}`}
                               onClick={(e) => e.stopPropagation()}
-                              className="inline-flex items-center text-sm font-medium text-gray-900 hover:text-blue-600 hover:bg-blue-50 px-2 py-1 rounded-md transition-colors duration-150 border-b border-dotted border-gray-400 hover:border-blue-500"
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
                             >
                               {contact.account_name || getAccountName(contact.account_id)}
                             </Link>
@@ -481,6 +491,14 @@ export default function ContactsPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function ContactsPage() {
+  return (
+    <Suspense fallback={<div className="text-gray-600">Loading contacts...</div>}>
+      <ContactsPageContent />
+    </Suspense>
   );
 }
 

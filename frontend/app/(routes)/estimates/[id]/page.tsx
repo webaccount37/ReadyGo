@@ -14,10 +14,11 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import Link from "next/link";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Lock, AlertTriangle, AlertCircle } from "lucide-react";
+import { Lock, AlertTriangle, AlertCircle, Calendar } from "lucide-react";
 import { CURRENCIES } from "@/types/currency";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EstimateDetailResponse } from "@/types/estimate";
+import { GanttViewDialog } from "@/components/estimates/gantt-view-dialog";
 
 // Helper function to clear stale cache entries
 function clearStaleCacheEntries(queryClient: ReturnType<typeof useQueryClient>, estimateId: string, actualLineItemIds: Set<string>) {
@@ -90,6 +91,7 @@ export default function EstimateDetailPage() {
   const deleteEstimate = useDeleteEstimate();
   const [isCloning, setIsCloning] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isGanttDialogOpen, setIsGanttDialogOpen] = useState(false);
   
   // Fetch opportunity data for start/end dates and delivery center
   const { data: opportunity, refetch: refetchOpportunity } = useOpportunity(estimate?.opportunity_id || "", false);
@@ -118,8 +120,30 @@ export default function EstimateDetailPage() {
   // Initialize dates and currency from opportunity
   useEffect(() => {
     if (opportunity) {
-      setStartDate(opportunity.start_date || "");
-      setEndDate(opportunity.end_date || "");
+      // Ensure dates are in YYYY-MM-DD format for date inputs
+      const formatDateForInput = (dateStr: string | undefined): string => {
+        if (!dateStr) return "";
+        // If already in YYYY-MM-DD format, return as-is
+        if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
+        // If includes time (ISO format), extract date part
+        if (dateStr.includes('T')) return dateStr.split('T')[0];
+        // Try to parse and format
+        try {
+          const date = new Date(dateStr);
+          if (!isNaN(date.getTime())) {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+          }
+        } catch {
+          // If parsing fails, return as-is
+        }
+        return dateStr;
+      };
+      
+      setStartDate(formatDateForInput(opportunity.start_date) || "");
+      setEndDate(formatDateForInput(opportunity.end_date) || "");
       setInvoiceCurrency(opportunity.default_currency || "USD");
       setInvoiceCustomer(opportunity.invoice_customer !== undefined ? opportunity.invoice_customer : true);
       setBillableExpenses(opportunity.billable_expenses !== undefined ? opportunity.billable_expenses : true);
@@ -244,7 +268,8 @@ export default function EstimateDetailPage() {
     try {
       const newEstimate = await createEstimate.mutateAsync({
         opportunity_id: estimate.opportunity_id,
-        name: "", // Empty name will trigger backend to create empty estimate
+        name: "", // Empty name will trigger backend to auto-generate version name
+        copy_line_items: false, // Don't copy line items - create empty estimate
       });
       // Invalidate all estimates to ensure fresh data
       queryClient.invalidateQueries({ queryKey: ["estimates"] });
@@ -351,6 +376,16 @@ export default function EstimateDetailPage() {
           </Button>
           <Button onClick={handleDuplicate} variant="outline" disabled={isCloning} title="">
             {isCloning ? "Duplicating..." : "DUPLICATE"}
+          </Button>
+          <Button 
+            onClick={() => setIsGanttDialogOpen(true)} 
+            variant="default"
+            size="sm"
+            className="flex items-center gap-2"
+            title="View Timeline"
+          >
+            <Calendar className="w-4 h-4" />
+            View Timeline
           </Button>
           {!estimate.active_version && (
             <Button 
@@ -516,6 +551,12 @@ export default function EstimateDetailPage() {
         invoiceCustomer={invoiceCustomer}
         billableExpenses={billableExpenses}
         readOnly={estimate.is_locked || false}
+      />
+      
+      <GanttViewDialog
+        open={isGanttDialogOpen}
+        onOpenChange={setIsGanttDialogOpen}
+        estimateIds={[estimateId]}
       />
     </div>
   );

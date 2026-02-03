@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useDeliveryCenters,
   useDeliveryCenter,
@@ -8,8 +9,6 @@ import {
   useUpdateDeliveryCenter,
   useDeleteDeliveryCenter,
 } from "@/hooks/useDeliveryCenters";
-import { useOpportunities } from "@/hooks/useOpportunities";
-import { useEmployees } from "@/hooks/useEmployees";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
@@ -21,11 +20,20 @@ import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
 import Link from "next/link";
 
-export default function DeliveryCentersPage() {
+function DeliveryCentersPageContent() {
+  const searchParams = useSearchParams();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingDeliveryCenter, setEditingDeliveryCenter] = useState<string | null>(null);
   const [viewingDeliveryCenter, setViewingDeliveryCenter] = useState<DeliveryCenter | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Initialize search query from URL parameter
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
 
   const { data, isLoading, error, refetch } = useDeliveryCenters();
   const createDeliveryCenter = useCreateDeliveryCenter();
@@ -438,6 +446,14 @@ export default function DeliveryCentersPage() {
         </Dialog>
       )}
     </div>
+  );
+}
+
+export default function DeliveryCentersPage() {
+  return (
+    <Suspense fallback={<div className="text-gray-600">Loading delivery centers...</div>}>
+      <DeliveryCentersPageContent />
+    </Suspense>
   );
 }
 

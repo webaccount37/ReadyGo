@@ -429,6 +429,19 @@ class OpportunityService(BaseService):
         if hasattr(opportunity, 'account') and opportunity.account:
             account_name = opportunity.account.company_name
         
+        # Check if opportunity is locked by active quote
+        is_locked = False
+        locked_by_quote_id = None
+        try:
+            from app.db.repositories.quote_repository import QuoteRepository
+            quote_repo = QuoteRepository(self.session)
+            active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity.id)
+            if active_quote:
+                is_locked = True
+                locked_by_quote_id = active_quote.id
+        except Exception:
+            pass  # If check fails, assume not locked
+        
         opportunity_dict = {
             "id": str(opportunity.id),
             "name": opportunity.name,
@@ -459,6 +472,9 @@ class OpportunityService(BaseService):
             "deal_length": opportunity.deal_length,
             "forecast_value": str(opportunity.forecast_value) if opportunity.forecast_value is not None else None,
             "forecast_value_usd": str(opportunity.forecast_value_usd) if opportunity.forecast_value_usd is not None else None,
+            # Locked status
+            "is_locked": is_locked,
+            "locked_by_quote_id": str(locked_by_quote_id) if locked_by_quote_id else None,
         }
         
         if include_relationships:

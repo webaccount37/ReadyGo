@@ -31,6 +31,7 @@ import Link from "next/link";
 
 function OpportunitiesPageContent() {
   const searchParams = useSearchParams();
+  const accountIdParam = searchParams.get("account_id");
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -46,8 +47,20 @@ function OpportunitiesPageContent() {
     }
   }, [searchParams]);
 
+  // Initialize viewing opportunity from URL parameter
+  useEffect(() => {
+    const opportunityIdParam = searchParams.get("opportunity_id");
+    if (opportunityIdParam) {
+      setViewingOpportunity(opportunityIdParam);
+    }
+  }, [searchParams]);
+
   const router = useRouter();
-  const { data, isLoading, error, refetch } = useOpportunities({ skip, limit });
+  const { data, isLoading, error, refetch } = useOpportunities({ 
+    skip, 
+    limit,
+    account_id: accountIdParam || undefined
+  });
   const createOpportunity = useCreateOpportunity();
   const updateOpportunity = useUpdateOpportunity();
   const deleteOpportunity = useDeleteOpportunity();

@@ -20,6 +20,7 @@ import { normalizeDateForInput } from "@/lib/utils";
 import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import type { Employee } from "@/types/employee";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
+import { Lock } from "lucide-react";
 
 interface EmployeeRelationshipsProps {
   employee: Employee;
@@ -327,24 +328,32 @@ export function EmployeeRelationships({
                 // Get employee's association data for this opportunity
                 const employeeOpportunityData = employee.opportunities?.find(o => o.id === opportunityId);
                 
-                // Check if opportunity has active quote (for locking)
-                const opportunityHasActiveQuote = hasActiveQuote(opportunityId);
+                // Check if opportunity is locked (use is_locked field if available, otherwise fallback to checking quotes)
+                const isLocked = opportunity.is_locked ?? hasActiveQuote(opportunityId);
                 
                 return (
                   <div
                     key={opportunityId}
-                    className="border rounded-lg p-4 space-y-3 bg-gray-50"
+                    className={`border rounded-lg p-4 space-y-3 ${isLocked ? 'bg-yellow-50 border-yellow-200' : 'bg-gray-50'}`}
                   >
                     {/* Opportunity Header */}
                     <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
                       <div className="flex-1">
-                        <span
-                          className="text-blue-600 font-semibold text-base cursor-default"
-                          title={`Opportunity: ${opportunity.name}`}
-                        >
-                          {opportunity.name}
-                        </span>
-                        <span className="ml-2 text-xs text-gray-500">(via Active Estimates)</span>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-blue-600 font-semibold text-base cursor-default"
+                            title={`Opportunity: ${opportunity.name}`}
+                          >
+                            {opportunity.name}
+                          </span>
+                          {isLocked && (
+                            <span className="flex items-center gap-1 text-yellow-700 text-xs px-2 py-1 bg-yellow-100 border border-yellow-300 rounded font-semibold">
+                              <Lock className="w-3 h-3" />
+                              Locked
+                            </span>
+                          )}
+                        </div>
+                        <span className="ml-0 text-xs text-gray-500">(via Active Estimates)</span>
                         {/* Display association fields */}
                         {employeeOpportunityData && (
                           <div className="mt-2 text-xs text-gray-600 space-y-1">
@@ -372,17 +381,12 @@ export function EmployeeRelationships({
                             size="sm"
                             variant="outline"
                             onClick={() => handleUnlinkOpportunity(opportunityId)}
-                            disabled={unlinkFromOpportunity.isPending || opportunityHasActiveQuote}
-                            className="w-full sm:w-auto"
-                            title={opportunityHasActiveQuote ? "Cannot unlink opportunity with active quote" : ""}
+                            disabled={unlinkFromOpportunity.isPending || isLocked}
+                            className={`w-full sm:w-auto ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                            title={isLocked ? "Cannot unlink opportunity - it is locked by an active quote" : "Unlink this opportunity"}
                           >
                             Unlink Opportunity
                           </Button>
-                          {opportunityHasActiveQuote && (
-                            <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
-                              Locked
-                            </span>
-                          )}
                         </div>
                       )}
                     </div>

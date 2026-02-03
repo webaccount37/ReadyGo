@@ -1,15 +1,17 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useQuoteDetail, useUpdateQuoteStatus, useDeactivateQuote } from "@/hooks/useQuotes";
+import { useQuoteDetail, useDeactivateQuote } from "@/hooks/useQuotes";
+import { useOpportunity } from "@/hooks/useOpportunities";
+import { useAccounts } from "@/hooks/useAccounts";
+import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
 import { UnlockDialog } from "@/components/quotes/unlock-dialog";
-import { QuoteStatusUpdate } from "@/types/quote";
-import { Lock, FileText, Calendar } from "lucide-react";
+import { Lock, FileText } from "lucide-react";
 import { QuoteReadonlyTable } from "@/components/quotes/quote-readonly-table";
 
 export default function QuoteDetailPage() {
@@ -17,27 +19,197 @@ export default function QuoteDetailPage() {
   const router = useRouter();
   const quoteId = params.id as string;
   const { data: quote, isLoading, error, refetch } = useQuoteDetail(quoteId);
-  const updateStatus = useUpdateQuoteStatus();
   const deactivateQuote = useDeactivateQuote();
   const [isUnlockDialogOpen, setIsUnlockDialogOpen] = useState(false);
-  const [statusUpdate, setStatusUpdate] = useState<QuoteStatusUpdate>({
-    status: quote?.status || "DRAFT",
-    sent_date: quote?.sent_date,
+  
+  // Fetch opportunity for date range
+  const { data: opportunity } = useOpportunity(quote?.opportunity_id || "", false, {
+    enabled: !!quote?.opportunity_id,
   });
 
-  const handleStatusUpdate = async () => {
-    if (!quote) return;
-    
-    try {
-      await updateStatus.mutateAsync({
-        quoteId: quote.id,
-        status: statusUpdate,
-      });
-      refetch();
-    } catch (err) {
-      console.error("Failed to update quote status:", err);
-      alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
+  // Fetch accounts and delivery centers for lookup
+  const { data: accountsData } = useAccounts({ limit: 1000 });
+  const { data: deliveryCentersData } = useDeliveryCenters();
+
+  // Helper function to get account name
+  const getAccountName = (accountId: string | undefined): string => {
+    if (!accountId) return "—";
+    // First try snapshot_data
+    if (quote?.snapshot_data?.account_name && typeof quote.snapshot_data.account_name === "string") {
+      return quote.snapshot_data.account_name;
     }
+    // Then try opportunity account_name
+    if (opportunity?.account_name) {
+      return opportunity.account_name;
+    }
+    // Finally lookup by ID
+    const account = accountsData?.items.find((a) => a.id === accountId);
+    return account?.company_name || accountId;
+  };
+
+  // Helper function to get delivery center name
+  const getDeliveryCenterName = (dcId: string | undefined): string => {
+    if (!dcId) return "—";
+    // First try snapshot_data
+    if (quote?.snapshot_data?.delivery_center_name && typeof quote.snapshot_data.delivery_center_name === "string") {
+      return quote.snapshot_data.delivery_center_name;
+    }
+    // Then lookup by ID from opportunity
+    const dc = deliveryCentersData?.items.find((d) => d.id === dcId);
+    return dc?.name || dcId;
+  };
+
+  // Helper function to safely get currency from snapshot_data or opportunity
+  const getCurrency = (): string => {
+    if (quote?.snapshot_data?.default_currency && typeof quote.snapshot_data.default_currency === "string") {
+      return quote.snapshot_data.default_currency;
+    }
+    if (opportunity?.default_currency) {
+      return opportunity.default_currency;
+    }
+    return "USD";
+  };
+
+  // Calculate estimate summary from quote's snapshot line items
+  const estimateSummary = useMemo(() => {
+    if (!quote?.line_items || !opportunity) return null;
+    
+    const parseLocalDate = (dateStr: string): Date => {
+      const datePart = dateStr.split("T")[0];
+      const [year, month, day] = datePart.split("-").map(Number);
+      return new Date(year, month - 1, day);
+    };
+    
+    const formatDateKey = (date: Date): string => {
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
+    };
+    
+    // Generate weeks from opportunity start/end dates
+    const weeks: Date[] = [];
+    if (!opportunity.start_date || !opportunity.end_date) {
+      return null;
+    }
+    const startDate = parseLocalDate(opportunity.start_date);
+    const endDate = parseLocalDate(opportunity.end_date);
+    
+    // Find first Sunday
+    const current = new Date(startDate);
+    const dayOfWeek = current.getDay();
+    const diff = current.getDate() - dayOfWeek;
+    current.setDate(diff);
+    
+    while (current <= endDate) {
+      const weekStart = new Date(current);
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekEnd.getDate() + 6);
+      
+      if (weekStart <= endDate && weekEnd >= startDate) {
+        weeks.push(new Date(weekStart));
+      }
+      current.setDate(current.getDate() + 7);
+    }
+    
+    // Calculate totals from quote's snapshot line items
+    let totalCost = 0;
+    let totalRevenue = 0;
+    let totalHours = 0;
+    
+    quote.line_items.forEach((item) => {
+      const itemHours = weeks.reduce((hoursSum, week) => {
+        const weekKey = formatDateKey(week);
+        const weekDate = week;
+        const itemStartDate = parseLocalDate(item.start_date);
+        const itemEndDate = parseLocalDate(item.end_date);
+        const weekEnd = new Date(weekDate);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        
+        if (weekDate <= itemEndDate && weekEnd >= itemStartDate) {
+          const weeklyHour = item.weekly_hours?.find((wh) => {
+            const whDate = parseLocalDate(wh.week_start_date);
+            return formatDateKey(whDate) === weekKey;
+          });
+          return hoursSum + parseFloat(weeklyHour?.hours || "0");
+        }
+        return hoursSum;
+      }, 0);
+      
+      const itemCost = itemHours * parseFloat(item.cost || "0");
+      const itemRevenue = itemHours * parseFloat(item.rate || "0");
+      
+      totalCost += itemCost;
+      totalRevenue += itemRevenue;
+      totalHours += itemHours;
+    });
+    
+    const marginAmount = totalRevenue - totalCost;
+    const marginPercentage = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
+    
+    return {
+      totalCost,
+      totalRevenue,
+      totalHours,
+      marginAmount,
+      marginPercentage,
+      currency: getCurrency(),
+    };
+  }, [quote, opportunity]);
+
+  // Calculate quote total
+  const quoteTotal = useMemo(() => {
+    if (!quote?.quote_type || !estimateSummary) return 0;
+    
+    if (quote.quote_type === "FIXED_BID") {
+      return parseFloat(quote.target_amount || "0");
+    } else if (quote.quote_type === "TIME_MATERIALS") {
+      // If blended rate is selected, calculate: total hours * blended rate
+      if (quote.rate_billing_unit === "HOURLY_BLENDED" || quote.rate_billing_unit === "DAILY_BLENDED") {
+        const blendedRate = parseFloat(quote.blended_rate_amount || "0");
+        const totalHours = estimateSummary.totalHours || 0;
+        return totalHours * blendedRate;
+      }
+      // Otherwise use estimate total revenue
+      return estimateSummary.totalRevenue;
+    }
+    return 0;
+  }, [quote, estimateSummary]);
+
+  // Calculate variable compensation impact
+  const variableCompensationImpact = useMemo(() => {
+    if (!quote?.variable_compensations || !quote.variable_compensations.length || !estimateSummary) return 0;
+    
+    return quote.variable_compensations.reduce((sum, comp) => {
+      const percentage = parseFloat(comp.percentage_amount || "0") / 100;
+      if (comp.revenue_type === "GROSS_REVENUE") {
+        return sum + (quoteTotal * percentage);
+      } else {
+        // GROSS_MARGIN
+        const margin = estimateSummary.marginAmount;
+        return sum + (margin * percentage);
+      }
+    }, 0);
+  }, [quote, estimateSummary, quoteTotal]);
+
+  // Format currency helper
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: getCurrency(),
+    }).format(amount);
+  };
+
+  // Helper function to format date without timezone conversion
+  const formatLocalDate = (dateStr: string): string => {
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+    return date.toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "numeric",
+      day: "numeric",
+    });
   };
 
   const handleDeactivate = async () => {
@@ -109,16 +281,19 @@ export default function QuoteDetailPage() {
             <div className="flex items-center gap-2">
               {quote.is_active && (
                 <Button
-                  variant="outline"
+                  variant="destructive"
                   onClick={() => setIsUnlockDialogOpen(true)}
                 >
                   <Lock className="h-4 w-4 mr-2" />
                   Unlock
                 </Button>
               )}
-              <Link href={`/opportunities/${quote.opportunity_id}`}>
-                <Button variant="outline">View Opportunity</Button>
-              </Link>
+              <Button 
+                variant="outline"
+                onClick={() => router.push(`/opportunities?opportunity_id=${quote.opportunity_id}`)}
+              >
+                View Opportunity
+              </Button>
               <Link href={`/estimates/${quote.estimate_id}`}>
                 <Button variant="outline">View Estimate</Button>
               </Link>
@@ -136,9 +311,25 @@ export default function QuoteDetailPage() {
               <p className="font-medium">{quote.estimate_name}</p>
             </div>
             <div>
+              <p className="text-sm text-gray-500">Account Name</p>
+              <p className="font-medium">
+                {getAccountName(opportunity?.account_id || quote.snapshot_data?.account_id as string | undefined)}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Invoice Center</p>
+              <p className="font-medium">
+                {getDeliveryCenterName(opportunity?.delivery_center_id || quote.snapshot_data?.delivery_center_id as string | undefined)}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500">Invoice Currency</p>
+              <p className="font-medium">{getCurrency()}</p>
+            </div>
+            <div>
               <p className="text-sm text-gray-500">Created</p>
               <p className="font-medium">
-                {new Date(quote.created_at).toLocaleDateString()}
+                {formatLocalDate(quote.created_at)}
                 {quote.created_by_name && ` by ${quote.created_by_name}`}
               </p>
             </div>
@@ -146,7 +337,7 @@ export default function QuoteDetailPage() {
               <div>
                 <p className="text-sm text-gray-500">Sent Date</p>
                 <p className="font-medium">
-                  {new Date(quote.sent_date).toLocaleDateString()}
+                  {formatLocalDate(quote.sent_date)}
                 </p>
               </div>
             )}
@@ -158,53 +349,283 @@ export default function QuoteDetailPage() {
               <p className="mt-1">{quote.notes}</p>
             </div>
           )}
-
-          {/* Status Update Section */}
-          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-            <h3 className="font-semibold mb-3">Update Status</h3>
-            <div className="flex items-center gap-4">
-              <select
-                value={statusUpdate.status}
-                onChange={(e) =>
-                  setStatusUpdate({
-                    ...statusUpdate,
-                    status: e.target.value as QuoteStatusUpdate["status"],
-                  })
-                }
-                className="border rounded px-3 py-2"
-              >
-                <option value="DRAFT">DRAFT</option>
-                <option value="SENT">SENT</option>
-                <option value="ACCEPTED">ACCEPTED</option>
-                <option value="REJECTED">REJECTED</option>
-                <option value="INVALID">INVALID</option>
-              </select>
-              {statusUpdate.status === "SENT" && (
-                <div className="flex items-center gap-2">
-                  <Calendar className="h-4 w-4" />
-                  <input
-                    type="date"
-                    value={statusUpdate.sent_date || ""}
-                    onChange={(e) =>
-                      setStatusUpdate({
-                        ...statusUpdate,
-                        sent_date: e.target.value || undefined,
-                      })
-                    }
-                    className="border rounded px-3 py-2"
-                  />
-                </div>
-              )}
-              <Button
-                onClick={handleStatusUpdate}
-                disabled={updateStatus.isPending}
-              >
-                Update Status
-              </Button>
-            </div>
-          </div>
         </CardContent>
       </Card>
+
+      {/* Estimate vs Quote Comparison */}
+      {quote.quote_type && estimateSummary && (
+        <Card className="border-indigo-200 bg-gradient-to-r from-indigo-50 to-violet-50">
+          <CardHeader className="bg-indigo-100/50">
+            <CardTitle className="text-lg text-indigo-900">Quote vs Estimate Comparison</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-2 gap-6">
+              <div className="bg-white rounded-lg p-4 border border-indigo-200">
+                <h4 className="font-semibold mb-3 text-indigo-900">Estimate</h4>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Total Cost:</span>
+                    <span className="text-sm font-semibold">{formatCurrency(estimateSummary.totalCost)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Total Revenue:</span>
+                    <span className="text-sm font-semibold text-green-700">{formatCurrency(estimateSummary.totalRevenue)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Margin Amount:</span>
+                    <span className="text-sm font-semibold text-purple-700">{formatCurrency(estimateSummary.marginAmount)}</span>
+                  </div>
+                  <div className="flex justify-between border-t pt-2">
+                    <span className="text-sm font-medium text-gray-700">Margin %:</span>
+                    <span className="text-sm font-bold text-orange-700">{estimateSummary.marginPercentage.toFixed(2)}%</span>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white rounded-lg p-4 border border-indigo-200">
+                <h4 className="font-semibold mb-3 text-indigo-900">
+                  {quote.quote_type === "FIXED_BID" ? "Fixed Bid Quote" : "Time & Materials Quote"}
+                </h4>
+                <div className="space-y-2">
+                  {quote.quote_type === "FIXED_BID" ? (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Fixed Bid Total:</span>
+                        <span className="text-sm font-semibold text-green-700">{formatCurrency(quoteTotal)}</span>
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span className="text-sm font-medium text-gray-700">Difference:</span>
+                        <span className={`text-sm font-bold ${quoteTotal - estimateSummary.totalRevenue >= 0 ? 'text-green-700' : 'text-red-700'}`}>
+                          {formatCurrency(quoteTotal - estimateSummary.totalRevenue)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex justify-between">
+                        <span className="text-sm text-gray-600">Total Revenue:</span>
+                        <span className="text-sm font-semibold text-green-700">{formatCurrency(quoteTotal)}</span>
+                      </div>
+                      {(quote.rate_billing_unit === "HOURLY_BLENDED" || quote.rate_billing_unit === "DAILY_BLENDED") ? (
+                        <div className="mt-2 text-xs text-gray-600 space-y-1">
+                          <p>Blended Rate: {formatCurrency(parseFloat(quote.blended_rate_amount || "0"))}</p>
+                          <p>Total Hours: {estimateSummary.totalHours.toFixed(2)}</p>
+                          <p className="mt-1 font-medium text-indigo-700">Quote Total = Hours × Blended Rate</p>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-gray-500 italic">(Same as Estimate)</p>
+                      )}
+                    </>
+                  )}
+                  {quote.variable_compensations && quote.variable_compensations.length > 0 && (
+                    <div className="flex justify-between border-t pt-2">
+                      <span className="text-sm font-medium text-gray-700">Variable Compensation:</span>
+                      <span className="text-sm font-bold text-emerald-700">{formatCurrency(variableCompensationImpact)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Quote Type and Configuration */}
+      {quote.quote_type && (
+        <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
+          <CardHeader className="bg-blue-100/50">
+            <CardTitle className="text-lg text-blue-900">Quote Configuration</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <p className="text-sm text-gray-500">Quote Type</p>
+                <p className="font-medium text-blue-900">
+                  {quote.quote_type === "FIXED_BID" ? "Fixed Bid" : "Time & Materials"}
+                </p>
+              </div>
+            </div>
+
+            {/* Fixed Bid Configuration */}
+            {quote.quote_type === "FIXED_BID" && (
+              <div className="space-y-4">
+                {quote.target_amount && (
+                  <div>
+                    <p className="text-sm text-gray-500">Target Amount</p>
+                    <p className="font-medium text-lg">
+                      {new Intl.NumberFormat("en-US", {
+                        style: "currency",
+                        currency: getCurrency(),
+                      }).format(parseFloat(quote.target_amount))}
+                    </p>
+                  </div>
+                )}
+
+                {quote.payment_triggers && quote.payment_triggers.length > 0 && (
+                  <div>
+                    <p className="text-sm text-gray-500 mb-2 font-medium">Payment Triggers</p>
+                    <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
+                      <table className="w-full">
+                        <thead className="bg-blue-100">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Name</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Type</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Time/Milestone</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {quote.payment_triggers
+                            .sort((a, b) => (a.row_order || 0) - (b.row_order || 0))
+                            .map((trigger) => (
+                              <tr key={trigger.id} className="border-t border-blue-100">
+                                <td className="px-3 py-2 text-sm">{trigger.name}</td>
+                                <td className="px-3 py-2 text-sm">{trigger.trigger_type}</td>
+                                <td className="px-3 py-2 text-sm">
+                                  {trigger.trigger_type === "TIME" ? (
+                                    <>
+                                      {trigger.time_type}
+                                      {trigger.time_type === "MONTHLY" && trigger.num_installments && (
+                                        <span className="text-gray-500"> ({trigger.num_installments} installments)</span>
+                                      )}
+                                    </>
+                                  ) : (
+                                    trigger.milestone_date && formatLocalDate(trigger.milestone_date)
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-sm font-medium">
+                                  {new Intl.NumberFormat("en-US", {
+                                    style: "currency",
+                                    currency: getCurrency(),
+                                  }).format(parseFloat(trigger.amount))}
+                                  {trigger.trigger_type === "TIME" && trigger.time_type === "MONTHLY" && trigger.num_installments && (
+                                    <span className="text-gray-500">
+                                      {" "}× {trigger.num_installments} = {new Intl.NumberFormat("en-US", {
+                                        style: "currency",
+                                        currency: getCurrency(),
+                                      }).format(parseFloat(trigger.amount) * trigger.num_installments)}
+                                    </span>
+                                  )}
+                                </td>
+                              </tr>
+                            ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="mt-2 p-2 bg-blue-100 rounded">
+                      <p className="text-sm font-medium text-blue-900">
+                        Total: {new Intl.NumberFormat("en-US", {
+                          style: "currency",
+                          currency: getCurrency(),
+                        }).format(
+                          quote.payment_triggers.reduce((sum, trigger) => {
+                            if (trigger.trigger_type === "TIME" && trigger.time_type === "MONTHLY" && trigger.num_installments) {
+                              return sum + parseFloat(trigger.amount) * trigger.num_installments;
+                            }
+                            return sum + parseFloat(trigger.amount);
+                          }, 0)
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Time & Materials Configuration */}
+            {quote.quote_type === "TIME_MATERIALS" && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  {quote.rate_billing_unit && (
+                    <div>
+                      <p className="text-sm text-gray-500">Rate Billing Unit</p>
+                      <p className="font-medium">
+                        {quote.rate_billing_unit === "HOURLY_ACTUALS" && "Hourly @ Actuals"}
+                        {quote.rate_billing_unit === "DAILY_ACTUALS" && "Daily @ Actuals"}
+                        {quote.rate_billing_unit === "HOURLY_BLENDED" && "Hourly @ Blended Rate"}
+                        {quote.rate_billing_unit === "DAILY_BLENDED" && "Daily @ Blended Rate"}
+                      </p>
+                    </div>
+                  )}
+                  {quote.invoice_detail && (
+                    <div>
+                      <p className="text-sm text-gray-500">Invoice Detail</p>
+                      <p className="font-medium">
+                        {quote.invoice_detail === "ROLE" && "Role"}
+                        {quote.invoice_detail === "EMPLOYEE" && "Employee"}
+                        {quote.invoice_detail === "EMPLOYEE_WITH_DESCRIPTIONS" && "Employee w/ Descriptions"}
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {(quote.rate_billing_unit === "HOURLY_BLENDED" || quote.rate_billing_unit === "DAILY_BLENDED") && quote.blended_rate_amount && (
+                  <div>
+                    <p className="text-sm text-gray-500">Blended Rate Amount</p>
+                    <p className="font-medium text-lg">
+                      {new Intl.NumberFormat("en-US", {
+                        style: "currency",
+                        currency: getCurrency(),
+                      }).format(parseFloat(quote.blended_rate_amount))}
+                    </p>
+                  </div>
+                )}
+
+                {quote.cap_type && quote.cap_type !== "NONE" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-500">Cap Type</p>
+                      <p className="font-medium">
+                        {quote.cap_type === "CAPPED" && "Capped (Not to Exceed)"}
+                        {quote.cap_type === "FLOOR" && "Floor (Minimum Spend)"}
+                      </p>
+                    </div>
+                    {quote.cap_amount && (
+                      <div>
+                        <p className="text-sm text-gray-500">Cap Amount</p>
+                        <p className="font-medium text-lg">
+                          {new Intl.NumberFormat("en-US", {
+                            style: "currency",
+                            currency: getCurrency(),
+                          }).format(parseFloat(quote.cap_amount))}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Variable Compensations */}
+            {quote.variable_compensations && quote.variable_compensations.length > 0 && (
+              <div className="mt-6 pt-6 border-t border-blue-200">
+                <p className="text-sm text-gray-500 mb-2 font-medium">Variable Compensation</p>
+                <div className="border border-blue-200 rounded-lg overflow-hidden bg-white">
+                  <table className="w-full">
+                    <thead className="bg-blue-100">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Employee</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Revenue Type</th>
+                        <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Percentage</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {quote.variable_compensations.map((comp) => (
+                        <tr key={comp.id} className="border-t border-blue-100">
+                          <td className="px-3 py-2 text-sm">{comp.employee_name || comp.employee_id}</td>
+                          <td className="px-3 py-2 text-sm">
+                            {comp.revenue_type === "GROSS_REVENUE" ? "Gross Revenue" : "Gross Margin"}
+                          </td>
+                          <td className="px-3 py-2 text-sm font-medium">{parseFloat(comp.percentage_amount).toFixed(2)}%</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Snapshot Data Display */}
       <Card>
@@ -238,7 +659,7 @@ export default function QuoteDetailPage() {
                     <div className="flex-1">
                       <div className="font-semibold">{phase.name}</div>
                       <div className="text-sm text-gray-600">
-                        {new Date(phase.start_date).toLocaleDateString()} - {new Date(phase.end_date).toLocaleDateString()}
+                        {formatLocalDate(phase.start_date)} - {formatLocalDate(phase.end_date)}
                       </div>
                     </div>
                   </div>

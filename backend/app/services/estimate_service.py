@@ -60,6 +60,9 @@ class EstimateService(BaseService):
         
         estimate_dict = estimate_data.model_dump(exclude_unset=True)
         
+        # Extract copy_line_items flag before creating estimate (it's not a database field)
+        copy_line_items = estimate_dict.pop("copy_line_items", True)  # Default to True for backward compatibility
+        
         # Auto-generate version name if name is "NEW", empty, or None
         name = estimate_dict.get("name")
         if not name or name.strip() == "" or name == "NEW":
@@ -105,46 +108,50 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.create(**estimate_dict)
         await self.session.flush()  # Flush to get estimate.id
         
-        # Create default line items from active estimate if one exists
-        active_estimate = await self._get_active_estimate(estimate_data.opportunity_id)
-        if active_estimate and active_estimate.id != estimate.id:
-            # Copy line items from active estimate
-            active_line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
-            logger.info(f"Copying {len(active_line_items)} line items from active estimate {active_estimate.id} to new estimate {estimate.id}")
-            row_order = 0
-            
-            for active_li in active_line_items:
-                # Copy line item from active estimate
-                line_item_dict = {
-                    "estimate_id": estimate.id,
-                    "role_rates_id": active_li.role_rates_id,
-                    "employee_id": active_li.employee_id,
-                    "rate": active_li.rate,
-                    "cost": active_li.cost,
-                    "currency": active_li.currency,
-                    "start_date": active_li.start_date,
-                    "end_date": active_li.end_date,
-                    "row_order": row_order,
-                    "billable_expense_percentage": active_li.billable_expense_percentage,
-                }
+        # Create default line items from active estimate if one exists AND copy_line_items is True
+        # Use opportunity dates for all copied line items
+        if copy_line_items:
+            active_estimate = await self._get_active_estimate(estimate_data.opportunity_id)
+            if active_estimate and active_estimate.id != estimate.id:
+                # Copy line items from active estimate
+                active_line_items = await self.line_item_repo.list_by_estimate(active_estimate.id)
+                logger.info(f"Copying {len(active_line_items)} line items from active estimate {active_estimate.id} to new estimate {estimate.id}")
+                row_order = 0
                 
-                line_item = await self.line_item_repo.create(**line_item_dict)
-                await self.session.flush()
+                for active_li in active_line_items:
+                    # Copy line item from active estimate, but use Opportunity dates instead of copied dates
+                    line_item_dict = {
+                        "estimate_id": estimate.id,
+                        "role_rates_id": active_li.role_rates_id,
+                        "employee_id": active_li.employee_id,
+                        "rate": active_li.rate,
+                        "cost": active_li.cost,
+                        "currency": active_li.currency,
+                        "start_date": opportunity.start_date,  # Use Opportunity start_date
+                        "end_date": opportunity.end_date,  # Use Opportunity end_date
+                        "row_order": row_order,
+                        "billable_expense_percentage": active_li.billable_expense_percentage,
+                    }
+                    
+                    line_item = await self.line_item_repo.create(**line_item_dict)
+                    await self.session.flush()
+                    
+                    # Copy weekly hours if they exist
+                    if active_li.weekly_hours:
+                        from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
+                        weekly_hours_repo = EstimateWeeklyHoursRepository(self.session)
+                        for wh in active_li.weekly_hours:
+                            await weekly_hours_repo.create(
+                                estimate_line_item_id=line_item.id,
+                                week_start_date=wh.week_start_date,
+                                hours=wh.hours,
+                            )
+                    
+                    row_order += 1
                 
-                # Copy weekly hours if they exist
-                if active_li.weekly_hours:
-                    from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
-                    weekly_hours_repo = EstimateWeeklyHoursRepository(self.session)
-                    for wh in active_li.weekly_hours:
-                        await weekly_hours_repo.create(
-                            estimate_line_item_id=line_item.id,
-                            week_start_date=wh.week_start_date,
-                            hours=wh.hours,
-                        )
-                
-                row_order += 1
-            
-            logger.info(f"Copied {row_order} line items from active estimate")
+                logger.info(f"Copied {row_order} line items from active estimate")
+        else:
+            logger.info(f"Creating empty estimate {estimate.id} without copying line items (copy_line_items=False)")
         
         await self.session.commit()
         
@@ -333,6 +340,11 @@ class EstimateService(BaseService):
                     row_order=phase.row_order,
                 )
         
+        # Get opportunity to use its dates for cloned line items
+        opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        if not opportunity:
+            raise ValueError("Opportunity not found")
+        
         # Clone line items - ensure they're sorted by row_order first
         line_items_to_clone = list(estimate.line_items) if estimate.line_items else []
         line_items_to_clone.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
@@ -347,8 +359,8 @@ class EstimateService(BaseService):
                     "rate": line_item.rate,
                     "cost": line_item.cost,
                     "currency": line_item.currency,
-                    "start_date": line_item.start_date,
-                    "end_date": line_item.end_date,
+                    "start_date": opportunity.start_date,  # Use Opportunity start_date instead of copied date
+                    "end_date": opportunity.end_date,  # Use Opportunity end_date instead of copied date
                     "row_order": line_item.row_order,
                     "billable": line_item.billable,
                     "billable_expense_percentage": line_item.billable_expense_percentage,
@@ -495,7 +507,7 @@ class EstimateService(BaseService):
         if active_quote and estimate.active_version:
             raise ValueError(f"Active estimate is locked by active quote {active_quote.quote_number}. Deactivate the quote to unlock.")
         
-        # Get opportunity to get currency
+        # Get opportunity to get currency and dates
         opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
         if not opportunity:
             raise ValueError("Opportunity not found")
@@ -505,6 +517,11 @@ class EstimateService(BaseService):
         role_rates_id = line_item_data.role_rates_id
         currency = line_item_data.currency or opportunity.default_currency
         opportunity_delivery_center_id = opportunity.delivery_center_id
+        
+        # Always use Opportunity dates for new line items (per requirement)
+        # This ensures all default rows match the Opportunity date range
+        start_date = opportunity.start_date
+        end_date = opportunity.end_date
         
         if not role_rates_id and line_item_data.role_id:
             # Get role rate using Opportunity Invoice Center (not Payable Center)
@@ -560,8 +577,8 @@ class EstimateService(BaseService):
             "rate": rate,
             "cost": cost,
             "currency": currency,
-            "start_date": line_item_data.start_date,
-            "end_date": line_item_data.end_date,
+            "start_date": start_date,  # Use Opportunity date if not provided
+            "end_date": end_date,  # Use Opportunity date if not provided
             "row_order": row_order,
             "billable": getattr(line_item_data, 'billable', True),
             "billable_expense_percentage": getattr(line_item_data, 'billable_expense_percentage', 0),

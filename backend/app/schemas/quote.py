@@ -9,7 +9,10 @@ from uuid import UUID
 from decimal import Decimal
 import enum
 
-from app.models.quote import QuoteStatus
+from app.models.quote import (
+    QuoteStatus, QuoteType, PaymentTriggerType, TimeType, RevenueType,
+    RateBillingUnit, InvoiceDetail, CapType
+)
 
 
 class QuotePhaseBase(BaseModel):
@@ -71,6 +74,53 @@ class QuoteLineItemResponse(BaseModel):
         from_attributes = True
 
 
+class PaymentTriggerBase(BaseModel):
+    """Base schema for payment trigger."""
+    name: str = Field(..., min_length=1, max_length=255)
+    trigger_type: PaymentTriggerType
+    time_type: Optional[TimeType] = None  # Only for TIME triggers
+    amount: Decimal = Field(..., ge=0)
+    num_installments: Optional[int] = Field(None, ge=1)  # Only for MONTHLY triggers
+    milestone_date: Optional[date] = None  # Only for MILESTONE triggers
+    row_order: int = Field(default=0, ge=0)
+
+
+class PaymentTriggerCreate(PaymentTriggerBase):
+    """Schema for creating a payment trigger."""
+    pass
+
+
+class PaymentTriggerResponse(PaymentTriggerBase):
+    """Response schema for payment trigger."""
+    id: UUID
+    quote_id: UUID
+    
+    class Config:
+        from_attributes = True
+
+
+class VariableCompensationBase(BaseModel):
+    """Base schema for variable compensation."""
+    employee_id: UUID
+    revenue_type: RevenueType = Field(default=RevenueType.GROSS_MARGIN)
+    percentage_amount: Decimal = Field(..., ge=0, le=100)
+
+
+class VariableCompensationCreate(VariableCompensationBase):
+    """Schema for creating variable compensation."""
+    pass
+
+
+class VariableCompensationResponse(VariableCompensationBase):
+    """Response schema for variable compensation."""
+    id: UUID
+    quote_id: UUID
+    employee_name: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
+
+
 class QuoteBase(BaseModel):
     """Base quote schema with common fields."""
     opportunity_id: UUID
@@ -80,7 +130,15 @@ class QuoteBase(BaseModel):
 
 class QuoteCreate(QuoteBase):
     """Schema for creating a quote."""
-    pass
+    quote_type: Optional[QuoteType] = None
+    target_amount: Optional[Decimal] = Field(None, ge=0)  # Only for FIXED_BID
+    rate_billing_unit: Optional[RateBillingUnit] = None  # Only for TIME_MATERIALS
+    blended_rate_amount: Optional[Decimal] = Field(None, ge=0)  # Only when rate_billing_unit is BLENDED
+    invoice_detail: Optional[InvoiceDetail] = None  # Only for TIME_MATERIALS
+    cap_type: Optional[CapType] = Field(default=None)  # Only for TIME_MATERIALS
+    cap_amount: Optional[Decimal] = Field(None, ge=0)  # Only when cap_type is CAPPED or FLOOR
+    payment_triggers: Optional[List[PaymentTriggerCreate]] = None  # Only for FIXED_BID
+    variable_compensations: Optional[List[VariableCompensationCreate]] = None
 
 
 class QuoteUpdate(BaseModel):
@@ -108,6 +166,13 @@ class QuoteResponse(QuoteBase):
     snapshot_data: Optional[dict] = None
     opportunity_name: Optional[str] = None
     estimate_name: Optional[str] = None
+    quote_type: Optional[QuoteType] = None
+    target_amount: Optional[Decimal] = None
+    rate_billing_unit: Optional[RateBillingUnit] = None
+    blended_rate_amount: Optional[Decimal] = None
+    invoice_detail: Optional[InvoiceDetail] = None
+    cap_type: Optional[CapType] = None
+    cap_amount: Optional[Decimal] = None
     
     class Config:
         from_attributes = True
@@ -117,6 +182,8 @@ class QuoteDetailResponse(QuoteResponse):
     """Detailed quote response with all relationships."""
     line_items: List[QuoteLineItemResponse]
     phases: List[QuotePhaseResponse]
+    payment_triggers: List[PaymentTriggerResponse]
+    variable_compensations: List[VariableCompensationResponse]
 
 
 class QuoteListResponse(BaseModel):

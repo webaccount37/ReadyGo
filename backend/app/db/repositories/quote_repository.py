@@ -105,4 +105,23 @@ class QuoteRepository(BaseRepository[Quote]):
         )
         max_version = result.scalar_one_or_none()
         return max_version if max_version is not None else 0
+    
+    async def invalidate_previous_versions(self, opportunity_id: UUID, exclude_quote_id: Optional[UUID] = None) -> int:
+        """Set all previous versions of quotes for an opportunity to INVALID status."""
+        from app.models.quote import QuoteStatus
+        from sqlalchemy import update
+        
+        query = update(Quote).where(
+            Quote.opportunity_id == opportunity_id,
+            Quote.status != QuoteStatus.INVALID
+        )
+        
+        if exclude_quote_id:
+            query = query.where(Quote.id != exclude_quote_id)
+        
+        result = await self.session.execute(
+            query.values(status=QuoteStatus.INVALID)
+        )
+        await self.session.flush()
+        return result.rowcount
 

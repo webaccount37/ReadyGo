@@ -50,6 +50,9 @@ export interface Opportunity {
   deal_length?: number;
   forecast_value?: string;
   forecast_value_usd?: string;
+  // Locked status
+  is_locked?: boolean;
+  locked_by_quote_id?: string;
 }
 
 export interface OpportunityCreate {

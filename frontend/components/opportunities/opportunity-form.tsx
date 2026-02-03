@@ -147,6 +147,18 @@ export function OpportunityForm({
     }
   }, [formData.account_id, accountsData]);
 
+  // Clear parent opportunity if it's not linked to the selected account
+  useEffect(() => {
+    if (formData.account_id && formData.parent_opportunity_id && opportunitiesData?.items) {
+      const parentOpportunity = opportunitiesData.items.find(
+        opp => opp.id === formData.parent_opportunity_id
+      );
+      if (parentOpportunity && parentOpportunity.account_id !== formData.account_id) {
+        setFormData(prev => ({ ...prev, parent_opportunity_id: undefined }));
+      }
+    }
+  }, [formData.account_id, formData.parent_opportunity_id, opportunitiesData]);
+
   // Sync formData when initialData changes (e.g., after an update)
   useEffect(() => {
     if (initialData && 'id' in initialData) {
@@ -383,12 +395,14 @@ export function OpportunityForm({
                 parent_opportunity_id: e.target.value || undefined,
               })
             }
+            disabled={!formData.account_id}
           >
             <option value="">None</option>
-            {opportunitiesData?.items
+            {formData.account_id && opportunitiesData?.items
               .filter((e) => {
                 const currentId = 'id' in (initialData || {}) ? (initialData as Opportunity).id : undefined;
-                return !currentId || e.id !== currentId;
+                // Filter out current opportunity and only show opportunities linked to the selected account
+                return (!currentId || e.id !== currentId) && e.account_id === formData.account_id;
               })
               .map((opportunity) => (
                 <option key={opportunity.id} value={opportunity.id}>

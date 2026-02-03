@@ -17,17 +17,24 @@ from app.db.repositories.quote_repository import QuoteRepository
 from app.db.repositories.quote_line_item_repository import QuoteLineItemRepository
 from app.db.repositories.quote_phase_repository import QuotePhaseRepository
 from app.db.repositories.quote_weekly_hours_repository import QuoteWeeklyHoursRepository
+from app.db.repositories.quote_payment_trigger_repository import QuotePaymentTriggerRepository
+from app.db.repositories.quote_variable_compensation_repository import QuoteVariableCompensationRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
 from app.db.repositories.estimate_phase_repository import EstimatePhaseRepository
 from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
-from app.models.quote import Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus
+from app.models.quote import (
+    Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus,
+    QuotePaymentTrigger, QuoteVariableCompensation, QuoteType, PaymentTriggerType,
+    TimeType, RevenueType, RateBillingUnit, InvoiceDetail, CapType
+)
 from app.models.estimate import Estimate
 from app.models.opportunity import Opportunity
 from app.schemas.quote import (
     QuoteCreate, QuoteUpdate, QuoteResponse, QuoteDetailResponse, QuoteListResponse,
     QuoteStatusUpdate, QuoteLineItemResponse, QuotePhaseResponse, QuoteWeeklyHoursResponse,
+    PaymentTriggerResponse, VariableCompensationResponse,
 )
 
 
@@ -40,6 +47,8 @@ class QuoteService(BaseService):
         self.quote_line_item_repo = QuoteLineItemRepository(session)
         self.quote_phase_repo = QuotePhaseRepository(session)
         self.quote_weekly_hours_repo = QuoteWeeklyHoursRepository(session)
+        self.quote_payment_trigger_repo = QuotePaymentTriggerRepository(session)
+        self.quote_variable_compensation_repo = QuoteVariableCompensationRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.estimate_line_item_repo = EstimateLineItemRepository(session)
         self.estimate_phase_repo = EstimatePhaseRepository(session)
@@ -63,6 +72,35 @@ class QuoteService(BaseService):
         
         if estimate.opportunity_id != quote_data.opportunity_id:
             raise ValueError("Estimate does not belong to the specified opportunity")
+        
+        # Validate quote type specific requirements
+        if quote_data.quote_type == QuoteType.FIXED_BID:
+            if not quote_data.payment_triggers or len(quote_data.payment_triggers) == 0:
+                raise ValueError("Fixed Bid quotes require at least one payment trigger")
+            if quote_data.target_amount is None:
+                raise ValueError("Fixed Bid quotes require a target amount")
+            
+            # Validate payment trigger totals match target amount
+            total_amount = Decimal(0)
+            for trigger in quote_data.payment_triggers:
+                if trigger.trigger_type == PaymentTriggerType.TIME and trigger.time_type == TimeType.MONTHLY:
+                    if trigger.num_installments is None or trigger.num_installments < 1:
+                        raise ValueError("MONTHLY payment triggers require num_installments >= 1")
+                    total_amount += trigger.amount * Decimal(trigger.num_installments)
+                else:
+                    total_amount += trigger.amount
+            
+            if abs(total_amount - quote_data.target_amount) > Decimal("0.01"):  # Allow small rounding differences
+                raise ValueError(f"Payment trigger total ({total_amount}) must equal target amount ({quote_data.target_amount})")
+        
+        elif quote_data.quote_type == QuoteType.TIME_MATERIALS:
+            # Validate blended rate amount if blended rate billing unit is selected
+            if quote_data.rate_billing_unit in [RateBillingUnit.HOURLY_BLENDED, RateBillingUnit.DAILY_BLENDED]:
+                if quote_data.blended_rate_amount is None:
+                    raise ValueError("Blended rate billing unit requires blended_rate_amount")
+            if quote_data.cap_type in [CapType.CAPPED, CapType.FLOOR]:
+                if quote_data.cap_amount is None:
+                    raise ValueError(f"{quote_data.cap_type.value} cap type requires cap_amount")
         
         # Check if opportunity already has active quote (deactivate if exists)
         existing_active = await self.quote_repo.get_active_quote_by_opportunity(quote_data.opportunity_id)
@@ -91,8 +129,42 @@ class QuoteService(BaseService):
             "created_by": created_by,
             "notes": quote_data.notes,
             "snapshot_data": snapshot_data,
+            "quote_type": quote_data.quote_type,
+            "target_amount": quote_data.target_amount,
+            "rate_billing_unit": quote_data.rate_billing_unit,
+            "blended_rate_amount": quote_data.blended_rate_amount,
+            "invoice_detail": quote_data.invoice_detail,
+            "cap_type": quote_data.cap_type,
+            "cap_amount": quote_data.cap_amount,
         }
         quote = await self.quote_repo.create(**quote_dict)
+        
+        # Set all previous versions to INVALID (excluding the newly created quote)
+        await self.quote_repo.invalidate_previous_versions(quote_data.opportunity_id, exclude_quote_id=quote.id)
+        
+        # Create payment triggers for Fixed Bid quotes
+        if quote_data.quote_type == QuoteType.FIXED_BID and quote_data.payment_triggers:
+            for idx, trigger_data in enumerate(quote_data.payment_triggers):
+                await self.quote_payment_trigger_repo.create(
+                    quote_id=quote.id,
+                    name=trigger_data.name,
+                    trigger_type=trigger_data.trigger_type,
+                    time_type=trigger_data.time_type,
+                    amount=trigger_data.amount,
+                    num_installments=trigger_data.num_installments,
+                    milestone_date=trigger_data.milestone_date,
+                    row_order=idx,
+                )
+        
+        # Create variable compensations
+        if quote_data.variable_compensations:
+            for comp_data in quote_data.variable_compensations:
+                await self.quote_variable_compensation_repo.create(
+                    quote_id=quote.id,
+                    employee_id=comp_data.employee_id,
+                    revenue_type=comp_data.revenue_type,
+                    percentage_amount=comp_data.percentage_amount,
+                )
         
         # Snapshot estimate data
         await self._snapshot_estimate(quote.id, quote_data.estimate_id)
@@ -138,6 +210,8 @@ class QuoteService(BaseService):
                 selectinload(Quote.line_items).selectinload(QuoteLineItem.employee),
                 selectinload(Quote.line_items).selectinload(QuoteLineItem.weekly_hours),
                 selectinload(Quote.phases),
+                selectinload(Quote.payment_triggers),
+                selectinload(Quote.variable_compensations).selectinload(QuoteVariableCompensation.employee),
             )
             .where(Quote.id == quote_id)
         )
@@ -261,9 +335,24 @@ class QuoteService(BaseService):
     
     async def _snapshot_opportunity(self, opportunity_id: UUID) -> dict:
         """Snapshot opportunity metadata."""
-        opportunity = await self.opportunity_repo.get(opportunity_id)
+        # Load opportunity with relationships for snapshot
+        from sqlalchemy.orm import selectinload
+        
+        result = await self.session.execute(
+            select(Opportunity)
+            .options(
+                selectinload(Opportunity.account),
+                selectinload(Opportunity.delivery_center),
+            )
+            .where(Opportunity.id == opportunity_id)
+        )
+        opportunity = result.scalar_one_or_none()
+        
         if not opportunity:
             raise ValueError("Opportunity not found")
+        
+        account_name = opportunity.account.company_name if opportunity.account else None
+        delivery_center_name = opportunity.delivery_center.name if opportunity.delivery_center else None
         
         return {
             "name": opportunity.name,
@@ -272,6 +361,10 @@ class QuoteService(BaseService):
             "status": opportunity.status.value if opportunity.status else None,
             "default_currency": opportunity.default_currency,
             "description": opportunity.description,
+            "account_id": str(opportunity.account_id),
+            "account_name": account_name,
+            "delivery_center_id": str(opportunity.delivery_center_id),
+            "delivery_center_name": delivery_center_name,
         }
     
     async def _lock_opportunity(self, opportunity_id: UUID) -> None:
@@ -318,6 +411,13 @@ class QuoteService(BaseService):
             snapshot_data=quote.snapshot_data,
             opportunity_name=quote.opportunity.name if quote.opportunity else None,
             estimate_name=quote.estimate.name if quote.estimate else None,
+            quote_type=quote.quote_type,
+            target_amount=quote.target_amount,
+            rate_billing_unit=quote.rate_billing_unit,
+            blended_rate_amount=quote.blended_rate_amount,
+            invoice_detail=quote.invoice_detail,
+            cap_type=quote.cap_type,
+            cap_amount=quote.cap_amount,
         )
     
     async def _to_detail_response(self, quote: Quote) -> QuoteDetailResponse:
@@ -370,9 +470,40 @@ class QuoteService(BaseService):
             for phase in quote.phases
         ]
         
+        # Convert payment triggers
+        payment_triggers = [
+            PaymentTriggerResponse(
+                id=trigger.id,
+                quote_id=trigger.quote_id,
+                name=trigger.name,
+                trigger_type=trigger.trigger_type,
+                time_type=trigger.time_type,
+                amount=trigger.amount,
+                num_installments=trigger.num_installments,
+                milestone_date=trigger.milestone_date,
+                row_order=trigger.row_order,
+            )
+            for trigger in (quote.payment_triggers or [])
+        ]
+        
+        # Convert variable compensations
+        variable_compensations = [
+            VariableCompensationResponse(
+                id=comp.id,
+                quote_id=comp.quote_id,
+                employee_id=comp.employee_id,
+                revenue_type=comp.revenue_type,
+                percentage_amount=comp.percentage_amount,
+                employee_name=f"{comp.employee.first_name} {comp.employee.last_name}" if comp.employee else None,
+            )
+            for comp in (quote.variable_compensations or [])
+        ]
+        
         return QuoteDetailResponse(
             **base_response.model_dump(),
             line_items=line_items,
             phases=phases,
+            payment_triggers=payment_triggers,
+            variable_compensations=variable_compensations,
         )
 

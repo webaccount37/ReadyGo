@@ -130,6 +130,8 @@ class OpportunityResponse(OpportunityBase):
     id: UUID
     account_name: Optional[str] = None  # Company name from account relationship
     employees: Optional[List[dict]] = None  # Employees from active estimates
+    is_locked: Optional[bool] = None  # Computed: whether opportunity is locked by an active quote
+    locked_by_quote_id: Optional[UUID] = None  # ID of quote locking this opportunity if exists
     
     class Config:
         from_attributes = True

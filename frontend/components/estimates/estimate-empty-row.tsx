@@ -72,7 +72,14 @@ export function EstimateEmptyRow({
   });
 
   // Use a ref to persist formData across refetches, initialized from localStorage if available
+  // CRITICAL: Always use Opportunity dates for start_date and end_date, never use cached dates
   const getInitialFormData = (): EstimateLineItemCreate => {
+    // Always prioritize Opportunity dates - they should match the Opportunity's date range
+    const defaultStartDate = opportunityStartDate || new Date().toISOString().split("T")[0];
+    const defaultEndDate = opportunityEndDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .split("T")[0];
+    
     if (typeof window !== "undefined") {
       // Include rowIndex in key to prevent first row from affecting second row
       const saved = localStorage.getItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
@@ -82,6 +89,8 @@ export function EstimateEmptyRow({
           return {
             ...parsed,
             currency: currency, // Always use current currency
+            start_date: defaultStartDate, // Always use Opportunity start date
+            end_date: defaultEndDate, // Always use Opportunity end date
           };
         } catch {
           // Ignore parse errors
@@ -95,16 +104,41 @@ export function EstimateEmptyRow({
       rate: "",
       cost: "",
       currency: currency,
-      start_date: opportunityStartDate || new Date().toISOString().split("T")[0],
-      end_date: opportunityEndDate || new Date(Date.now() + 90 * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .split("T")[0],
+      start_date: defaultStartDate, // Always use Opportunity start date
+      end_date: defaultEndDate, // Always use Opportunity end date
       billable: invoiceCustomer, // Default to invoiceCustomer value
       billable_expense_percentage: "0",
     };
   };
 
   const [formData, setFormData] = useState<EstimateLineItemCreate>(getInitialFormData);
+
+  // CRITICAL: Update dates when Opportunity dates change to ensure they always match
+  // This ensures that if Opportunity dates are updated or loaded later, empty rows use the correct dates
+  useEffect(() => {
+    if (opportunityStartDate && opportunityEndDate && !lineItemId) {
+      // Only update if we don't have a line item yet (empty row)
+      // Format dates to YYYY-MM-DD for date inputs
+      const formattedStartDate = opportunityStartDate.includes('T') 
+        ? opportunityStartDate.split('T')[0] 
+        : opportunityStartDate;
+      const formattedEndDate = opportunityEndDate.includes('T') 
+        ? opportunityEndDate.split('T')[0] 
+        : opportunityEndDate;
+      
+      // Update formData if dates don't match Opportunity dates
+      setFormData(prev => {
+        if (prev.start_date !== formattedStartDate || prev.end_date !== formattedEndDate) {
+          return {
+            ...prev,
+            start_date: formattedStartDate,
+            end_date: formattedEndDate,
+          };
+        }
+        return prev;
+      });
+    }
+  }, [opportunityStartDate, opportunityEndDate, lineItemId]);
 
   // SIMPLE: Each row is tied directly to its database record ID
   // If we have a lineItemId (from localStorage or creation), use it directly
@@ -276,18 +310,11 @@ export function EstimateEmptyRow({
     ? estimateDetail?.line_items?.find(item => item.id === effectiveLineItemId)
     : null;
   
-  // Also check for matching record by field values (for backwards compatibility)
-  // Use String() comparison for cost/rate to handle string vs number differences
-  const matchingExistingRecord = estimateDetail?.line_items?.find(item => 
-    item.role_id === formData.role_id &&
-    item.delivery_center_id === opportunityDeliveryCenterId &&
-    String(item.cost) === String(formData.cost) &&
-    String(item.rate) === String(formData.rate)
-  );
-  
-  // Only show Delete if we have a valid database record (not just localStorage)
-  const hasDatabaseRecord = existingLineItemById !== null || matchingExistingRecord !== undefined;
-  const recordIdForDelete = existingLineItemById?.id || matchingExistingRecord?.id || null;
+  // CRITICAL: Don't match by field values - this causes cross-row contamination
+  // Each row should only operate on its own lineItemId, never match to other rows
+  // Only show Delete if we have a valid database record with our specific lineItemId
+  const hasDatabaseRecord = existingLineItemById !== null;
+  const recordIdForDelete = existingLineItemById?.id || null;
 
   // Debug logging
   useEffect(() => {
@@ -428,23 +455,9 @@ export function EstimateEmptyRow({
     }
 
     // If we DON'T have a line item ID but have role_id, CREATE it immediately
+    // CRITICAL: Never match to existing line items - each empty row must create its own line item
+    // Matching to existing items causes cross-row contamination where editing one row updates another
     if (!lineItemId && formData.role_id) {
-      // Check for existing matching item
-      if (estimateDetail?.line_items) {
-        const matchingItem = estimateDetail.line_items.find(item => 
-          item.role_id === formData.role_id &&
-          item.delivery_center_id === opportunityDeliveryCenterId
-        );
-        
-        if (matchingItem) {
-          console.log("Found existing line item:", matchingItem.id);
-          setLineItemId(matchingItem.id);
-          prevSavedDataRef.current = { ...currentData };
-          lastSavedDataRef.current = { ...formData };
-          return;
-        }
-      }
-
       isCreatingRef.current = true;
       setIsSaving(true);
       
@@ -1046,26 +1059,17 @@ export function EstimateEmptyRow({
               <button
                 onClick={async () => {
                   // Ensure we have a line item before opening Fill dialog
-                  // First, check if a matching line item already exists in the database
+                  // CRITICAL: Never match to existing line items - this causes cross-row contamination
+                  // Each row must have its own line item. If we don't have one, create it first.
                   let lineItemToUse = effectiveLineItem;
                   
-                  if (!lineItemToUse && estimateDetail?.line_items) {
-                    // Try to find existing line item by matching role_id, delivery_center_id, cost, and rate
-                    // Use String() comparison for cost/rate to handle string vs number differences
-                    const matchingItem = estimateDetail.line_items.find(item => 
-                      item.role_id === formData.role_id &&
-                      item.delivery_center_id === opportunityDeliveryCenterId &&
-                      String(item.cost) === String(formData.cost) &&
-                      String(item.rate) === String(formData.rate)
-                    );
-                    
-                    if (matchingItem) {
-                      // Found existing line item - use it instead of creating duplicate
-                      lineItemToUse = matchingItem;
-                      setLineItemId(matchingItem.id);
-                      setIsAutoFillOpen(true);
-                      return; // Don't create a new one
-                    }
+                  // Only use the line item if we already have a lineItemId for THIS row
+                  // Never search for matching items - that would cause one row to update another
+                  if (!lineItemToUse && !lineItemId) {
+                    // We need to create a line item first before opening auto-fill
+                    // Auto-fill requires a line item to exist
+                    console.log("Cannot open auto-fill - no line item exists for this row. Please save the row first.");
+                    return;
                   }
                   
                   // If we still don't have a line item, create one

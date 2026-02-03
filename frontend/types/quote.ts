@@ -3,6 +3,13 @@
  */
 
 export type QuoteStatus = "DRAFT" | "SENT" | "ACCEPTED" | "REJECTED" | "INVALID";
+export type QuoteType = "FIXED_BID" | "TIME_MATERIALS";
+export type PaymentTriggerType = "TIME" | "MILESTONE";
+export type TimeType = "IMMEDIATE" | "MONTHLY";
+export type RevenueType = "GROSS_REVENUE" | "GROSS_MARGIN";
+export type RateBillingUnit = "HOURLY_ACTUALS" | "DAILY_ACTUALS" | "HOURLY_BLENDED" | "DAILY_BLENDED";
+export type InvoiceDetail = "ROLE" | "EMPLOYEE" | "EMPLOYEE_WITH_DESCRIPTIONS";
+export type CapType = "NONE" | "CAPPED" | "FLOOR";
 
 export interface QuoteWeeklyHours {
   id: string;
@@ -18,6 +25,27 @@ export interface QuotePhase {
   end_date: string;
   color: string;
   row_order: number;
+}
+
+export interface PaymentTrigger {
+  id: string;
+  quote_id: string;
+  name: string;
+  trigger_type: PaymentTriggerType;
+  time_type?: TimeType;
+  amount: string;
+  num_installments?: number;
+  milestone_date?: string;
+  row_order: number;
+}
+
+export interface VariableCompensation {
+  id: string;
+  quote_id: string;
+  employee_id: string;
+  revenue_type: RevenueType;
+  percentage_amount: string;
+  employee_name?: string;
 }
 
 export interface QuoteLineItem {
@@ -57,14 +85,48 @@ export interface Quote {
   snapshot_data?: Record<string, unknown>;
   opportunity_name?: string;
   estimate_name?: string;
+  quote_type?: QuoteType;
+  target_amount?: string;
+  rate_billing_unit?: RateBillingUnit;
+  blended_rate_amount?: string;
+  invoice_detail?: InvoiceDetail;
+  cap_type?: CapType;
+  cap_amount?: string;
   line_items?: QuoteLineItem[];
   phases?: QuotePhase[];
+  payment_triggers?: PaymentTrigger[];
+  variable_compensations?: VariableCompensation[];
+}
+
+export interface PaymentTriggerCreate {
+  name: string;
+  trigger_type: PaymentTriggerType;
+  time_type?: TimeType;
+  amount: string;
+  num_installments?: number;
+  milestone_date?: string;
+  row_order?: number;
+}
+
+export interface VariableCompensationCreate {
+  employee_id: string;
+  revenue_type?: RevenueType;
+  percentage_amount: string;
 }
 
 export interface QuoteCreate {
   opportunity_id: string;
   estimate_id: string;
   notes?: string;
+  quote_type?: QuoteType;
+  target_amount?: string;
+  rate_billing_unit?: RateBillingUnit;
+  blended_rate_amount?: string;
+  invoice_detail?: InvoiceDetail;
+  cap_type?: CapType;
+  cap_amount?: string;
+  payment_triggers?: PaymentTriggerCreate[];
+  variable_compensations?: VariableCompensationCreate[];
 }
 
 export interface QuoteUpdate {

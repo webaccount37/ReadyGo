@@ -226,21 +226,21 @@ function EstimatesPageContent() {
         <h1 className="text-3xl font-bold">Estimates</h1>
         <div className="flex items-center gap-4">
           {selectedEstimateIds.size > 0 && (
-            <>
-              <Badge variant="default" className="text-sm px-3 py-1">
-                {selectedEstimateIds.size} selected
-              </Badge>
-              <Button
-                onClick={() => setIsGanttDialogOpen(true)}
-                variant="default"
-                size="sm"
-                className="flex items-center gap-2"
-              >
-                <Calendar className="w-4 h-4" />
-                View Timeline
-              </Button>
-            </>
+            <Badge variant="default" className="text-sm px-3 py-1">
+              {selectedEstimateIds.size} selected
+            </Badge>
           )}
+          <Button
+            onClick={() => setIsGanttDialogOpen(true)}
+            variant="default"
+            size="sm"
+            className="flex items-center gap-2"
+            disabled={selectedEstimateIds.size === 0}
+            title={selectedEstimateIds.size === 0 ? "Select at least one estimate to view timeline" : "View Timeline"}
+          >
+            <Calendar className="w-4 h-4" />
+            View Timeline
+          </Button>
         </div>
       </div>
 

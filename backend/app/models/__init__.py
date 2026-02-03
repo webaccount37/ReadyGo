@@ -15,7 +15,12 @@ from app.models.role_rate import RoleRate
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours, EstimatePhase
 from app.models.delivery_center_approver import DeliveryCenterApprover
 from app.models.currency_rate import CurrencyRate
-from app.models.quote import Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus
+from app.models.quote import (
+    Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus,
+    QuotePaymentTrigger, QuoteVariableCompensation,
+    QuoteType, PaymentTriggerType, TimeType, RevenueType,
+    RateBillingUnit, InvoiceDetail, CapType
+)
 
 __all__ = [
     "Employee",

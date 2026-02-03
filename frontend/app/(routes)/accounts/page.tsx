@@ -32,6 +32,14 @@ function AccountsPageContent() {
   const [viewingAccount, setViewingAccount] = useState<Account | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Initialize search query from URL parameter
+  useEffect(() => {
+    const searchParam = searchParams.get("search");
+    if (searchParam) {
+      setSearchQuery(searchParam);
+    }
+  }, [searchParams]);
+
   const { data: accountData } = useAccount(accountIdParam || "", false, {
     enabled: !!accountIdParam,
   });
@@ -203,7 +211,7 @@ function AccountsPageContent() {
                               </td>
                               <td className="p-3">
                                 <Link
-                                  href={`/contacts?account_id=${account.id}`}
+                                  href={`/contacts?search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
                                   className="text-blue-600 hover:text-blue-800 underline"
                                 >
@@ -212,7 +220,7 @@ function AccountsPageContent() {
                               </td>
                               <td className="p-3">
                                 <Link
-                                  href={`/opportunities?account_id=${account.id}`}
+                                  href={`/opportunities?account_id=${account.id}&search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
                                   className="text-blue-600 hover:text-blue-800 underline"
                                 >
@@ -305,14 +313,14 @@ function AccountsPageContent() {
                               </div>
                               <div className="flex gap-4 text-sm">
                                 <Link
-                                  href={`/contacts?account_id=${account.id}`}
+                                  href={`/contacts?search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
                                   className="text-blue-600 hover:text-blue-800 underline"
                                 >
                                   Contacts: {account.contact_count ?? 0}
                                 </Link>
                                 <Link
-                                  href={`/opportunities?account_id=${account.id}`}
+                                  href={`/opportunities?account_id=${account.id}&search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
                                   className="text-blue-600 hover:text-blue-800 underline"
                                 >

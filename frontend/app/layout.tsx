@@ -3,7 +3,11 @@ import { Inter } from "next/font/google";
 import "./globals.css";
 import { ReactQueryProvider } from "@/lib/react-query-provider";
 
-const inter = Inter({ subsets: ["latin"] });
+const inter = Inter({ 
+  subsets: ["latin"],
+  display: "swap", // Use swap to prevent blocking on font load
+  fallback: ["system-ui", "arial"], // Fallback fonts
+});
 
 export const metadata: Metadata = {
   title: "ReadyGo Consulting Platform",

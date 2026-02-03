@@ -64,6 +64,7 @@ export interface EstimateCreate {
   name: string;
   description?: string;
   active_version?: boolean;
+  copy_line_items?: boolean; // Whether to copy line items from active estimate (default: true)
   attributes?: Record<string, unknown>;
 }
 
