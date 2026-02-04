@@ -804,6 +804,26 @@ export function EstimateLineItemRow({
           </div>
         </td>
 
+        {/* Cost Daily */}
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">{currency}</span>
+            <span className="text-xs flex-1 text-right">
+              {(parseFloat(costValue || "0") * 8).toFixed(2)}
+            </span>
+          </div>
+        </td>
+
+        {/* Rate Daily */}
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ width: '120px', minWidth: '120px' }}>
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500">{currency}</span>
+            <span className="text-xs flex-1 text-right">
+              {(parseFloat(rateValue || "0") * 8).toFixed(2)}
+            </span>
+          </div>
+        </td>
+
         {/* Start Date */}
         <td className="border border-gray-300 px-2 py-1 text-xs">
           <Input

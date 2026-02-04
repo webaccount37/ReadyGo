@@ -429,6 +429,35 @@ export default function QuoteDetailPage() {
         </Card>
       )}
 
+      {/* Active Estimate Phases */}
+      {quote.phases && quote.phases.length > 0 && (
+        <Card className="border-purple-200 bg-gradient-to-r from-purple-50 to-pink-50">
+          <CardHeader className="bg-purple-100/50">
+            <CardTitle className="text-lg text-purple-900">Active Estimate Phases</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-6">
+            <div className="space-y-2">
+              {quote.phases
+                .sort((a, b) => a.row_order - b.row_order)
+                .map((phase) => (
+                  <div
+                    key={phase.id}
+                    className="flex items-center gap-4 p-3 border rounded-lg bg-white"
+                    style={{ borderLeftColor: phase.color, borderLeftWidth: "4px" }}
+                  >
+                    <div className="flex-1">
+                      <div className="font-semibold text-purple-900">{phase.name}</div>
+                      <div className="text-sm text-gray-600">
+                        {formatLocalDate(phase.start_date)} - {formatLocalDate(phase.end_date)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Quote Type and Configuration */}
       {quote.quote_type && (
         <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
@@ -639,35 +668,6 @@ export default function QuoteDetailPage() {
           <QuoteReadonlyTable quote={quote} />
         </CardContent>
       </Card>
-
-      {/* Phases */}
-      {quote.phases && quote.phases.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Phases</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {quote.phases
-                .sort((a, b) => a.row_order - b.row_order)
-                .map((phase) => (
-                  <div
-                    key={phase.id}
-                    className="flex items-center gap-4 p-3 border rounded-lg"
-                    style={{ borderLeftColor: phase.color, borderLeftWidth: "4px" }}
-                  >
-                    <div className="flex-1">
-                      <div className="font-semibold">{phase.name}</div>
-                      <div className="text-sm text-gray-600">
-                        {formatLocalDate(phase.start_date)} - {formatLocalDate(phase.end_date)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Unlock Dialog */}
       <UnlockDialog

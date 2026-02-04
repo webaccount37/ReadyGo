@@ -115,7 +115,7 @@ export function EstimateTotalsRow({
   return (
     <tr className="bg-gray-100 font-semibold">
       <td
-        colSpan={10}
+        colSpan={12}
         className="bg-gray-100 border border-gray-300 px-2 py-2 text-xs"
       >
         TOTALS

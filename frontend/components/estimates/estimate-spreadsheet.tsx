@@ -450,7 +450,7 @@ export function EstimateSpreadsheet({
                 {/* Phase header row */}
                 {estimate.phases && estimate.phases.length > 0 && (
                   <tr>
-                    <th colSpan={10} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
+                    <th colSpan={12} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
                       Phases
                     </th>
                     {weeks.map((week: Date, weekIndex: number) => {
@@ -509,6 +509,12 @@ export function EstimateSpreadsheet({
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
                     Rate ({opportunityCurrency || estimate.currency || "USD"})
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
+                    Cost ({opportunityCurrency || estimate.currency || "USD"}) Daily
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold" style={{ width: '120px', minWidth: '120px' }}>
+                    Rate ({opportunityCurrency || estimate.currency || "USD"}) Daily
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-left text-xs font-semibold min-w-[100px]">
                     Start Date
@@ -622,7 +628,7 @@ export function EstimateSpreadsheet({
                 )}
                 {/* Add Row button */}
                 <tr>
-                  <td colSpan={10 + weeks.length + 5} className="border border-gray-300 px-2 py-2 text-center">
+                  <td colSpan={12 + weeks.length + 5} className="border border-gray-300 px-2 py-2 text-center">
                     <button
                       onClick={() => setEmptyRowsCount(emptyRowsCount + 1)}
                       className="text-sm text-blue-600 hover:underline"

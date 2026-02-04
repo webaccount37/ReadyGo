@@ -310,7 +310,7 @@ class ExcelExportService:
         """Write header rows to worksheet."""
         # Row 1: Phase headers (if phases exist)
         if phases and len(phases) > 0:
-            col = 10  # Start after fixed columns (Payable Center, Role, Employee, Cost, Rate, Start Date, End Date, Billable, Billable %)
+            col = 12  # Start after fixed columns (Payable Center, Role, Employee, Cost, Rate, Cost Daily, Rate Daily, Start Date, End Date, Billable, Billable %)
             phase_col_map = {}  # Map phase to column ranges
             
             # Collect all phase ranges and detect overlaps
@@ -472,6 +472,8 @@ class ExcelExportService:
             "Employee",
             f"Cost ({currency})",
             f"Rate ({currency})",
+            f"Cost ({currency}) Daily",
+            f"Rate ({currency}) Daily",
             "Start Date",
             "End Date",
             "Billable",
@@ -487,7 +489,7 @@ class ExcelExportService:
         # Week column headers - use actual week dates instead of Hours1, Hours2, etc.
         # IMPORTANT: Excel Tables require unique column headers
         # Week dates are unique, so they work perfectly as headers
-        col = 10  # Week columns start at column J
+        col = 12  # Week columns start at column L (after Payable Center, Role, Employee, Cost, Rate, Cost Daily, Rate Daily, Start Date, End Date, Billable, Billable %)
         for idx, week in enumerate(weeks):
             cell = ws[f"{get_column_letter(col + idx)}3"]
             # Use week date as header (format: MM/DD/YYYY)
@@ -527,7 +529,7 @@ class ExcelExportService:
             min_rows: Minimum number of data rows to create (default 20)
         """
         start_row = 4  # After header rows (row 3 is headers)
-        week_col_start = 10  # Column J
+        week_col_start = 12  # Column L (after Payable Center, Role, Employee, Cost, Rate, Cost Daily, Rate Daily, Start Date, End Date, Billable, Billable %)
         totals_start_col = week_col_start + len(weeks)
         header_row = 3
         
@@ -538,7 +540,7 @@ class ExcelExportService:
         if write_formulas:
             cost_header = str(ws.cell(row=header_row, column=4).value or "Cost")
             rate_header = str(ws.cell(row=header_row, column=5).value or "Rate")
-            billable_pct_header = str(ws.cell(row=header_row, column=9).value or "Billable %")
+            billable_pct_header = str(ws.cell(row=header_row, column=11).value or "Billable %")
             total_hours_header = str(ws.cell(row=header_row, column=totals_start_col).value or "Total Hours")
             total_cost_header = str(ws.cell(row=header_row, column=totals_start_col + 1).value or "Total Cost")
             total_revenue_header = str(ws.cell(row=header_row, column=totals_start_col + 2).value or "Total Revenue")
@@ -582,8 +584,16 @@ class ExcelExportService:
                 rate_cell = ws.cell(row=row, column=5)
                 rate_cell.number_format = '#,##0.00'
                 
-                # Billable % (Column I) - percentage format
-                billable_pct_cell = ws.cell(row=row, column=9)
+                # Cost Daily (Column F) - currency format
+                cost_daily_cell = ws.cell(row=row, column=6)
+                cost_daily_cell.number_format = '#,##0.00'
+                
+                # Rate Daily (Column G) - currency format
+                rate_daily_cell = ws.cell(row=row, column=7)
+                rate_daily_cell.number_format = '#,##0.00'
+                
+                # Billable % (Column K) - percentage format
+                billable_pct_cell = ws.cell(row=row, column=11)
                 billable_pct_cell.number_format = '0.00%'
                 
                 # Write formulas for empty rows so they're ready when user adds data
@@ -609,7 +619,7 @@ class ExcelExportService:
                     
                     # Billable Expense Amount (currency) - Billable % is stored as 0-1 in Excel
                     billable_expense_cell = ws.cell(row=row, column=totals_start_col + 3)
-                    billable_expense_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(9)}{row}"
+                    billable_expense_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(11)}{row}"
                     billable_expense_cell.number_format = '#,##0.00'
                     
                     # Margin Amount (currency)
@@ -653,17 +663,27 @@ class ExcelExportService:
             rate_cell.value = float(line_item.rate)
             rate_cell.number_format = '#,##0.00'
             
+            # Cost Daily (currency format) - calculated as Cost * 8
+            cost_daily_cell = ws.cell(row=row, column=6)
+            cost_daily_cell.value = float(line_item.cost) * 8
+            cost_daily_cell.number_format = '#,##0.00'
+            
+            # Rate Daily (currency format) - calculated as Rate * 8
+            rate_daily_cell = ws.cell(row=row, column=7)
+            rate_daily_cell.value = float(line_item.rate) * 8
+            rate_daily_cell.number_format = '#,##0.00'
+            
             # Start Date
-            ws.cell(row=row, column=6).value = line_item.start_date
+            ws.cell(row=row, column=8).value = line_item.start_date
             
             # End Date
-            ws.cell(row=row, column=7).value = line_item.end_date
+            ws.cell(row=row, column=9).value = line_item.end_date
             
             # Billable
-            ws.cell(row=row, column=8).value = "Yes" if line_item.billable else "No"
+            ws.cell(row=row, column=10).value = "Yes" if line_item.billable else "No"
             
             # Billable % (percentage format)
-            billable_pct_cell = ws.cell(row=row, column=9)
+            billable_pct_cell = ws.cell(row=row, column=11)
             billable_pct_cell.value = float(line_item.billable_expense_percentage) / 100  # Excel percentages are 0-1
             billable_pct_cell.number_format = '0.00%'
             
@@ -742,7 +762,7 @@ class ExcelExportService:
             return
         
         start_row = 5
-        week_col_start = 10
+        week_col_start = 12
         totals_start_col = week_col_start + len(weeks)
         header_row = 4
         
@@ -750,7 +770,7 @@ class ExcelExportService:
         # Get cell values directly and ensure they're strings
         cost_header = str(ws.cell(row=header_row, column=4).value or "").strip()
         rate_header = str(ws.cell(row=header_row, column=5).value or "").strip()
-        billable_pct_header = str(ws.cell(row=header_row, column=9).value or "").strip()
+        billable_pct_header = str(ws.cell(row=header_row, column=11).value or "").strip()
         
         # Read totals column headers - these MUST exist
         total_hours_header = str(ws.cell(row=header_row, column=totals_start_col).value or "").strip()
@@ -1068,10 +1088,10 @@ class ExcelExportService:
             # Verify sample cells are unlocked
             sample_cell_a = ws.cell(row=start_row, column=1)
             sample_cell_d = ws.cell(row=start_row, column=4)
-            sample_cell_j = ws.cell(row=start_row, column=10)
+            sample_cell_l = ws.cell(row=start_row, column=12)
             logger.info(f"Before protection - A{start_row} locked: {sample_cell_a.protection.locked}")
             logger.info(f"Before protection - D{start_row} locked: {sample_cell_d.protection.locked}")
-            logger.info(f"Before protection - J{start_row} locked: {sample_cell_j.protection.locked}")
+            logger.info(f"Before protection - L{start_row} locked: {sample_cell_l.protection.locked}")
         except Exception as e:
             logger.warning(f"Could not perform final unlock: {e}")
         

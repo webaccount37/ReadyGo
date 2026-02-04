@@ -12,7 +12,7 @@ import { highlightText } from "@/lib/utils/highlight";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { FileText, Lock, Unlock } from "lucide-react";
+import { FileText, Lock, Unlock, ChevronDown, ChevronUp } from "lucide-react";
 import type { Quote, QuoteDetailResponse } from "@/types/quote";
 import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
 
@@ -21,6 +21,7 @@ function QuotesPageContent() {
   const [skip] = useState(0);
   const [limit] = useState(1000);
   const [searchQuery, setSearchQuery] = useState("");
+  const [expandedOpportunities, setExpandedOpportunities] = useState<Set<string>>(new Set());
   const opportunityIdFilter = searchParams.get("opportunity_id") || undefined;
 
   const { data, isLoading, error, refetch } = useQuotes({
@@ -414,54 +415,129 @@ function QuotesPageContent() {
                     )}
 
                     <div className="space-y-2">
-                    {group.quotes.map((quote) => (
-                      <div
-                        key={quote.id}
-                        className="flex items-center justify-between p-3 bg-gray-50 rounded border"
-                      >
-                        <div className="flex items-center gap-4 flex-1">
-                          <Link
-                            href={`/quotes/${quote.id}`}
-                            className="font-medium hover:underline"
-                          >
-                            {highlightText(quote.quote_number, searchQuery)}
-                          </Link>
-                          <QuoteStatusBadge status={quote.status} />
-                          {quote.is_active && (
-                            <span className="flex items-center gap-1 text-green-600 text-sm">
-                              <Lock className="h-4 w-4" />
-                              Active
-                            </span>
-                          )}
-                          <span className="text-sm text-gray-500">
-                            Version {quote.version}
-                          </span>
-                          {quote.sent_date && (
-                            <span className="text-sm text-gray-500">
-                              Sent: {formatLocalDate(quote.sent_date)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <Link href={`/quotes/${quote.id}`}>
-                            <Button variant="outline" size="sm">
-                              View
-                            </Button>
-                          </Link>
-                          {quote.is_active && (
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              onClick={() => handleDeactivate(quote.id, quote.quote_number)}
-                              disabled={deactivateQuote.isPending}
-                            >
-                              <Unlock className="h-4 w-4 mr-1" />
-                              Unlock
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                      {(() => {
+                        const activeQuotes = group.quotes.filter(q => q.is_active);
+                        const inactiveQuotes = group.quotes.filter(q => !q.is_active);
+                        const isExpanded = expandedOpportunities.has(opportunityId);
+                        
+                        return (
+                          <>
+                            {/* Active Quotes - Always visible */}
+                            {activeQuotes.map((quote) => (
+                              <div
+                                key={quote.id}
+                                className="flex items-center justify-between p-3 bg-gray-50 rounded border border-green-200"
+                              >
+                                <div className="flex items-center gap-4 flex-1">
+                                  <Link
+                                    href={`/quotes/${quote.id}`}
+                                    className="font-medium hover:underline"
+                                  >
+                                    {highlightText(quote.quote_number, searchQuery)}
+                                  </Link>
+                                  <QuoteStatusBadge status={quote.status} />
+                                  <span className="flex items-center gap-1 text-green-600 text-sm">
+                                    <Lock className="h-4 w-4" />
+                                    Active
+                                  </span>
+                                  <span className="text-sm text-gray-500">
+                                    Version {quote.version}
+                                  </span>
+                                  {quote.sent_date && (
+                                    <span className="text-sm text-gray-500">
+                                      Sent: {formatLocalDate(quote.sent_date)}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Link href={`/quotes/${quote.id}`}>
+                                    <Button variant="outline" size="sm">
+                                      View
+                                    </Button>
+                                  </Link>
+                                  <Button
+                                    variant="destructive"
+                                    size="sm"
+                                    onClick={() => handleDeactivate(quote.id, quote.quote_number)}
+                                    disabled={deactivateQuote.isPending}
+                                  >
+                                    <Unlock className="h-4 w-4 mr-1" />
+                                    Unlock
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+
+                            {/* Inactive Quotes - Collapsible section */}
+                            {inactiveQuotes.length > 0 && (
+                              <div className="border rounded-lg">
+                                <button
+                                  onClick={() => {
+                                    setExpandedOpportunities(prev => {
+                                      const next = new Set(prev);
+                                      if (next.has(opportunityId)) {
+                                        next.delete(opportunityId);
+                                      } else {
+                                        next.add(opportunityId);
+                                      }
+                                      return next;
+                                    });
+                                  }}
+                                  className="w-full flex items-center justify-between p-2 hover:bg-gray-50 rounded-t-lg transition-colors"
+                                >
+                                    <span className="text-sm font-medium text-gray-700">
+                                      {inactiveQuotes.length} older version{inactiveQuotes.length !== 1 ? 's' : ''}
+                                    </span>
+                                    {isExpanded ? (
+                                      <ChevronUp className="h-4 w-4 text-gray-500" />
+                                    ) : (
+                                      <ChevronDown className="h-4 w-4 text-gray-500" />
+                                    )}
+                                  </button>
+                                  
+                                  {isExpanded && (
+                                    <div className="border-t divide-y">
+                                      {inactiveQuotes.map((quote) => {
+                                        const isInvalid = quote.status === "INVALID";
+                                        return (
+                                          <div
+                                            key={quote.id}
+                                            className={`flex items-center justify-between px-3 py-1.5 ${
+                                              isInvalid ? "bg-gray-50 opacity-75" : "bg-white"
+                                            }`}
+                                          >
+                                            <div className="flex items-center gap-3 flex-1 min-w-0">
+                                              <Link
+                                                href={`/quotes/${quote.id}`}
+                                                className="text-xs font-medium hover:underline truncate"
+                                              >
+                                                {highlightText(quote.quote_number, searchQuery)}
+                                              </Link>
+                                              <QuoteStatusBadge status={quote.status} />
+                                              <span className="text-xs text-gray-500 whitespace-nowrap">
+                                                v{quote.version}
+                                              </span>
+                                              {quote.sent_date && (
+                                                <span className="text-xs text-gray-400 whitespace-nowrap">
+                                                  {formatLocalDate(quote.sent_date)}
+                                                </span>
+                                              )}
+                                            </div>
+                                            <Link href={`/quotes/${quote.id}`}>
+                                              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                                                View
+                                              </Button>
+                                            </Link>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 );

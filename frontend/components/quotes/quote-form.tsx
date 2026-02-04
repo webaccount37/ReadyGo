@@ -263,6 +263,57 @@ export function QuoteForm() {
     setVariableCompensations(updated);
   };
 
+  const handleDefaultFromEstimate = () => {
+    if (!estimateSummary || !opportunity) {
+      return;
+    }
+
+    // Set target amount to estimate total revenue
+    const targetAmountValue = estimateSummary.totalRevenue.toFixed(2);
+    setTargetAmount(targetAmountValue);
+
+    // Get phases from estimate detail
+    const phases = estimateDetail?.phases || [];
+    
+    let newTriggers: PaymentTriggerCreate[] = [];
+
+    if (phases.length > 0) {
+      // Create milestone triggers for each phase
+      newTriggers = phases
+        .sort((a, b) => (a.row_order || 0) - (b.row_order || 0))
+        .map((phase, index) => ({
+          name: phase.name,
+          trigger_type: "MILESTONE" as PaymentTriggerType,
+          milestone_date: phase.end_date.split("T")[0], // Use phase end date
+          amount: "0", // Will be distributed
+          row_order: index,
+        }));
+    } else {
+      // No phases - create single "Default" milestone with opportunity end date
+      if (opportunity.end_date) {
+        newTriggers = [{
+          name: "Default",
+          trigger_type: "MILESTONE" as PaymentTriggerType,
+          milestone_date: opportunity.end_date.split("T")[0],
+          amount: "0", // Will be distributed
+          row_order: 0,
+        }];
+      }
+    }
+
+    // Distribute target amount across triggers
+    if (newTriggers.length > 0 && targetAmountValue) {
+      const target = parseFloat(targetAmountValue);
+      const amountPerTrigger = (target / newTriggers.length).toFixed(2);
+      newTriggers = newTriggers.map(trigger => ({
+        ...trigger,
+        amount: amountPerTrigger,
+      }));
+    }
+
+    setPaymentTriggers(newTriggers);
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -469,6 +520,35 @@ export function QuoteForm() {
               </Card>
             )}
 
+            {/* Active Estimate Phases */}
+            {estimateDetail?.phases && estimateDetail.phases.length > 0 && (
+              <Card className="border-purple-200 bg-gradient-to-r from-purple-50 to-pink-50">
+                <CardHeader className="bg-purple-100/50">
+                  <CardTitle className="text-lg text-purple-900">Active Estimate Phases</CardTitle>
+                </CardHeader>
+                <CardContent className="pt-6">
+                  <div className="space-y-2">
+                    {estimateDetail.phases
+                      .sort((a, b) => (a.row_order || 0) - (b.row_order || 0))
+                      .map((phase) => (
+                        <div
+                          key={phase.id}
+                          className="flex items-center gap-4 p-3 border rounded-lg bg-white"
+                          style={{ borderLeftColor: phase.color, borderLeftWidth: "4px" }}
+                        >
+                          <div className="flex-1">
+                            <div className="font-semibold text-purple-900">{phase.name}</div>
+                            <div className="text-sm text-gray-600">
+                              {phase.start_date.split("T")[0]} - {phase.end_date.split("T")[0]}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Quote Type Selection */}
             <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200">
               <Label htmlFor="quote_type" className="text-blue-900 font-semibold mb-2 block">Quote Type *</Label>
@@ -502,7 +582,19 @@ export function QuoteForm() {
             {quoteType === "FIXED_BID" && (
               <Card className="border-blue-200 bg-gradient-to-br from-blue-50 to-indigo-50">
                 <CardHeader className="bg-blue-100/50">
-                  <CardTitle className="text-lg text-blue-900">Fixed Bid Configuration</CardTitle>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg text-blue-900">Fixed Bid Configuration</CardTitle>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleDefaultFromEstimate}
+                      disabled={!estimateSummary || !opportunity}
+                      className="bg-white hover:bg-blue-50 border-blue-300 text-blue-700"
+                    >
+                      Default from Estimate
+                    </Button>
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-4 pt-6">
                   <div>

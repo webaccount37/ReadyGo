@@ -197,6 +197,17 @@ function OpportunitiesPageContent() {
     });
   };
 
+  // Helper function to get active quote ID for an opportunity
+  const getActiveQuoteId = (opportunityId: string): string | null => {
+    if (!allQuotesData?.items || !opportunityId) {
+      return null;
+    }
+    const activeQuote = allQuotesData.items.find((quote) => {
+      return quote.opportunity_id === opportunityId && quote.is_active === true;
+    });
+    return activeQuote?.id || null;
+  };
+
   // Handler for Estimates button - navigate to active estimate or estimates page
   const handleEstimatesClick = (opportunityId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -208,10 +219,13 @@ function OpportunitiesPageContent() {
     }
   };
 
-  // Handler for Quotes button - navigate to create quote if none exist, otherwise quotes page
+  // Handler for Quotes button - navigate to active quote if exists, otherwise quotes page or create
   const handleQuotesClick = (opportunityId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (hasQuotes(opportunityId)) {
+    const activeQuoteId = getActiveQuoteId(opportunityId);
+    if (activeQuoteId) {
+      router.push(`/quotes/${activeQuoteId}`);
+    } else if (hasQuotes(opportunityId)) {
       router.push(`/quotes?opportunity_id=${opportunityId}`);
     } else {
       router.push(`/quotes/create?opportunity_id=${opportunityId}`);
@@ -524,7 +538,7 @@ function OpportunitiesPageContent() {
                                   variant="outline"
                                   onClick={(e) => handleQuotesClick(opportunity.id, e)}
                                   className="h-6 px-1.5 text-xs text-green-600 hover:text-green-700"
-                                  title={hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
+                                  title={getActiveQuoteId(opportunity.id) ? "View Active Quote" : hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
                                 >
                                   <FileCheck className="w-3 h-3" />
                                 </Button>
@@ -633,7 +647,7 @@ function OpportunitiesPageContent() {
                                 variant="outline"
                                 onClick={(e) => handleQuotesClick(opportunity.id, e)}
                                 className="flex-1 text-green-600 hover:text-green-700"
-                                title={hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
+                                title={getActiveQuoteId(opportunity.id) ? "View Active Quote" : hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
                               >
                                 <FileCheck className="w-4 h-4" />
                               </Button>
