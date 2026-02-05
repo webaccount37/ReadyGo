@@ -36,11 +36,18 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     container_name: readygo-backend
+    # Load environment variables from backend/.env file
+    env_file:
+      - ../backend/.env
     environment:
+      # Override database URL for Docker network
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/readygo
       REDIS_URL: redis://redis:6379/0
-      CORS_ORIGINS: '["http://localhost:3000"]'
+      # Override CORS for Docker setup (can be overridden in .env)
+      CORS_ORIGINS: '["http://localhost:3000","http://frontend:3000"]'
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      # Override redirect URI for Docker (if needed)
+      # AZURE_REDIRECT_URI: http://localhost:8000/api/v1/auth/callback
     ports:
       - "8000:8000"
     depends_on:

@@ -396,17 +396,20 @@ class OpportunityService(BaseService):
                 if not employee:
                     continue
                 
-                # Get role and delivery center from role_rate
+                # Get role from role_rate
                 role_id = None
                 role_name = None
-                delivery_center_code = None
                 
                 if li.role_rate:
                     if li.role_rate.role:
                         role_id = str(li.role_rate.role.id)
                         role_name = li.role_rate.role.role_name
-                    if li.role_rate.delivery_center:
-                        delivery_center_code = li.role_rate.delivery_center.code
+                
+                # Get Payable Center from line item (not Invoice Center from role_rate)
+                # Payable Center is the reference-only field stored on the line item
+                delivery_center_code = None
+                if li.payable_center:
+                    delivery_center_code = li.payable_center.code
                 
                 employees_dict[employee_id] = {
                     "id": employee_id,
@@ -418,7 +421,7 @@ class OpportunityService(BaseService):
                     "start_date": li.start_date.isoformat() if li.start_date else None,
                     "end_date": li.end_date.isoformat() if li.end_date else None,
                     "project_rate": float(li.rate) if li.rate else None,
-                    "delivery_center": delivery_center_code,
+                    "delivery_center": delivery_center_code,  # Payable Center code
                 }
         
         return list(employees_dict.values())

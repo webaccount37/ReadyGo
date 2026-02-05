@@ -109,10 +109,14 @@ class ExcelImportService:
         """Read metadata from metadata sheet."""
         metadata = {}
         
-        # Read basic fields
-        for row in range(1, 20):
+        # Scan more rows to find all sections (employees can be beyond row 20)
+        # Scan up to row 200 to be safe
+        for row in range(1, 200):
             key = ws[f"A{row}"].value
             value = ws[f"B{row}"].value
+            
+            if not key:  # Skip empty rows
+                continue
             
             if key == "estimate_id":
                 metadata["estimate_id"] = UUID(value)
@@ -161,15 +165,26 @@ class ExcelImportService:
                     emp_str = ws[f"B{row_idx}"].value
                     parts = emp_str.split("|")
                     if len(parts) >= 2:
-                        metadata["employees"][parts[1]] = UUID(parts[0])
+                        emp_name = parts[1].strip()  # Normalize whitespace
+                        emp_id = UUID(parts[0])
+                        metadata["employees"][emp_name] = emp_id
+                        logger.debug(f"Loaded employee from metadata: '{emp_name}' -> {emp_id}")
                     row_idx += 1
+                logger.info(f"Loaded {len(metadata['employees'])} employees from metadata: {list(metadata['employees'].keys())}")
+        
+        # Verify we found employees
+        if "employees" not in metadata:
+            logger.warning("No 'employees' section found in metadata sheet!")
+            metadata["employees"] = {}
+        elif len(metadata["employees"]) == 0:
+            logger.warning("Employees section found but empty in metadata sheet!")
         
         return metadata
     
     def _extract_week_columns(self, ws, expected_count: int) -> List[date]:
         """Extract week start dates from week header row (row 3 - column headers)."""
         weeks = []
-        col = 10  # Start after fixed columns (Payable Center, Role, Employee, Cost, Rate, Start Date, End Date, Billable, Billable %)
+        col = 12  # Start after fixed columns (Payable Center, Role, Employee, Cost, Rate, Cost Daily, Rate Daily, Start Date, End Date, Billable, Billable %)
         
         for idx in range(expected_count):
             cell = ws[f"{self._get_column_letter(col + idx)}3"]  # Row 3 is now the header row with week dates
@@ -223,12 +238,17 @@ class ExcelImportService:
                 line_item = self._parse_line_item_row(ws, row, weeks, metadata, opportunity_delivery_center_id, currency)
                 if line_item:
                     line_items.append(line_item)
+                else:
+                    logger.debug(f"Skipping row {row}: parsed as None (empty row)")
             except Exception as e:
-                logger.warning(f"Error parsing row {row}: {e}")
-                # Continue with next row
+                error_msg = f"Error parsing row {row}: {e}"
+                logger.error(error_msg, exc_info=True)
+                # Continue with next row - don't fail entire import for one bad row
+                # The error will be logged but we continue processing other rows
             
             row += 1
         
+        logger.info(f"Parsed {len(line_items)} line items from Excel (processed rows {start_row} to {row-1})")
         return line_items
     
     def _parse_line_item_row(self, ws, row: int, weeks: List[date], metadata: Dict,
@@ -262,13 +282,55 @@ class ExcelImportService:
         # This will be checked during upsert
         
         # Employee (Column C) - optional
-        employee_name = ws[f"C{row}"].value
+        employee_name_raw = ws[f"C{row}"].value
         employee_id = None
-        if employee_name:
+        if employee_name_raw:
+            employee_name = str(employee_name_raw).strip()  # Normalize whitespace
             employees = metadata.get("employees", {})
+            
+            logger.debug(f"Row {row}: Looking for employee '{employee_name}' (repr: {repr(employee_name)}) in {len(employees)} available employees")
+            
+            # Strategy 1: Try exact match first (with normalized whitespace)
             employee_id = employees.get(employee_name)
-            if not employee_id:
-                raise ValueError(f"Row {row}: Invalid Employee '{employee_name}'")
+            if employee_id:
+                logger.debug(f"Row {row}: Found exact match for employee '{employee_name}' -> {employee_id}")
+            else:
+                # Strategy 2: Try case-insensitive match with normalized whitespace
+                for emp_name, emp_id in employees.items():
+                    if emp_name.strip().lower() == employee_name.lower():
+                        employee_id = emp_id
+                        logger.info(f"Row {row}: Matched employee '{employee_name}' to '{emp_name}' (case-insensitive) -> {employee_id}")
+                        break
+                
+                if not employee_id:
+                    # Strategy 3: Try matching with normalized whitespace (collapse multiple spaces)
+                    normalized_excel_name = " ".join(employee_name.split())
+                    for emp_name, emp_id in employees.items():
+                        normalized_meta_name = " ".join(emp_name.split())
+                        if normalized_meta_name.lower() == normalized_excel_name.lower():
+                            employee_id = emp_id
+                            logger.info(f"Row {row}: Matched employee '{employee_name}' to '{emp_name}' (normalized whitespace) -> {employee_id}")
+                            break
+                
+                if not employee_id:
+                    # Log available employees for debugging
+                    available_employees = list(employees.keys())
+                    logger.error(f"Row {row}: Employee '{employee_name}' NOT FOUND in metadata!")
+                    logger.error(f"Row {row}: Employee name from Excel (repr): {repr(employee_name)}")
+                    logger.error(f"Row {row}: Employee name length: {len(employee_name)}")
+                    logger.error(f"Row {row}: Available employees ({len(available_employees)}): {available_employees}")
+                    # Log each available employee with repr for comparison
+                    for emp_name in available_employees[:10]:
+                        logger.error(f"Row {row}:   Available: '{emp_name}' (repr: {repr(emp_name)}, len: {len(emp_name)})")
+                    # Check for similar names (substring match)
+                    similar_found = False
+                    for emp_name in available_employees:
+                        if employee_name.lower() in emp_name.lower() or emp_name.lower() in employee_name.lower():
+                            logger.error(f"Row {row}: Similar name found: '{emp_name}' (might be a match)")
+                            similar_found = True
+                    # CRITICAL: Don't reset employee to None - this is a data loss bug
+                    # Instead, we should fail the import or at least warn strongly
+                    raise ValueError(f"Row {row}: Employee '{employee_name}' not found in metadata. This would cause data loss. Available: {available_employees[:5]}")
         
         # Cost (Column D) - optional, will use defaults if None
         cost_value = ws[f"D{row}"].value
@@ -290,8 +352,11 @@ class ExcelImportService:
                 # Invalid value, treat as None to use defaults
                 rate = None
         
-        # Start Date (Column F)
-        start_date_value = ws[f"F{row}"].value
+        # Cost Daily (Column F) - optional, ignored (calculated from Cost)
+        # Rate Daily (Column G) - optional, ignored (calculated from Rate)
+        
+        # Start Date (Column H)
+        start_date_value = ws[f"H{row}"].value
         if not start_date_value:
             raise ValueError(f"Row {row}: Start Date is required")
         if isinstance(start_date_value, datetime):
@@ -304,8 +369,8 @@ class ExcelImportService:
             except:
                 raise ValueError(f"Row {row}: Invalid Start Date format")
         
-        # End Date (Column G)
-        end_date_value = ws[f"G{row}"].value
+        # End Date (Column I)
+        end_date_value = ws[f"I{row}"].value
         if not end_date_value:
             raise ValueError(f"Row {row}: End Date is required")
         if isinstance(end_date_value, datetime):
@@ -321,15 +386,15 @@ class ExcelImportService:
         if start_date > end_date:
             raise ValueError(f"Row {row}: Start Date must be <= End Date")
         
-        # Billable (Column H)
-        billable_value = ws[f"H{row}"].value
+        # Billable (Column J)
+        billable_value = ws[f"J{row}"].value
         billable = True
         if billable_value:
             billable_str = str(billable_value).strip().lower()
             billable = billable_str in ["yes", "true", "1", "y"]
         
-        # Billable % (Column I) - Excel stores percentages as 0-1 (e.g., 0.15 for 15%)
-        billable_pct_value = ws[f"I{row}"].value
+        # Billable % (Column K) - Excel stores percentages as 0-1 (e.g., 0.15 for 15%)
+        billable_pct_value = ws[f"K{row}"].value
         billable_pct = Decimal("0")
         if billable_pct_value is not None:
             pct_decimal = Decimal(str(billable_pct_value))
@@ -346,9 +411,9 @@ class ExcelImportService:
                 if billable_pct < 0 or billable_pct > 100:
                     raise ValueError(f"Row {row}: Billable % must be between 0 and 100")
         
-        # Weekly hours (Columns J onwards)
+        # Weekly hours (Columns L onwards)
         weekly_hours = {}
-        week_col_start = 10
+        week_col_start = 12
         for idx, week in enumerate(weeks):
             col = week_col_start + idx
             col_letter = self._get_column_letter(col)
@@ -378,38 +443,24 @@ class ExcelImportService:
                                  weeks: List[date]) -> Dict:
         """Upsert line items from parsed data.
         
-        Matching strategy:
-        1. Primary match: (delivery_center_id, role_id, employee_id, start_date)
-        2. Fallback match (if employee_id is None in Excel): (delivery_center_id, role_id, None, start_date)
-           - This handles cases where an employee is added to an existing record
-        3. If no match found, create new record
-        
-        This ensures:
-        - Rate changes update existing records
-        - Employee additions update existing records (if employee was None)
-        - Employee changes create new records (if employee changed from one to another)
-        - Weekly hours are always replaced with Excel values
+        Matching strategy: Simple positional matching
+        - Excel row N (data starts at row 4) matches estimate line item with row_order = N-4 (0-indexed)
+        - This is a direct overwrite: row 4 in Excel updates row_order 0, row 5 updates row_order 1, etc.
+        - If there are more Excel rows than existing line items, create new ones
+        - If there are fewer Excel rows than existing line items, delete the extra ones
         """
-        # Get existing line items
+        # Get existing line items sorted by row_order
         existing_line_items = await self.line_item_repo.list_by_estimate(estimate_id)
-        # Matching keys: (role_id, employee_id, start_date)
-        # Note: Payable Center is NOT used for matching since it's reference-only
-        existing_by_key = {}  # Primary key: (role_id, employee_id, start_date)
-        existing_by_key_no_employee = {}  # Fallback key: (role_id, None, start_date)
+        # Sort by row_order to ensure consistent ordering
+        existing_line_items = sorted(existing_line_items, key=lambda li: li.row_order if li.row_order is not None else 999999)
         
-        for li in existing_line_items:
-            role_id = str(li.role_rate.role_id) if li.role_rate and li.role_rate.role else None
-            employee_id = str(li.employee_id) if li.employee_id else None
-            start_date = str(li.start_date)
-            
-            # Primary key with employee
-            key = (role_id, employee_id, start_date)
-            existing_by_key[key] = li
-            
-            # Fallback key without employee (for matching when Excel has no employee)
-            if employee_id is None:
-                key_no_emp = (role_id, None, start_date)
-                existing_by_key_no_employee[key_no_emp] = li
+        # Create a map by row_order for easy lookup
+        existing_by_row_order = {li.row_order: li for li in existing_line_items if li.row_order is not None}
+        
+        logger.info(f"Import: Found {len(existing_line_items)} existing line items")
+        logger.info(f"Import: Mapped {len(existing_by_row_order)} line items by row_order: {sorted(existing_by_row_order.keys())}")
+        for row_order, li in sorted(existing_by_row_order.items()):
+            logger.debug(f"  row_order {row_order} -> line_item {li.id}")
         
         created_count = 0
         updated_count = 0
@@ -417,7 +468,6 @@ class ExcelImportService:
         errors = []
         
         # Track which line items were matched during processing
-        # This includes both exact matches and fallback matches
         matched_line_item_ids = set()
         
         # Get estimate for currency
@@ -425,11 +475,14 @@ class ExcelImportService:
         opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
         opportunity_delivery_center_id = opportunity.delivery_center_id
         
-        # Get max row_order
+        # Get max row_order for new items
         max_order = await self.line_item_repo.get_max_row_order(estimate_id)
         next_order = max_order + 1
         
+        # Process each Excel row - match by position (row_order = Excel row index)
         for idx, item_data in enumerate(line_items_data):
+            excel_row_number = idx + 4  # Excel rows start at 4 (row 1-3 are headers)
+            row_order = idx  # 0-indexed row_order matches Excel row position
             try:
                 # Verify role has relationship with opportunity delivery center
                 # Check if ANY role rate exists for this role + delivery center (currency doesn't matter for this check)
@@ -522,56 +575,34 @@ class ExcelImportService:
                         f"Payable Center will not be exported correctly."
                     )
                 
-                # Create keys for matching
-                # Note: Payable Center is NOT used for matching since it's reference-only
-                employee_id_str = str(item_data["employee_id"]) if item_data["employee_id"] else None
-                role_id_str = str(item_data["role_id"])
-                start_date_str = str(item_data["start_date"])
+                # Simple positional matching: Excel row N matches line item with row_order = N-4 (0-indexed)
+                # Excel row 4 (first data row) -> row_order 0
+                # Excel row 5 -> row_order 1, etc.
+                line_item = existing_by_row_order.get(row_order)
                 
-                # Primary key: exact match including employee
-                primary_key = (role_id_str, employee_id_str, start_date_str)
-                
-                # Fallback key: match without employee (for cases where employee is added)
-                fallback_key = (role_id_str, None, start_date_str)
-                
-                # Find existing line item
-                line_item = None
-                if primary_key in existing_by_key:
-                    # Exact match found
-                    line_item = existing_by_key[primary_key]
-                    logger.debug(f"Found exact match for row {idx + 4}: {primary_key}")
-                elif employee_id_str is None and fallback_key in existing_by_key_no_employee:
-                    # Fallback match: Excel has no employee, but DB record exists without employee
-                    line_item = existing_by_key_no_employee[fallback_key]
-                    logger.debug(f"Found fallback match (no employee) for row {idx + 4}: {fallback_key}")
-                elif employee_id_str and fallback_key in existing_by_key_no_employee:
-                    # Special case: Excel has employee, DB record has no employee - update existing
-                    line_item = existing_by_key_no_employee[fallback_key]
-                    logger.debug(f"Found fallback match (adding employee) for row {idx + 4}: {fallback_key}")
+                logger.info(f"Excel row {excel_row_number}: Looking for row_order {row_order}, found: {line_item.id if line_item else 'None'}")
                 
                 if line_item:
-                    # Update existing line item - use Excel values or defaults
-                    # Store Opportunity Invoice Center's RoleRate (for rate calculations)
-                    # Store Payable Center from Excel (for reference/export)
+                    logger.info(f"Excel row {excel_row_number} (row_order {row_order}) matches existing line item {line_item.id} - updating")
+                    # Update existing line item - direct overwrite with Excel values
                     await self.line_item_repo.update(
                         line_item.id,
                         role_rates_id=opportunity_role_rate.id,  # Use Opportunity Invoice Center RoleRate
                         payable_center_id=item_data["delivery_center_id"],  # Payable Center from Excel (reference only)
-                        employee_id=item_data["employee_id"],  # Update employee (may be adding or changing)
+                        employee_id=item_data["employee_id"],
                         rate=final_rate,  # Use Excel value or default
                         cost=final_cost,  # Use Excel value or default
-                        start_date=item_data["start_date"],  # Update start date
-                        end_date=item_data["end_date"],  # Update end date
-                        billable=item_data["billable"],  # Update billable flag
-                        billable_expense_percentage=item_data["billable_expense_percentage"],  # Update billable %
+                        start_date=item_data["start_date"],
+                        end_date=item_data["end_date"],
+                        billable=item_data["billable"],
+                        billable_expense_percentage=item_data["billable_expense_percentage"],
+                        row_order=row_order,  # Preserve row_order position
                     )
                     updated_count += 1
                     matched_line_item_ids.add(line_item.id)  # Track as matched
-                    logger.info(f"Updated line item {line_item.id} from Excel row {idx + 4} (rate={final_rate}, cost={final_cost})")
+                    logger.info(f"Updated line item {line_item.id} from Excel row {excel_row_number} (row_order={row_order}, rate={final_rate}, cost={final_cost})")
                 else:
-                    # Create new line item - use Excel values or defaults
-                    # Store Opportunity Invoice Center's RoleRate (for rate calculations)
-                    # Store Payable Center from Excel (for reference/export)
+                    # Create new line item at this position
                     line_item = await self.line_item_repo.create(
                         estimate_id=estimate_id,
                         role_rates_id=opportunity_role_rate.id,  # Use Opportunity Invoice Center RoleRate
@@ -582,14 +613,13 @@ class ExcelImportService:
                         currency=item_data["currency"],
                         start_date=item_data["start_date"],
                         end_date=item_data["end_date"],
-                        row_order=next_order,
+                        row_order=row_order,  # Use position-based row_order
                         billable=item_data["billable"],
                         billable_expense_percentage=item_data["billable_expense_percentage"],
                     )
-                    next_order += 1
                     created_count += 1
                     matched_line_item_ids.add(line_item.id)  # Track as matched (newly created)
-                    logger.info(f"Created new line item {line_item.id} from Excel row {idx + 4} (rate={final_rate}, cost={final_cost})")
+                    logger.info(f"Created new line item {line_item.id} from Excel row {excel_row_number} (row_order={row_order}, rate={final_rate}, cost={final_cost})")
                 
                 await self.session.flush()
                 

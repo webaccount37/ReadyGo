@@ -166,7 +166,8 @@ class EmployeeService(BaseService):
             .options(
                 selectinload(EstimateLineItem.estimate).selectinload(Estimate.opportunity),
                 selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
-                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center)
+                selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center),
+                selectinload(EstimateLineItem.payable_center)  # Load Payable Center relationship
             )
             .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
             .where(
@@ -189,17 +190,20 @@ class EmployeeService(BaseService):
             opportunity_id = str(opportunity.id)
             
             if opportunity_id not in opportunities_dict:
-                # Get role and delivery center from role_rate
+                # Get role from role_rate
                 role_id = None
                 role_name = None
-                delivery_center_code = None
                 
                 if li.role_rate:
                     if li.role_rate.role:
                         role_id = str(li.role_rate.role.id)
                         role_name = li.role_rate.role.role_name
-                    if li.role_rate.delivery_center:
-                        delivery_center_code = li.role_rate.delivery_center.code
+                
+                # Get Payable Center from line item (not Invoice Center from role_rate)
+                # Payable Center is the reference-only field stored on the line item
+                delivery_center_code = None
+                if li.payable_center:
+                    delivery_center_code = li.payable_center.code
                 
                 opportunities_dict[opportunity_id] = {
                     "id": opportunity_id,
@@ -209,7 +213,7 @@ class EmployeeService(BaseService):
                     "start_date": li.start_date.isoformat() if li.start_date else None,
                     "end_date": li.end_date.isoformat() if li.end_date else None,
                     "project_rate": float(li.rate) if li.rate else None,
-                    "delivery_center": delivery_center_code,
+                    "delivery_center": delivery_center_code,  # Payable Center code
                 }
         
         return list(opportunities_dict.values())

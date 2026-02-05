@@ -75,6 +75,12 @@ export function EstimateLineItemRow({
   // Track if we're currently updating to prevent feedback loops
   const isUpdatingRef = useRef(false);
   
+  // Track if we're currently updating rates from role change (to prevent sync effect from overwriting)
+  const isUpdatingRatesFromRoleRef = useRef(false);
+  
+  // Track if we're currently updating role_id (to prevent sync effect from overwriting)
+  const isUpdatingRoleIdRef = useRef(false);
+  
   // Update local state when lineItem prop changes (from refetch)
   // Only update if values actually changed to prevent unnecessary re-renders and feedback loops
   useEffect(() => {
@@ -87,14 +93,20 @@ export function EstimateLineItemRow({
     const endDateStr = lineItem.end_date.split("T")[0];
     
     // Only update state if values actually changed
-    setCostValue((prev) => {
-      const newValue = lineItem.cost || "0";
-      return prev !== newValue ? newValue : prev;
-    });
-    setRateValue((prev) => {
-      const newValue = lineItem.rate || "0";
-      return prev !== newValue ? newValue : prev;
-    });
+    // CRITICAL: Don't sync rate/cost from backend if we're updating them from role change
+    // This prevents backend data from overwriting the calculated role-based rates
+    if (!isUpdatingRatesFromRoleRef.current) {
+      setCostValue((prev) => {
+        const newValue = lineItem.cost || "0";
+        return prev !== newValue ? newValue : prev;
+      });
+      setRateValue((prev) => {
+        const newValue = lineItem.rate || "0";
+        return prev !== newValue ? newValue : prev;
+      });
+    } else {
+      console.log("Skipping rate/cost sync - updating from role change");
+    }
     setStartDateValue((prev) => {
       const newValue = startDateStr;
       return prev !== newValue ? newValue : prev;
@@ -107,10 +119,17 @@ export function EstimateLineItemRow({
       const newValue = lineItem.delivery_center_id;
       return prev !== newValue ? newValue : prev;
     });
-    setRoleValue((prev) => {
-      const newValue = lineItem.role_id;
-      return prev !== newValue ? newValue : prev;
-    });
+    
+    // CRITICAL: Don't sync role_id from backend if we're currently updating it
+    // This prevents the sync effect from reverting the role change before backend processes it
+    if (!isUpdatingRoleIdRef.current) {
+      setRoleValue((prev) => {
+        const newValue = lineItem.role_id;
+        return prev !== newValue ? newValue : prev;
+      });
+    } else {
+      console.log("Skipping role_id sync - updating from user change");
+    }
     setEmployeeValue((prev) => {
       const newValue = lineItem.employee_id || "";
       return prev !== newValue ? newValue : prev;
@@ -123,7 +142,7 @@ export function EstimateLineItemRow({
       const newValue = lineItem.billable_expense_percentage || "0";
       return prev !== newValue ? newValue : prev;
     });
-  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable, lineItem.billable_expense_percentage]);
+  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable, lineItem.billable_expense_percentage, roleValue]);
 
   // Weekly hours editing state
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
@@ -137,12 +156,12 @@ export function EstimateLineItemRow({
   const { data: employeesData } = useEmployees({ limit: 100 });
 
   // Fetch role details when role is selected (to get role rates)
-  const { data: selectedRoleData } = useRole(roleValue || "", true, {
+  const { data: selectedRoleData, isLoading: isLoadingRole, isFetching: isFetchingRole } = useRole(roleValue || "", true, {
     enabled: !!roleValue,
   });
 
   // Fetch employee details when employee is selected (to get employee rates)
-  const { data: selectedEmployeeData } = useEmployee(employeeValue || "", false, {
+  const { data: selectedEmployeeData, isLoading: isLoadingEmployee, isFetching: isFetchingEmployee } = useEmployee(employeeValue || "", false, {
     enabled: !!employeeValue,
   });
 
@@ -372,6 +391,8 @@ export function EstimateLineItemRow({
           updateData.delivery_center_id = value;
         } else if (field === "role_id") {
           updateData.role_id = value;
+          // Set flag to prevent sync effect from overwriting role_id during update
+          isUpdatingRoleIdRef.current = true;
         } else if (field === "currency") {
           updateData.currency = value;
         } else if (field === "row_order") {
@@ -388,11 +409,22 @@ export function EstimateLineItemRow({
         // Use a small delay to allow the query invalidation to complete
         setTimeout(() => {
           isUpdatingRef.current = false;
+          // Clear role_id update flag after backend has processed and refetched
+          if (field === "role_id") {
+            // Give extra time for the backend to update and refetch
+            setTimeout(() => {
+              isUpdatingRoleIdRef.current = false;
+            }, 500);
+          }
         }, 100);
       } catch (err) {
         console.error(`Failed to update ${field}:`, err);
         // Clear updating flag on error
         isUpdatingRef.current = false;
+        // Clear role_id update flag on error
+        if (field === "role_id") {
+          isUpdatingRoleIdRef.current = false;
+        }
         // Revert on error
         if (field === "cost") setCostValue(originalValue);
         else if (field === "rate") setRateValue(originalValue);
@@ -427,14 +459,14 @@ export function EstimateLineItemRow({
   // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role
   // IMPORTANT: Only auto-populate when role/employee changes, NOT when lineItem updates
   useEffect(() => {
-    // Skip if we're currently updating to prevent feedback loops
-    if (isUpdatingRef.current) {
-      if (roleValue !== prevRoleRef.current) {
-        prevRoleRef.current = roleValue;
-        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      }
-      return;
-    }
+    console.log("Role change useEffect triggered:", {
+      roleValue,
+      prevRole: prevRoleRef.current,
+      isUpdatingRef: isUpdatingRef.current,
+      selectedRoleDataId: selectedRoleData?.id,
+      isLoadingRole,
+      isFetchingRole,
+    });
 
     // Only proceed if role actually changed (not just on every render)
     const roleChanged = roleValue !== prevRoleRef.current;
@@ -442,9 +474,27 @@ export function EstimateLineItemRow({
       return; // Don't auto-populate if role didn't change
     }
 
+    console.log("Role changed detected, proceeding with rate calculation");
+
     // Need roleValue, opportunity delivery center, and selectedRoleData to proceed
-    if (!roleValue || !opportunityDeliveryCenterId || !selectedRoleData) {
+    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
+    if (!roleValue || !opportunityDeliveryCenterId || !selectedRoleData || isLoadingRole || isFetchingRole) {
       // If role changed but data not loaded yet, update ref
+      prevRoleRef.current = roleValue;
+      lastPopulatedRoleDataRef.current = ""; // Reset when role changes
+      return;
+    }
+
+    // CRITICAL: Verify that selectedRoleData matches the current roleValue
+    // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
+    if (selectedRoleData.id !== roleValue) {
+      console.warn("Role data mismatch detected:", {
+        selectedRoleDataId: selectedRoleData.id,
+        currentRoleValue: roleValue,
+        isLoadingRole,
+        isFetchingRole,
+      });
+      // Role data doesn't match current selection - wait for correct data to load
       prevRoleRef.current = roleValue;
       lastPopulatedRoleDataRef.current = ""; // Reset when role changes
       return;
@@ -461,6 +511,18 @@ export function EstimateLineItemRow({
 
     // Find the role rate that matches opportunity invoice center
     // Compare as strings to handle UUID string comparison
+    console.log("Finding matching rate for role:", {
+      roleId: roleValue,
+      roleName: selectedRoleData.role_name,
+      opportunityDeliveryCenterId,
+      roleRatesCount: selectedRoleData.role_rates?.length || 0,
+      roleRates: selectedRoleData.role_rates?.map(r => ({
+        delivery_center_id: r.delivery_center_id,
+        external_rate: r.external_rate,
+        internal_cost_rate: r.internal_cost_rate,
+      })),
+    });
+    
     const matchingRate = selectedRoleData.role_rates?.find(
       (rate) =>
         String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
@@ -470,6 +532,17 @@ export function EstimateLineItemRow({
     let newRate: string;
 
     if (matchingRate) {
+      console.log("Found matching rate:", {
+        roleId: roleValue,
+        roleName: selectedRoleData.role_name,
+        matchingRate: {
+          delivery_center_id: matchingRate.delivery_center_id,
+          external_rate: matchingRate.external_rate,
+          internal_cost_rate: matchingRate.internal_cost_rate,
+          default_currency: matchingRate.default_currency,
+        },
+      });
+      
       // Get rates from role rate
       // Centers already match (we found matchingRate by matching delivery_center_id)
       let baseCost = matchingRate.internal_cost_rate || 0;
@@ -501,6 +574,19 @@ export function EstimateLineItemRow({
       }
     }
 
+    console.log("Updating rates for role:", {
+      roleId: roleValue,
+      roleName: selectedRoleData.role_name,
+      newRate,
+      newCost,
+      previousRate: lineItem.rate,
+      previousCost: lineItem.cost,
+      hasEmployee: !!employeeValue,
+    });
+    
+    // Set flag to prevent sync effect from overwriting these values
+    isUpdatingRatesFromRoleRef.current = true;
+    
     // Update Rate always (Rate always comes from Role) - but ONLY when role changes
     setRateValue(newRate);
     handleFieldUpdate("rate", newRate, lineItem.rate || "0");
@@ -512,9 +598,14 @@ export function EstimateLineItemRow({
       handleFieldUpdate("cost", newCost, lineItem.cost || "0");
     }
 
+    // Clear flag after a short delay to allow updates to complete
+    setTimeout(() => {
+      isUpdatingRatesFromRoleRef.current = false;
+    }, 1000);
+
     prevRoleRef.current = roleValue;
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [roleValue, employeeValue, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate]);
+  }, [roleValue, employeeValue, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate, isLoadingRole, isFetchingRole]);
 
   // When Employee is selected or cleared, update Cost accordingly
   useEffect(() => {
@@ -534,7 +625,22 @@ export function EstimateLineItemRow({
     // If employee was cleared (set to empty), revert Cost to Role-based cost
     if (!employeeValue) {
       // Need role and opportunity delivery center to get role-based cost
-      if (roleValue && opportunityDeliveryCenterId && selectedRoleData) {
+      // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
+      if (roleValue && opportunityDeliveryCenterId && selectedRoleData && !isLoadingRole && !isFetchingRole) {
+        // CRITICAL: Verify that selectedRoleData matches the current roleValue
+        // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
+        if (selectedRoleData.id !== roleValue) {
+          console.warn("Role data mismatch when clearing employee:", {
+            selectedRoleDataId: selectedRoleData.id,
+            currentRoleValue: roleValue,
+            isLoadingRole,
+            isFetchingRole,
+          });
+          // Role data doesn't match current selection - wait for correct data to load
+          prevEmployeeRef.current = employeeValue;
+          return;
+        }
+        
         // Find the role rate that matches opportunity delivery center and currency
         const matchingRate = selectedRoleData.role_rates?.find(
           (rate) =>
@@ -570,8 +676,23 @@ export function EstimateLineItemRow({
     }
 
     // Employee was selected - update cost from employee's rates based on delivery center matching
-    if (!selectedEmployeeData) {
+    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
+    if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
       // Employee data not loaded yet, wait for it
+      prevEmployeeRef.current = employeeValue;
+      return;
+    }
+
+    // CRITICAL: Verify that selectedEmployeeData matches the current employeeValue
+    // This prevents using stale employee data when employee changes but React Query hasn't finished fetching yet
+    if (selectedEmployeeData.id !== employeeValue) {
+      console.warn("Employee data mismatch detected:", {
+        selectedEmployeeDataId: selectedEmployeeData.id,
+        currentEmployeeValue: employeeValue,
+        isLoadingEmployee,
+        isFetchingEmployee,
+      });
+      // Employee data doesn't match current selection - wait for correct data to load
       prevEmployeeRef.current = employeeValue;
       return;
     }
@@ -627,7 +748,7 @@ export function EstimateLineItemRow({
     handleFieldUpdate("cost", newCost, lineItem.cost || "0");
 
     prevEmployeeRef.current = employeeValue;
-  }, [employeeValue, roleValue, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue]);
+  }, [employeeValue, roleValue, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     if (readOnly) {
@@ -729,8 +850,16 @@ export function EstimateLineItemRow({
           <Select
             value={roleValue}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
-              setRoleValue(e.target.value);
-              handleFieldUpdate("role_id", e.target.value, lineItem.role_id);
+              const newRoleId = e.target.value;
+              console.log("Role select changed:", {
+                oldRoleId: roleValue,
+                newRoleId,
+                lineItemRoleId: lineItem.role_id,
+              });
+              // Set flag immediately to prevent sync effect from reverting the change
+              isUpdatingRoleIdRef.current = true;
+              setRoleValue(newRoleId);
+              handleFieldUpdate("role_id", newRoleId, lineItem.role_id);
             }}
             className="text-xs h-7 w-full"
           >

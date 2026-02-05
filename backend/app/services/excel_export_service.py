@@ -51,13 +51,8 @@ class ExcelExportService:
         if not estimate:
             raise ValueError("Estimate not found")
         
-        # Explicitly reload line items to ensure all are loaded
-        from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
-        line_item_repo = EstimateLineItemRepository(self.session)
-        line_items = await line_item_repo.list_by_estimate(estimate_id)
-        if line_items:
-            estimate.line_items = line_items
-            logger.info(f"Explicitly loaded {len(line_items)} line items for Excel export of estimate {estimate_id}")
+        # get_with_line_items already loads relationships, so we don't need to reload
+        # Just ensure line items are sorted by row_order
         
         # Ensure line items are sorted by row_order
         if estimate.line_items:
@@ -640,14 +635,20 @@ class ExcelExportService:
             
             # Write line item data
             # Payable Center (use payable_center if available, otherwise fallback to role_rate.delivery_center for backward compatibility)
-            if hasattr(line_item, 'payable_center') and line_item.payable_center:
-                ws.cell(row=row, column=1).value = line_item.payable_center.name
-            elif line_item.role_rate and line_item.role_rate.delivery_center:
-                ws.cell(row=row, column=1).value = line_item.role_rate.delivery_center.name
+            try:
+                if hasattr(line_item, 'payable_center') and line_item.payable_center:
+                    ws.cell(row=row, column=1).value = line_item.payable_center.name
+                elif line_item.role_rate and hasattr(line_item.role_rate, 'delivery_center') and line_item.role_rate.delivery_center:
+                    ws.cell(row=row, column=1).value = line_item.role_rate.delivery_center.name
+            except (AttributeError, KeyError) as e:
+                logger.warning(f"Could not access payable_center for line item {line_item.id}: {e}")
             
             # Role
-            if line_item.role_rate and line_item.role_rate.role:
-                ws.cell(row=row, column=2).value = line_item.role_rate.role.role_name
+            try:
+                if line_item.role_rate and hasattr(line_item.role_rate, 'role') and line_item.role_rate.role:
+                    ws.cell(row=row, column=2).value = line_item.role_rate.role.role_name
+            except (AttributeError, KeyError) as e:
+                logger.warning(f"Could not access role for line item {line_item.id}: {e}")
             
             # Employee
             if line_item.employee:

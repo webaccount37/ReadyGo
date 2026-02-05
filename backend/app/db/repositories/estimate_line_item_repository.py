@@ -26,6 +26,7 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
         return select(EstimateLineItem).options(
             selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
             selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center),
+            selectinload(EstimateLineItem.payable_center),  # Load Payable Center relationship
             selectinload(EstimateLineItem.employee),
             selectinload(EstimateLineItem.estimate),
             selectinload(EstimateLineItem.weekly_hours),
@@ -57,6 +58,7 @@ class EstimateLineItemRepository(BaseRepository[EstimateLineItem]):
             .options(
                 selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.role),
                 selectinload(EstimateLineItem.role_rate).selectinload(RoleRate.delivery_center),
+                selectinload(EstimateLineItem.payable_center),  # Load Payable Center relationship
                 selectinload(EstimateLineItem.employee),
                 selectinload(EstimateLineItem.estimate),
                 selectinload(EstimateLineItem.weekly_hours),

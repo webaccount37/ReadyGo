@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 import {
   LayoutDashboard,
   Briefcase,
@@ -22,6 +23,8 @@ import {
   Clock,
   Receipt,
   UserCog,
+  LogOut,
+  User,
 } from "lucide-react";
 
 interface NavItem {
@@ -212,9 +215,10 @@ interface SidebarProps {
 
 export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
   const pathname = usePathname();
+  const { user, isAuthenticated, logout } = useAuth();
   
   return (
-    <aside className={`hidden lg:block bg-gray-900 text-white h-screen fixed left-0 top-0 overflow-y-auto border-r border-gray-800 transition-all duration-300 ${collapsed ? "w-16 p-2" : "w-64 p-4"}`}>
+    <aside className={`hidden lg:block bg-gray-900 text-white h-screen fixed left-0 top-0 overflow-y-auto border-r border-gray-800 transition-all duration-300 flex flex-col ${collapsed ? "w-16 p-2" : "w-64 p-4"}`}>
       {collapsed ? (
         <div className="flex flex-col items-center">
           <button
@@ -308,7 +312,45 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
               </svg>
             </button>
           </div>
-          <SidebarContent />
+          <div className="flex-1 overflow-y-auto">
+            <SidebarContent />
+          </div>
+          
+          {/* User Info Section */}
+          <div className="border-t border-gray-800 pt-4 mt-4">
+            {isAuthenticated && user ? (
+              <div className="space-y-2">
+                <div className="flex items-center gap-3 px-4 py-2">
+                  <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
+                    <User className="w-5 h-5" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-white truncate">
+                      {user.name || user.email}
+                    </p>
+                    <p className="text-xs text-gray-400 truncate">{user.email}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={logout}
+                  className="w-full flex items-center gap-3 px-4 py-2 text-sm text-gray-300 hover:bg-gray-800 rounded-md transition-colors"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span>Sign out</span>
+                </button>
+              </div>
+            ) : (
+              <div className="px-4 py-2">
+                <p className="text-xs text-gray-500 mb-2">Not signed in</p>
+                <Link
+                  href="/auth/login"
+                  className="block w-full text-center px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-md transition-colors"
+                >
+                  Sign in
+                </Link>
+              </div>
+            )}
+          </div>
         </>
       )}
     </aside>

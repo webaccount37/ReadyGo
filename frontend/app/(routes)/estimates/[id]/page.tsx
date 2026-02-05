@@ -158,16 +158,21 @@ export default function EstimateDetailPage() {
     }
   }, [estimate?.id, opportunity?.id]); // Reset when estimate or opportunity ID changes
   
+  // Check if opportunity is locked
+  const isOpportunityLocked = useMemo(() => {
+    return opportunity?.is_locked || false;
+  }, [opportunity?.is_locked]);
+
   // Detect Invoice Center/Currency changes for active estimates
   const hasInvoiceCenterOrCurrencyChange = useMemo(() => {
-    if (!opportunity || !estimate || estimate.is_locked) return false;
+    if (!opportunity || !estimate || estimate.is_locked || isOpportunityLocked) return false;
     if (!originalInvoiceCenterId || !originalInvoiceCurrency) return false;
     
     const centerChanged = opportunity.delivery_center_id !== originalInvoiceCenterId;
     const currencyChanged = (opportunity.default_currency || "USD") !== originalInvoiceCurrency;
     
     return centerChanged || currencyChanged;
-  }, [opportunity, estimate, originalInvoiceCenterId, originalInvoiceCurrency]);
+  }, [opportunity, estimate, originalInvoiceCenterId, originalInvoiceCurrency, isOpportunityLocked]);
 
   // Check for date mismatches
   const hasDateMismatch = useMemo(() => {
@@ -181,10 +186,10 @@ export default function EstimateDetailPage() {
     });
   }, [estimate?.line_items, startDate, endDate]);
 
-  // Auto-save opportunity fields when they change
+  // Auto-save opportunity fields when they change (skip if opportunity is locked)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!opportunity || !estimate) return;
+    if (!opportunity || !estimate || isOpportunityLocked) return;
     
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -242,7 +247,7 @@ export default function EstimateDetailPage() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [startDate, endDate, invoiceCurrency, invoiceCustomer, billableExpenses, opportunity, estimate, updateOpportunity, refetchOpportunity]);
+  }, [startDate, endDate, invoiceCurrency, invoiceCustomer, billableExpenses, opportunity, estimate, updateOpportunity, refetchOpportunity, isOpportunityLocked]);
 
   const handleDuplicate = async () => {
     setIsCloning(true);
@@ -420,6 +425,25 @@ export default function EstimateDetailPage() {
         </Card>
       )}
 
+      {isOpportunityLocked && (
+        <Card className="mb-6 border-yellow-200 bg-yellow-50">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-yellow-800">
+              <Lock className="w-5 h-5" />
+              <div>
+                <p className="font-semibold">Opportunity is locked by an active quote.</p>
+                <p className="text-sm">
+                  The Opportunity header details (dates, currency, invoice settings) cannot be changed until the quote is deactivated.
+                  {opportunity?.locked_by_quote_id && (
+                    <> <Link href={`/quotes/${opportunity.locked_by_quote_id}`} className="underline">View quote</Link> to unlock.</>
+                  )}
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="mb-6">
         <CardHeader>
           <CardTitle>Estimate Details</CardTitle>
@@ -438,7 +462,7 @@ export default function EstimateDetailPage() {
                 id="invoice_currency"
                 value={invoiceCurrency}
                 onChange={(e) => setInvoiceCurrency(e.target.value)}
-                disabled={estimate.is_locked}
+                disabled={estimate.is_locked || isOpportunityLocked}
                 className="mt-1"
               >
                 {CURRENCIES.map((c) => (
@@ -455,7 +479,7 @@ export default function EstimateDetailPage() {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                disabled={estimate.is_locked}
+                disabled={estimate.is_locked || isOpportunityLocked}
                 className="mt-1"
               />
             </div>
@@ -466,7 +490,7 @@ export default function EstimateDetailPage() {
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                disabled={estimate.is_locked}
+                disabled={estimate.is_locked || isOpportunityLocked}
                 className="mt-1"
               />
             </div>
@@ -476,7 +500,7 @@ export default function EstimateDetailPage() {
                 id="invoice_customer"
                 checked={invoiceCustomer}
                 onChange={(e) => setInvoiceCustomer(e.target.checked)}
-                disabled={estimate.is_locked}
+                disabled={estimate.is_locked || isOpportunityLocked}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <Label htmlFor="invoice_customer" className="cursor-pointer">
@@ -489,7 +513,7 @@ export default function EstimateDetailPage() {
                 id="billable_expenses"
                 checked={billableExpenses}
                 onChange={(e) => setBillableExpenses(e.target.checked)}
-                disabled={estimate.is_locked}
+                disabled={estimate.is_locked || isOpportunityLocked}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <Label htmlFor="billable_expenses" className="cursor-pointer">

@@ -339,12 +339,12 @@ export function EstimateEmptyRow({
   }, [lineItemId, stableId, estimateId, _rowIndex]);
 
   // Fetch role details when role is selected (to get role rates)
-  const { data: selectedRoleData } = useRole(formData.role_id || "", true, {
+  const { data: selectedRoleData, isLoading: isLoadingRole, isFetching: isFetchingRole } = useRole(formData.role_id || "", true, {
     enabled: !!formData.role_id,
   });
 
   // Fetch employee details when employee is selected (to get employee rates)
-  const { data: selectedEmployeeData } = useEmployee(formData.employee_id || "", false, {
+  const { data: selectedEmployeeData, isLoading: isLoadingEmployee, isFetching: isFetchingEmployee } = useEmployee(formData.employee_id || "", false, {
     enabled: !!formData.employee_id,
   });
   
@@ -550,8 +550,26 @@ export function EstimateEmptyRow({
     }
 
     // Need role_id, opportunity delivery center, and selectedRoleData to proceed
-    if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData) {
+    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
+    if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData || isLoadingRole || isFetchingRole) {
       // If role changed but data not loaded yet, update ref
+      if (formData.role_id !== prevRoleIdRef.current) {
+        prevRoleIdRef.current = formData.role_id || "";
+        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
+      }
+      return;
+    }
+
+    // CRITICAL: Verify that selectedRoleData matches the current role_id
+    // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
+    if (selectedRoleData.id !== formData.role_id) {
+      console.warn("Role data mismatch detected (empty row):", {
+        selectedRoleDataId: selectedRoleData.id,
+        currentRoleId: formData.role_id,
+        isLoadingRole,
+        isFetchingRole,
+      });
+      // Role data doesn't match current selection - wait for correct data to load
       if (formData.role_id !== prevRoleIdRef.current) {
         prevRoleIdRef.current = formData.role_id || "";
         lastPopulatedRoleDataRef.current = ""; // Reset when role changes
@@ -653,7 +671,7 @@ export function EstimateEmptyRow({
     
     prevRoleIdRef.current = formData.role_id || "";
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [formData.role_id, formData.employee_id, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef]);
+  }, [formData.role_id, formData.employee_id, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef, isLoadingRole, isFetchingRole]);
 
   // Track if we've already populated cost for this employee
   const lastPopulatedEmployeeRef = useRef<string>("");
@@ -686,7 +704,22 @@ export function EstimateEmptyRow({
     // If employee was cleared (set to empty), revert Cost to Role-based cost
     if (!currentEmployeeId) {
       // Need role and opportunity delivery center to get role-based cost
-      if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData) {
+      // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
+      if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData && !isLoadingRole && !isFetchingRole) {
+        // CRITICAL: Verify that selectedRoleData matches the current role_id
+        // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
+        if (selectedRoleData.id !== formData.role_id) {
+          console.warn("Role data mismatch when clearing employee (empty row):", {
+            selectedRoleDataId: selectedRoleData.id,
+            currentRoleId: formData.role_id,
+            isLoadingRole,
+            isFetchingRole,
+          });
+          // Role data doesn't match current selection - wait for correct data to load
+          prevEmployeeIdRef.current = currentEmployeeId;
+          return;
+        }
+        
         // Find the role rate that matches opportunity invoice center
         const matchingRate = selectedRoleData.role_rates?.find(
           (rate) =>
@@ -732,8 +765,23 @@ export function EstimateEmptyRow({
     }
 
     // Employee was selected - update cost from employee's rates based on delivery center matching
-    if (!selectedEmployeeData) {
+    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
+    if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
       // Employee data not loaded yet, wait for it
+      prevEmployeeIdRef.current = currentEmployeeId;
+      return;
+    }
+
+    // CRITICAL: Verify that selectedEmployeeData matches the current employee_id
+    // This prevents using stale employee data when employee changes but React Query hasn't finished fetching yet
+    if (selectedEmployeeData.id !== currentEmployeeId) {
+      console.warn("Employee data mismatch detected (empty row):", {
+        selectedEmployeeDataId: selectedEmployeeData.id,
+        currentEmployeeId,
+        isLoadingEmployee,
+        isFetchingEmployee,
+      });
+      // Employee data doesn't match current selection - wait for correct data to load
       prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
@@ -798,7 +846,7 @@ export function EstimateEmptyRow({
     lastPopulatedEmployeeRef.current = currentEmployeeId;
 
     prevEmployeeIdRef.current = currentEmployeeId;
-  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef]);
+  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Ensure we have required fields and create line item if needed
