@@ -52,10 +52,12 @@ export function EstimateTotalsRow({
         const hours = parseFloat(weeklyHour?.hours || "0");
         const rate = parseFloat(item.rate || "0");
         const costRate = parseFloat(item.cost || "0");
+        // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
+        const itemRevenue = item.billable ? hours * rate : 0;
 
         totalHours += hours;
         totalCost += hours * costRate;
-        totalRevenue += hours * rate;
+        totalRevenue += itemRevenue;
       }
     });
 
@@ -83,7 +85,9 @@ export function EstimateTotalsRow({
         });
         const hours = parseFloat(weeklyHour?.hours || "0");
         const rate = parseFloat(item.rate || "0");
-        itemTotalRevenue += hours * rate;
+        // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
+        // Billable expenses are only calculated on billable revenue
+        itemTotalRevenue += item.billable ? hours * rate : 0;
       }
     });
     overallBillableExpenseAmount += (billableExpensePercentage / 100) * itemTotalRevenue;

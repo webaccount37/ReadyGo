@@ -114,7 +114,8 @@ export function OpportunityKPIs({ estimates }: OpportunityKPIsProps) {
       }, 0);
 
       const itemCost = itemHours * parseFloat(item.cost || "0");
-      const itemRevenue = itemHours * parseFloat(item.rate || "0");
+      // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
+      const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
 
       totalCost += itemCost;
       totalRevenue += itemRevenue;

@@ -129,6 +129,10 @@ export function EstimateEmptyRow({
       // Update formData if dates don't match Opportunity dates
       setFormData(prev => {
         if (prev.start_date !== formattedStartDate || prev.end_date !== formattedEndDate) {
+          // Update the ref when start_date changes from opportunity
+          if (prev.start_date !== formattedStartDate) {
+            prevStartDateRef.current = formattedStartDate;
+          }
           return {
             ...prev,
             start_date: formattedStartDate,
@@ -376,9 +380,41 @@ export function EstimateEmptyRow({
   const hoursSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCreatingRef = useRef(false);
   const lastSavedDataRef = useRef<Partial<EstimateLineItemCreate>>({});
+  // Track which week keys are currently being edited to prevent backend data from overwriting user input
+  const activelyEditingWeeksRef = useRef<Set<string>>(new Set());
 
   // Track previous saved data to prevent unnecessary saves
   const prevSavedDataRef = useRef<Partial<EstimateLineItemCreate>>({});
+  
+  // Track previous start_date to detect when it's moved later
+  const prevStartDateRef = useRef<string>(formData.start_date);
+  
+  // Track previous billableExpenses to detect when it changes from true to false
+  const prevBillableExpensesRef = useRef<boolean>(billableExpenses);
+
+  // Clear billable expense percentage when billableExpenses changes from true to false
+  useEffect(() => {
+    if (prevBillableExpensesRef.current && !billableExpenses) {
+      // billableExpenses changed from true to false - clear the value
+      if (formData.billable_expense_percentage && formData.billable_expense_percentage !== "0") {
+        setFormData(prev => ({
+          ...prev,
+          billable_expense_percentage: "0",
+        }));
+        // If we have a line item, update it in the database
+        if (lineItemId && !isSaving && !isCreatingRef.current) {
+          updateLineItem.mutateAsync({
+            estimateId,
+            lineItemId,
+            data: { billable_expense_percentage: "0" },
+          }).catch((err) => {
+            console.error("Failed to clear billable expense percentage:", err);
+          });
+        }
+      }
+    }
+    prevBillableExpensesRef.current = billableExpenses;
+  }, [billableExpenses, formData.billable_expense_percentage, lineItemId, estimateId, updateLineItem, isSaving]);
 
   // SIMPLE: Save immediately when ANY field changes - no debounce, no complex logic
   const saveToDatabase = useCallback(async () => {
@@ -487,6 +523,8 @@ export function EstimateEmptyRow({
         
         console.log("Line item created:", newLineItem.id);
         setLineItemId(newLineItem.id);
+        // Initialize the ref with the current start_date when line item is created
+        prevStartDateRef.current = formData.start_date;
         prevSavedDataRef.current = { ...currentData };
         lastSavedDataRef.current = { ...formData };
         
@@ -863,12 +901,15 @@ export function EstimateEmptyRow({
       return;
     }
 
-    // Update local state immediately
-    setWeeklyHoursValues((prev) => {
-      const next = new Map(prev);
-      next.set(weekKey, hours);
-      return next;
-    });
+    // Update local state immediately (only if not already set by onChange)
+    // The onChange handler already updates the state, so this is mainly for the initial call
+    if (!activelyEditingWeeksRef.current.has(weekKey)) {
+      setWeeklyHoursValues((prev) => {
+        const next = new Map(prev);
+        next.set(weekKey, hours);
+        return next;
+      });
+    }
 
     // Create line item first if it doesn't exist
     let currentLineItemId = lineItemId;
@@ -888,6 +929,8 @@ export function EstimateEmptyRow({
         });
         currentLineItemId = newLineItem.id;
         setLineItemId(newLineItem.id);
+        // Initialize the ref with the current start_date when line item is created
+        prevStartDateRef.current = formData.start_date;
         queryClient.invalidateQueries({
           queryKey: ["estimates", "detail", estimateId, true],
         });
@@ -925,11 +968,20 @@ export function EstimateEmptyRow({
             [weekKey]: hours,
           },
         });
+        
+        // Remove from actively editing set after save completes
+        // This allows sync from backend, but only after user is done typing
+        setTimeout(() => {
+          activelyEditingWeeksRef.current.delete(weekKey);
+        }, 100);
+        
         queryClient.invalidateQueries({
           queryKey: ["estimates", "detail", estimateId, true],
         });
       } catch (err) {
         console.error("Failed to update weekly hours:", err);
+        // Remove from actively editing set on error
+        activelyEditingWeeksRef.current.delete(weekKey);
         // Revert on error
         setWeeklyHoursValues((prev) => {
           const next = new Map(prev);
@@ -951,15 +1003,92 @@ export function EstimateEmptyRow({
     return new Date(year, month - 1, day); // month is 0-indexed in JS
   };
 
+  // Clear hours for weeks before new start date when start_date is moved later
+  useEffect(() => {
+    // Skip if we don't have a line item yet or if we're saving/creating
+    if (!lineItemId || isSaving || isCreatingRef.current) {
+      return;
+    }
+
+    // Skip if start_date hasn't changed
+    if (formData.start_date === prevStartDateRef.current) {
+      return;
+    }
+
+    const oldStartDateStr = prevStartDateRef.current;
+    const newStartDateStr = formData.start_date;
+
+    if (!oldStartDateStr || !newStartDateStr) {
+      prevStartDateRef.current = newStartDateStr;
+      return;
+    }
+
+    const oldStartDate = parseLocalDate(oldStartDateStr);
+    const newStartDate = parseLocalDate(newStartDateStr);
+
+    // Only clear if the new start date is later than the old one
+    if (newStartDate > oldStartDate) {
+      // Find all weeks before the new start date that have hours
+      const weeksToClear: Record<string, string> = {};
+
+      // Check all weeks in the spreadsheet
+      weeks.forEach((week) => {
+        const weekKey = getWeekKey(week);
+        const weekDate = week;
+
+        // If week is before the new start date and has hours, mark it for clearing
+        if (weekDate < newStartDate) {
+          const hours = weeklyHoursValues.get(weekKey);
+          if (hours && parseFloat(hours) > 0) {
+            weeksToClear[weekKey] = "0";
+          }
+        }
+      });
+
+      // Clear hours for weeks before the new start date
+      if (Object.keys(weeksToClear).length > 0) {
+        console.log(`Clearing ${Object.keys(weeksToClear).length} weeks before new start date:`, weeksToClear);
+
+        // Use autoFillHours API to set hours to 0
+        estimatesApi.autoFillHours(estimateId, lineItemId, {
+          pattern: "custom",
+          custom_hours: weeksToClear,
+        }).then(() => {
+          // Update local state to reflect cleared hours
+          setWeeklyHoursValues((prev) => {
+            const next = new Map(prev);
+            Object.keys(weeksToClear).forEach((weekKey) => {
+              next.set(weekKey, "0");
+            });
+            return next;
+          });
+
+          // Invalidate cache to trigger refetch
+          queryClient.invalidateQueries({
+            queryKey: ["estimates", "detail", estimateId, true],
+          });
+        }).catch((err) => {
+          console.error("Failed to clear hours for weeks before new start date:", err);
+        });
+      }
+    }
+
+    // Update the ref to track the new start date
+    prevStartDateRef.current = newStartDateStr;
+  }, [formData.start_date, lineItemId, weeks, weeklyHoursValues, estimateId, isSaving, queryClient]);
+
   // Calculate totals
   const totalHours: number = Array.from(weeklyHoursValues.values()).reduce(
     (sum, hours) => sum + parseFloat(hours || "0"),
     0
   );
   const totalCost: number = totalHours * parseFloat(formData.cost || "0");
-  const totalRevenue: number = totalHours * parseFloat(formData.rate || "0");
+  // If billable is false, Total Revenue should be 0 (non-billable roles don't generate revenue)
+  const billable = formData.billable ?? invoiceCustomer;
+  const totalRevenue: number = billable ? totalHours * parseFloat(formData.rate || "0") : 0;
   const billableExpensePercentage: number = parseFloat(formData.billable_expense_percentage || "0");
-  const billableExpenseAmount: number = (billableExpensePercentage / 100) * totalRevenue;
+  // Billable expenses are only calculated on billable revenue
+  const billableExpenseAmount: number = billable ? (billableExpensePercentage / 100) * totalRevenue : 0;
   const marginAmount: number = totalRevenue - totalCost;
   // Margin % with expenses: (revenue - cost) / (revenue + expenses)
   const marginPercentageWithExpenses: number = (totalRevenue + billableExpenseAmount) > 0 
@@ -1165,6 +1294,8 @@ export function EstimateEmptyRow({
                         data: createData,
                       });
                       setLineItemId(newLineItem.id);
+                      // Initialize the ref with the current start_date when line item is created
+                      prevStartDateRef.current = formData.start_date;
                       lineItemToUse = newLineItem;
                       // Wait for the query to update, then open dialog
                       await queryClient.invalidateQueries({
@@ -1319,8 +1450,24 @@ export function EstimateEmptyRow({
               value={hours}
               onChange={(e) => {
                 if (canEdit) {
-                  handleWeeklyHoursUpdate(weekKey, e.target.value);
+                  const newHours = e.target.value || "0";
+                  // Mark this week as actively being edited
+                  activelyEditingWeeksRef.current.add(weekKey);
+                  // Update local state immediately
+                  setWeeklyHoursValues((prev) => {
+                    const next = new Map(prev);
+                    next.set(weekKey, newHours);
+                    return next;
+                  });
+                  handleWeeklyHoursUpdate(weekKey, newHours);
                 }
+              }}
+              onBlur={() => {
+                // Remove from actively editing set when user leaves the input
+                // Use a small delay to allow the save to complete first
+                setTimeout(() => {
+                  activelyEditingWeeksRef.current.delete(weekKey);
+                }, 500);
               }}
               placeholder="0"
               className="text-xs h-7 w-full text-center"

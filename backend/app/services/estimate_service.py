@@ -1020,7 +1020,8 @@ class EstimateService(BaseService):
                     
                     # Calculate values
                     week_cost = hours * cost_rate
-                    week_revenue = hours * rate
+                    # If billable is False, revenue should be 0 (non-billable roles don't generate revenue)
+                    week_revenue = Decimal("0") if not line_item.billable else hours * rate
                     
                     # Update week totals
                     weekly_totals_dict[week_start]["hours"] += hours

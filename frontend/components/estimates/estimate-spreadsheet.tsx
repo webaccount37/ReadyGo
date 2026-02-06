@@ -120,61 +120,64 @@ export function EstimateSpreadsheet({
     return new Date(year, month - 1, day); // month is 0-indexed in JS
   };
 
-  // Generate weeks based on startDate and endDate from Estimate Details (Release dates)
+  // Generate weeks based on Opportunity startDate and endDate
   // Only show weeks where Start or End Date is ON or BETWEEN Sunday through Saturday
   const weeks = useMemo(() => {
-    let estimateStartDate: Date | null = null;
-    let estimateEndDate: Date | null = null;
+    let opportunityStartDate: Date | null = null;
+    let opportunityEndDate: Date | null = null;
     
     if (startDate) {
-      estimateStartDate = parseLocalDate(startDate);
+      opportunityStartDate = parseLocalDate(startDate);
     }
     if (endDate) {
-      estimateEndDate = parseLocalDate(endDate);
+      opportunityEndDate = parseLocalDate(endDate);
     }
 
     // If no dates provided, show default range
-    if (!estimateStartDate && !estimateEndDate) {
+    if (!opportunityStartDate && !opportunityEndDate) {
       const today = new Date();
-      estimateStartDate = new Date(today);
-      estimateStartDate.setMonth(estimateStartDate.getMonth() - 1);
-      estimateEndDate = new Date(estimateStartDate);
-      estimateEndDate.setMonth(estimateEndDate.getMonth() + 12);
-    } else if (estimateStartDate && !estimateEndDate) {
+      opportunityStartDate = new Date(today);
+      opportunityStartDate.setMonth(opportunityStartDate.getMonth() - 1);
+      opportunityEndDate = new Date(opportunityStartDate);
+      opportunityEndDate.setMonth(opportunityEndDate.getMonth() + 12);
+    } else if (opportunityStartDate && !opportunityEndDate) {
       // Only start date - show 1 year forward
-      estimateEndDate = new Date(estimateStartDate);
-      estimateEndDate.setFullYear(estimateEndDate.getFullYear() + 1);
-    } else if (!estimateStartDate && estimateEndDate) {
+      opportunityEndDate = new Date(opportunityStartDate);
+      opportunityEndDate.setFullYear(opportunityEndDate.getFullYear() + 1);
+    } else if (!opportunityStartDate && opportunityEndDate) {
       // Only end date - show 1 year backward
-      estimateStartDate = new Date(estimateEndDate);
-      estimateStartDate.setFullYear(estimateStartDate.getFullYear() - 1);
+      opportunityStartDate = new Date(opportunityEndDate);
+      opportunityStartDate.setFullYear(opportunityStartDate.getFullYear() - 1);
     }
 
-    // Generate all potential weeks in a wide range
+    // Generate weeks that cover the full Opportunity date range
     const weekStarts: Date[] = [];
-    const rangeStart = estimateStartDate ? new Date(estimateStartDate) : new Date();
-    const rangeEnd = estimateEndDate ? new Date(estimateEndDate) : new Date();
     
-    // Expand range to ensure we capture all relevant weeks
-    rangeStart.setDate(rangeStart.getDate() - 7); // Go back one week
-    rangeEnd.setDate(rangeEnd.getDate() + 7); // Go forward one week
+    // Find the Sunday of the week containing the start date
+    const startWeekSunday = new Date(opportunityStartDate!);
+    const startDayOfWeek = startWeekSunday.getDay();
+    const daysToSubtract = startDayOfWeek; // 0 = Sunday, so subtract 0; 1 = Monday, subtract 1, etc.
+    startWeekSunday.setDate(startWeekSunday.getDate() - daysToSubtract);
     
-    const current = new Date(rangeStart);
-    // Get Sunday of the week (0 = Sunday)
-    const dayOfWeek = current.getDay();
-    const diff = current.getDate() - dayOfWeek; // Subtract days to get to Sunday
-    current.setDate(diff);
-
-    // Generate weeks and filter to only those that overlap with the date range
-    while (current <= rangeEnd) {
+    // Find the Sunday of the week containing the end date
+    const endWeekSunday = new Date(opportunityEndDate!);
+    const endDayOfWeek = endWeekSunday.getDay();
+    const daysToSubtractEnd = endDayOfWeek; // 0 = Sunday, so subtract 0; 1 = Monday, subtract 1, etc.
+    endWeekSunday.setDate(endWeekSunday.getDate() - daysToSubtractEnd);
+    
+    // Generate all weeks from start week Sunday to end week Sunday (inclusive)
+    const current = new Date(startWeekSunday);
+    const endWeek = new Date(endWeekSunday);
+    
+    // Generate weeks until we've included the week containing the end date
+    while (current <= endWeek) {
       const weekStart = new Date(current);
       const weekEnd = new Date(weekStart);
       weekEnd.setDate(weekEnd.getDate() + 6); // End of week (Saturday)
       
-      // Include week if it overlaps with the estimate date range
-      // A week overlaps if: weekStart <= estimateEndDate AND weekEnd >= estimateStartDate
-      if (!estimateStartDate || !estimateEndDate || 
-          (weekStart <= estimateEndDate && weekEnd >= estimateStartDate)) {
+      // Include week if it overlaps with the Opportunity date range
+      // A week overlaps if: weekStart <= opportunityEndDate AND weekEnd >= opportunityStartDate
+      if (weekStart <= opportunityEndDate! && weekEnd >= opportunityStartDate!) {
         weekStarts.push(new Date(weekStart));
       }
       
@@ -305,12 +308,14 @@ export function EstimateSpreadsheet({
       }, 0);
 
       const itemCost = itemHours * parseFloat(item.cost || "0");
-      const itemRevenue = itemHours * parseFloat(item.rate || "0");
+      // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
+      const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
       const billableExpensePercentage = parseFloat(item.billable_expense_percentage || "0");
 
       totalCost += itemCost;
       totalRevenue += itemRevenue;
-      billableExpenseAmount += (billableExpensePercentage / 100) * itemRevenue;
+      // Billable expenses are only calculated on billable revenue
+      billableExpenseAmount += item.billable ? (billableExpensePercentage / 100) * itemRevenue : 0;
     });
 
     const marginAmount = totalRevenue - totalCost;
@@ -329,6 +334,25 @@ export function EstimateSpreadsheet({
       marginPercentageWithExpenses,
     };
   }, [existingLineItems, weeks]);
+
+  // Format currency with commas
+  const currency = opportunityCurrency || estimate.currency || "USD";
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(amount);
+  };
+
+  // Format percentage with commas (for whole numbers)
+  const formatPercentage = (value: number) => {
+    return new Intl.NumberFormat("en-US", {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }).format(value);
+  };
 
   return (
     <Card className="w-full max-w-full overflow-hidden">
@@ -386,52 +410,28 @@ export function EstimateSpreadsheet({
         <CardContent className="px-6 pt-4 pb-4 border-b">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             {/* Total Cost Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600">Total Cost</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {opportunityCurrency || estimate.currency || "USD"} {summaryTotals.totalCost.toFixed(2)}
-                </div>
-              </CardContent>
-            </Card>
+            <div className="bg-white rounded-lg p-4 border border-blue-200">
+              <p className="text-sm text-blue-600 font-medium">Total Cost</p>
+              <p className="text-2xl font-bold text-blue-900 mt-1">{formatCurrency(summaryTotals.totalCost)}</p>
+            </div>
 
             {/* Total Revenue Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600">Total Revenue</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {opportunityCurrency || estimate.currency || "USD"} {summaryTotals.totalRevenue.toFixed(2)}
-                </div>
-              </CardContent>
-            </Card>
+            <div className="bg-white rounded-lg p-4 border border-green-200">
+              <p className="text-sm text-green-600 font-medium">Total Revenue</p>
+              <p className="text-2xl font-bold text-green-900 mt-1">{formatCurrency(summaryTotals.totalRevenue)}</p>
+            </div>
 
             {/* Margin Amount Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600">Margin Amount</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {opportunityCurrency || estimate.currency || "USD"} {summaryTotals.marginAmount.toFixed(2)}
-                </div>
-              </CardContent>
-            </Card>
+            <div className="bg-white rounded-lg p-4 border border-purple-200">
+              <p className="text-sm text-purple-600 font-medium">Margin Amount</p>
+              <p className="text-2xl font-bold text-purple-900 mt-1">{formatCurrency(summaryTotals.marginAmount)}</p>
+            </div>
 
             {/* Margin % Without Expenses Card */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-gray-600">Margin % (Without Expenses)</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {summaryTotals.marginPercentageWithoutExpenses.toFixed(1)}%
-                </div>
-              </CardContent>
-            </Card>
+            <div className="bg-white rounded-lg p-4 border border-orange-200">
+              <p className="text-sm text-orange-600 font-medium">Margin % (Without Expenses)</p>
+              <p className="text-2xl font-bold text-orange-900 mt-1">{formatPercentage(summaryTotals.marginPercentageWithoutExpenses)}%</p>
+            </div>
           </div>
         </CardContent>
       )}

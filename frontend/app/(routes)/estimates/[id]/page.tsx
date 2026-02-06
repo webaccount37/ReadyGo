@@ -406,47 +406,19 @@ export default function EstimateDetailPage() {
         </div>
       </div>
 
-      {estimate.is_locked && (
-        <Card className="mb-6 border-yellow-200 bg-yellow-50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-yellow-800">
-              <Lock className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">This estimate is locked by an active quote.</p>
-                <p className="text-sm">
-                  The estimate cannot be edited until the quote is deactivated.
-                  {estimate.locked_by_quote_id && (
-                    <> <Link href={`/quotes/${estimate.locked_by_quote_id}`} className="underline">View quote</Link> to unlock.</>
-                  )}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {isOpportunityLocked && (
-        <Card className="mb-6 border-yellow-200 bg-yellow-50">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-2 text-yellow-800">
-              <Lock className="w-5 h-5" />
-              <div>
-                <p className="font-semibold">Opportunity is locked by an active quote.</p>
-                <p className="text-sm">
-                  The Opportunity header details (dates, currency, invoice settings) cannot be changed until the quote is deactivated.
-                  {opportunity?.locked_by_quote_id && (
-                    <> <Link href={`/quotes/${opportunity.locked_by_quote_id}`} className="underline">View quote</Link> to unlock.</>
-                  )}
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Card className="mb-6">
+      <Card className={`mb-6 ${isOpportunityLocked ? 'border-yellow-200 bg-yellow-50' : ''}`}>
         <CardHeader>
-          <CardTitle>Estimate Details</CardTitle>
+          <CardTitle className="flex items-center gap-2">
+            {isOpportunityLocked && <Lock className="w-5 h-5 text-yellow-800" />}
+            Estimate Details
+            {isOpportunityLocked && (
+              <span className="text-sm font-normal text-yellow-800 ml-2">
+                (Locked by active quote - {opportunity?.locked_by_quote_id && (
+                  <Link href={`/quotes/${opportunity.locked_by_quote_id}`} className="underline">View quote</Link>
+                )} to unlock)
+              </span>
+            )}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">

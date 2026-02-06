@@ -137,11 +137,14 @@ export default function QuoteDetailPage() {
       }, 0);
       
       const itemCost = itemHours * parseFloat(item.cost || "0");
-      const itemRevenue = itemHours * parseFloat(item.rate || "0");
+      // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
+      const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
       
       totalCost += itemCost;
       totalRevenue += itemRevenue;
-      totalHours += itemHours;
+      // For blended rate calculations, only include hours from billable rows
+      // Non-billable hours don't generate revenue, so they shouldn't be multiplied by blended rate
+      totalHours += item.billable ? itemHours : 0;
     });
     
     const marginAmount = totalRevenue - totalCost;

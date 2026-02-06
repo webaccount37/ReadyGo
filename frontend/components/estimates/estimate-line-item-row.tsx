@@ -81,6 +81,12 @@ export function EstimateLineItemRow({
   // Track if we're currently updating role_id (to prevent sync effect from overwriting)
   const isUpdatingRoleIdRef = useRef(false);
   
+  // Track previous start_date to detect when it's moved later
+  const prevStartDateRef = useRef<string>(lineItem.start_date.split("T")[0]);
+  
+  // Track previous billableExpenses to detect when it changes from true to false
+  const prevBillableExpensesRef = useRef<boolean>(billableExpenses);
+  
   // Update local state when lineItem prop changes (from refetch)
   // Only update if values actually changed to prevent unnecessary re-renders and feedback loops
   useEffect(() => {
@@ -109,7 +115,12 @@ export function EstimateLineItemRow({
     }
     setStartDateValue((prev) => {
       const newValue = startDateStr;
-      return prev !== newValue ? newValue : prev;
+      if (prev !== newValue) {
+        // Update the ref when start_date changes from prop
+        prevStartDateRef.current = newValue;
+        return newValue;
+      }
+      return prev;
     });
     setEndDateValue((prev) => {
       const newValue = endDateStr;
@@ -149,6 +160,8 @@ export function EstimateLineItemRow({
     new Map()
   );
   const hoursSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track which week keys are currently being edited to prevent backend data from overwriting user input
+  const activelyEditingWeeksRef = useRef<Set<string>>(new Set());
 
   // Only show roles that have RoleRate associations with Opportunity Invoice Center
   const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
@@ -196,7 +209,8 @@ export function EstimateLineItemRow({
     
     console.log("EstimateLineItemRow: Building hoursMap from weekly_hours", {
       weeklyHoursCount: lineItem.weekly_hours?.length ?? 0,
-      weeklyHours: lineItem.weekly_hours
+      weeklyHours: lineItem.weekly_hours,
+      activelyEditingWeeks: Array.from(activelyEditingWeeksRef.current)
     });
     
     const hoursMap = new Map<string, string>();
@@ -270,7 +284,24 @@ export function EstimateLineItemRow({
       entries: Array.from(hoursMap.entries())
     });
     
-    setWeeklyHoursValues(hoursMap);
+    // Only update values for weeks that are NOT currently being edited
+    // This prevents backend data from overwriting user input while they're typing
+    setWeeklyHoursValues((prev) => {
+      const next = new Map(prev);
+      hoursMap.forEach((value, key) => {
+        // Only update if this week is not actively being edited
+        if (!activelyEditingWeeksRef.current.has(key)) {
+          next.set(key, value);
+        }
+      });
+      // Also add any weeks from backend that don't exist in local state (and aren't being edited)
+      hoursMap.forEach((value, key) => {
+        if (!next.has(key) && !activelyEditingWeeksRef.current.has(key)) {
+          next.set(key, value);
+        }
+      });
+      return next;
+    });
   }, [
     lineItem.id,
     // Use JSON.stringify to create a stable dependency that detects any changes
@@ -322,9 +353,11 @@ export function EstimateLineItemRow({
     return sum;
   }, 0);
   const totalCost: number = totalHours * parseFloat(costValue || "0");
-  const totalRevenue: number = totalHours * parseFloat(rateValue || "0");
+  // If billable is false, Total Revenue should be 0 (non-billable roles don't generate revenue)
+  const totalRevenue: number = billableValue ? totalHours * parseFloat(rateValue || "0") : 0;
   const billableExpensePercentage: number = parseFloat(billableExpensePercentageValue || "0");
-  const billableExpenseAmount: number = (billableExpensePercentage / 100) * totalRevenue;
+  // Billable expenses are only calculated on billable revenue
+  const billableExpenseAmount: number = billableValue ? (billableExpensePercentage / 100) * totalRevenue : 0;
   const marginAmount: number = totalRevenue - totalCost;
   // Margin % with expenses: (revenue - cost) / (revenue + expenses)
   const marginPercentageWithExpenses: number = (totalRevenue + billableExpenseAmount) > 0 
@@ -385,6 +418,68 @@ export function EstimateLineItemRow({
           updateData.rate = value;
         } else if (field === "start_date") {
           updateData.start_date = value;
+          
+          // If start_date is moved later, clear hours for weeks before the new start date
+          if (value && prevStartDateRef.current) {
+            const parseLocalDate = (dateStr: string): Date => {
+              const datePart = dateStr.split("T")[0];
+              const [year, month, day] = datePart.split("-").map(Number);
+              return new Date(year, month - 1, day);
+            };
+            
+            const oldStartDate = parseLocalDate(prevStartDateRef.current);
+            const newStartDate = parseLocalDate(value);
+            
+            // Only clear if the new start date is later than the old one
+            if (newStartDate > oldStartDate) {
+              // Find all weeks before the new start date that have hours
+              const weeksToClear: Record<string, string> = {};
+              
+              // Check all weeks in the spreadsheet
+              weeks.forEach((week) => {
+                const weekKey = getWeekKey(week);
+                const weekDate = week;
+                
+                // If week is before the new start date and has hours, mark it for clearing
+                if (weekDate < newStartDate) {
+                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
+                  if (hours && parseFloat(hours) > 0) {
+                    weeksToClear[weekKey] = "0";
+                  }
+                }
+              });
+              
+              // Clear hours for weeks before the new start date
+              if (Object.keys(weeksToClear).length > 0) {
+                console.log(`Clearing ${Object.keys(weeksToClear).length} weeks before new start date:`, weeksToClear);
+                
+                // Use autoFillHours API to set hours to 0
+                estimatesApi.autoFillHours(estimateId, lineItem.id, {
+                  pattern: "custom",
+                  custom_hours: weeksToClear,
+                }).then(() => {
+                  // Update local state to reflect cleared hours
+                  setWeeklyHoursValues((prev) => {
+                    const next = new Map(prev);
+                    Object.keys(weeksToClear).forEach((weekKey) => {
+                      next.set(weekKey, "0");
+                    });
+                    return next;
+                  });
+                  
+                  // Invalidate cache to trigger refetch
+                  queryClient.invalidateQueries({
+                    queryKey: ["estimates", "detail", estimateId, true],
+                  });
+                }).catch((err) => {
+                  console.error("Failed to clear hours for weeks before new start date:", err);
+                });
+              }
+            }
+            
+            // Update the ref to track the new start date
+            prevStartDateRef.current = value;
+          }
         } else if (field === "end_date") {
           updateData.end_date = value;
         } else if (field === "delivery_center_id") {
@@ -450,6 +545,21 @@ export function EstimateLineItemRow({
       }
     };
   }, []);
+
+  // Clear billable expense percentage when billableExpenses changes from true to false
+  useEffect(() => {
+    if (prevBillableExpensesRef.current && !billableExpenses) {
+      // billableExpenses changed from true to false - clear the value
+      if (billableExpensePercentageValue !== "0" && billableExpensePercentageValue !== "") {
+        setBillableExpensePercentageValue("0");
+        // Only update if not read-only and we have a valid line item
+        if (!readOnly) {
+          handleFieldUpdate("billable_expense_percentage", "0", lineItem.billable_expense_percentage || "0");
+        }
+      }
+    }
+    prevBillableExpensesRef.current = billableExpenses;
+  }, [billableExpenses, billableExpensePercentageValue, lineItem.billable_expense_percentage, handleFieldUpdate, readOnly]);
 
   // Track previous role and employee to detect changes
   const prevRoleRef = useRef<string>(roleValue);
@@ -788,6 +898,12 @@ export function EstimateLineItemRow({
         console.log("Save response:", response);
         console.log("Response weekly_hours:", response?.[0]?.weekly_hours);
         
+        // Remove from actively editing set after save completes
+        // This allows the useEffect to sync the value from backend, but only after user is done typing
+        setTimeout(() => {
+          activelyEditingWeeksRef.current.delete(weekKey);
+        }, 100);
+        
         // Invalidate cache to trigger refetch from database
         await queryClient.invalidateQueries({
           queryKey: ["estimates", "detail", estimateId, true],
@@ -804,6 +920,8 @@ export function EstimateLineItemRow({
         console.log("Fresh line item weekly_hours:", freshLineItem?.weekly_hours);
       } catch (err) {
         console.error("Failed to update weekly hours:", err);
+        // Remove from actively editing set on error
+        activelyEditingWeeksRef.current.delete(weekKey);
         // Revert on error - get the original value from the prop
         const originalHours = weeklyHoursMap.get(weekKey) || "0";
         setWeeklyHoursValues((prev: Map<string, string>) => {
@@ -1051,10 +1169,13 @@ export function EstimateLineItemRow({
               max="100"
               value={billableExpensePercentageValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                setBillableExpensePercentageValue(e.target.value);
-                handleFieldUpdate("billable_expense_percentage", e.target.value, lineItem.billable_expense_percentage || "0");
+                if (billableExpenses) {
+                  setBillableExpensePercentageValue(e.target.value);
+                  handleFieldUpdate("billable_expense_percentage", e.target.value, lineItem.billable_expense_percentage || "0");
+                }
               }}
               placeholder="0"
+              disabled={!billableExpenses || readOnly}
               className="text-xs h-7 flex-1"
             />
             <span className="text-[10px] text-gray-500">%</span>
@@ -1099,6 +1220,10 @@ export function EstimateLineItemRow({
                 onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                   const newHours = e.target.value || "0";
                   console.log(`Input onChange: weekKey=${weekKey}, oldValue=${hours}, newValue=${newHours}`);
+                  
+                  // Mark this week as actively being edited
+                  activelyEditingWeeksRef.current.add(weekKey);
+                  
                   setWeeklyHoursValues((prev: Map<string, string>) => {
                     const next = new Map(prev);
                     next.set(weekKey, newHours);
@@ -1106,6 +1231,13 @@ export function EstimateLineItemRow({
                     return next;
                   });
                   handleWeeklyHoursUpdate(weekKey, newHours);
+                }}
+                onBlur={() => {
+                  // Remove from actively editing set when user leaves the input
+                  // Use a small delay to allow the save to complete first
+                  setTimeout(() => {
+                    activelyEditingWeeksRef.current.delete(weekKey);
+                  }, 500);
                 }}
                 placeholder="0"
                 disabled={!isInRange || readOnly}
