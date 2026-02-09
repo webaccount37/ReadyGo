@@ -144,3 +144,19 @@ export function useDeactivateQuote(
   });
 }
 
+/**
+ * Get quotes available for approval by the current user.
+ */
+export function useQuotesForApproval(
+  params?: {
+    skip?: number;
+    limit?: number;
+  },
+  options?: Omit<UseQueryOptions<QuoteListResponse>, "queryKey" | "queryFn">
+) {
+  return useQuery<QuoteListResponse>({
+    queryKey: [...QUERY_KEYS.lists(), "approvals", params],
+    queryFn: () => quotesApi.getQuotesForApproval(params),
+    ...options,
+  });
+}

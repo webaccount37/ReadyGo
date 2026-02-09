@@ -46,6 +46,20 @@ class QuoteController(BaseController):
         )
         return QuoteListResponse(items=quotes, total=total)
     
+    async def list_quotes_for_approval(
+        self,
+        employee_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> QuoteListResponse:
+        """List quotes available for approval by the given employee."""
+        quotes, total = await self.quote_service.list_quotes_for_approval(
+            employee_id=employee_id,
+            skip=skip,
+            limit=limit,
+        )
+        return QuoteListResponse(items=quotes, total=total)
+    
     async def update_quote_status(
         self,
         quote_id: UUID,

@@ -25,6 +25,7 @@ import {
   UserCog,
   LogOut,
   User,
+  CheckCircle2,
 } from "lucide-react";
 
 interface NavItem {
@@ -56,6 +57,8 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Estimates", href: "/estimates", icon: Calculator },
       { title: "Quotes", href: "/quotes", icon: FileCheck },
+      { title: "Quote Approvals", href: "/quote-approvals", icon: CheckCircle2 },
+      { title: "Engagements", href: "/engagements", icon: Briefcase },
     ],
   },
   {

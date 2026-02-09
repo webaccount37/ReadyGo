@@ -23,6 +23,10 @@ from app.models import (
     DeliveryCenter,
     DeliveryCenterApprover,
     CurrencyRate,
+    Engagement,
+    EngagementPhase,
+    EngagementLineItem,
+    EngagementWeeklyHours,
 )
 
 # this is the Alembic Config object, which provides

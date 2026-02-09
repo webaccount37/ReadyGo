@@ -8,7 +8,7 @@ from uuid import UUID
 from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ from app.db.repositories.estimate_line_item_repository import EstimateLineItemRe
 from app.db.repositories.estimate_phase_repository import EstimatePhaseRepository
 from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
+from app.db.repositories.delivery_center_approver_repository import DeliveryCenterApproverRepository
 from app.models.quote import (
     Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus,
     QuotePaymentTrigger, QuoteVariableCompensation, QuoteType, PaymentTriggerType,
@@ -54,6 +55,7 @@ class QuoteService(BaseService):
         self.estimate_phase_repo = EstimatePhaseRepository(session)
         self.estimate_weekly_hours_repo = EstimateWeeklyHoursRepository(session)
         self.opportunity_repo = OpportunityRepository(session)
+        self.approver_repo = DeliveryCenterApproverRepository(session)
     
     async def create_quote(self, quote_data: QuoteCreate, created_by: Optional[UUID] = None) -> QuoteResponse:
         """Create quote from estimate snapshot."""
@@ -140,7 +142,30 @@ class QuoteService(BaseService):
         quote = await self.quote_repo.create(**quote_dict)
         
         # Set all previous versions to INVALID (excluding the newly created quote)
+        # Get list of quotes that will be invalidated before invalidating them
+        invalidate_query = select(Quote.id).where(
+            Quote.opportunity_id == quote_data.opportunity_id,
+            Quote.status != QuoteStatus.INVALID,
+            Quote.status != QuoteStatus.REJECTED,
+            Quote.id != quote.id
+        )
+        invalidate_result = await self.session.execute(invalidate_query)
+        quotes_to_invalidate = [row[0] for row in invalidate_result.all()]
+        
+        # Invalidate previous versions
         await self.quote_repo.invalidate_previous_versions(quote_data.opportunity_id, exclude_quote_id=quote.id)
+        
+        # Delete engagements for invalidated quotes
+        if quotes_to_invalidate:
+            from app.services.engagement_service import EngagementService
+            engagement_service = EngagementService(self.session)
+            for quote_id_to_invalidate in quotes_to_invalidate:
+                try:
+                    deleted_count = await engagement_service.delete_engagements_by_quote(quote_id_to_invalidate)
+                    if deleted_count > 0:
+                        logger.info(f"Deleted {deleted_count} engagement(s) for invalidated quote {quote_id_to_invalidate}")
+                except Exception as e:
+                    logger.error(f"Failed to delete engagement(s) for invalidated quote {quote_id_to_invalidate}: {e}")
         
         # Create payment triggers for Fixed Bid quotes
         if quote_data.quote_type == QuoteType.FIXED_BID and quote_data.payment_triggers:
@@ -238,6 +263,65 @@ class QuoteService(BaseService):
         quote_responses = [await self._to_response(quote) for quote in quotes]
         return quote_responses, total
     
+    async def list_quotes_for_approval(
+        self,
+        employee_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Tuple[List[QuoteResponse], int]:
+        """List Draft quotes that the employee can approve based on their delivery center approver status."""
+        # Get all delivery centers where this employee is an approver
+        approver_associations = await self.approver_repo.get_by_employee(employee_id)
+        delivery_center_ids = [assoc.delivery_center_id for assoc in approver_associations]
+        
+        if not delivery_center_ids:
+            # User is not an approver for any delivery center
+            return [], 0
+        
+        # Get all Draft quotes where the opportunity's delivery_center_id matches
+        # one of the delivery centers the user is an approver for
+        from sqlalchemy import select, and_
+        from sqlalchemy.orm import selectinload
+        
+        query = (
+            select(Quote)
+            .join(Opportunity, Quote.opportunity_id == Opportunity.id)
+            .where(
+                and_(
+                    Quote.status == QuoteStatus.DRAFT,
+                    Opportunity.delivery_center_id.in_(delivery_center_ids)
+                )
+            )
+            .options(
+                selectinload(Quote.opportunity).selectinload(Opportunity.account),
+                selectinload(Quote.estimate),
+                selectinload(Quote.created_by_employee),
+            )
+            .order_by(Quote.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        
+        result = await self.session.execute(query)
+        quotes = list(result.scalars().all())
+        
+        # Count total matching quotes
+        count_query = (
+            select(func.count(Quote.id))
+            .join(Opportunity, Quote.opportunity_id == Opportunity.id)
+            .where(
+                and_(
+                    Quote.status == QuoteStatus.DRAFT,
+                    Opportunity.delivery_center_id.in_(delivery_center_ids)
+                )
+            )
+        )
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one()
+        
+        quote_responses = [await self._to_response(quote) for quote in quotes]
+        return quote_responses, total
+    
     async def update_quote_status(
         self,
         quote_id: UUID,
@@ -252,6 +336,38 @@ class QuoteService(BaseService):
             "status": status_data.status,
             "sent_date": status_data.sent_date,
         }
+        
+        # If status is REJECTED or INVALID, delete associated Engagement and unlock opportunity
+        if status_data.status in [QuoteStatus.REJECTED, QuoteStatus.INVALID]:
+            update_dict["is_active"] = False
+            # Delete associated engagement(s)
+            from app.services.engagement_service import EngagementService
+            engagement_service = EngagementService(self.session)
+            try:
+                deleted_count = await engagement_service.delete_engagements_by_quote(quote_id)
+                if deleted_count > 0:
+                    logger.info(f"Deleted {deleted_count} engagement(s) for {status_data.status.value} quote {quote_id}")
+            except Exception as e:
+                logger.error(f"Failed to delete engagement(s) for quote {quote_id}: {e}")
+                # Don't fail the quote status update if engagement deletion fails
+            # Unlock opportunity and estimates
+            await self._unlock_opportunity(quote.opportunity_id)
+            await self._unlock_estimates(quote.opportunity_id)
+        
+        # If status is ACCEPTED, create Engagement automatically
+        if status_data.status == QuoteStatus.ACCEPTED:
+            from app.services.engagement_service import EngagementService
+            engagement_service = EngagementService(self.session)
+            try:
+                await engagement_service.create_engagement_from_quote(
+                    quote_id=quote_id,
+                    created_by=None,  # Could be passed from context if available
+                )
+                logger.info(f"Created engagement for approved quote {quote_id}")
+            except Exception as e:
+                logger.error(f"Failed to create engagement for quote {quote_id}: {e}")
+                # Don't fail the quote status update if engagement creation fails
+                # The engagement can be created manually later if needed
         
         updated = await self.quote_repo.update(quote_id, **update_dict)
         await self.session.commit()
@@ -270,11 +386,22 @@ class QuoteService(BaseService):
         # Set quote as inactive
         update_dict = {"is_active": False}
         
-        # If quote is not already ACCEPTED or REJECTED, set status to INVALID
-        if quote.status not in [QuoteStatus.ACCEPTED, QuoteStatus.REJECTED]:
+        # Only preserve REJECTED status, all others (including ACCEPTED) should become INVALID
+        if quote.status != QuoteStatus.REJECTED:
             update_dict["status"] = QuoteStatus.INVALID
         
         updated = await self.quote_repo.update(quote_id, **update_dict)
+        
+        # Delete associated engagement(s) when quote is unlocked/deactivated
+        from app.services.engagement_service import EngagementService
+        engagement_service = EngagementService(self.session)
+        try:
+            deleted_count = await engagement_service.delete_engagements_by_quote(quote_id)
+            if deleted_count > 0:
+                logger.info(f"Deleted {deleted_count} engagement(s) for deactivated/unlocked quote {quote_id}")
+        except Exception as e:
+            logger.error(f"Failed to delete engagement(s) for quote {quote_id}: {e}")
+            # Don't fail the quote deactivation if engagement deletion fails
         
         # Unlock opportunity and estimates
         await self._unlock_opportunity(quote.opportunity_id)

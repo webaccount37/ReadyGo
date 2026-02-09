@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 
 from app.db.session import get_db
+from app.api.v1.middleware import require_authentication
+from app.models.employee import Employee
 from app.controllers.quote_controller import QuoteController
 from app.schemas.quote import (
     QuoteCreate,
@@ -50,6 +52,22 @@ async def list_quotes(
         skip=skip,
         limit=limit,
         opportunity_id=opportunity_id,
+    )
+
+
+@router.get("/approvals", response_model=QuoteListResponse)
+async def list_quotes_for_approval(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    current_employee: Employee = Depends(require_authentication),
+    db: AsyncSession = Depends(get_db),
+) -> QuoteListResponse:
+    """List Draft quotes available for approval by the current user based on their delivery center approver status."""
+    controller = QuoteController(db)
+    return await controller.list_quotes_for_approval(
+        employee_id=current_employee.id,
+        skip=skip,
+        limit=limit,
     )
 
 

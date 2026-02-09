@@ -29,5 +29,6 @@ class RoleRate(Base):
     role = relationship("Role", back_populates="role_rates")
     delivery_center = relationship("DeliveryCenter")
     estimate_line_items = relationship("EstimateLineItem", back_populates="role_rate")
+    engagement_line_items = relationship("EngagementLineItem", back_populates="role_rate")
 
 

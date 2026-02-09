@@ -1,51 +1,46 @@
 "use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import type { EstimateLineItem, EstimateDetailResponse, EstimateLineItemUpdate } from "@/types/estimate";
-import { AutoFillDialog } from "./auto-fill-dialog";
-import { useUpdateLineItem } from "@/hooks/useEstimates";
-import { useDeleteLineItem } from "@/hooks/useEstimates";
+import type { EngagementLineItem, EngagementLineItemUpdate, EngagementDetailResponse } from "@/types/engagement";
+import { useUpdateLineItem, useDeleteLineItem } from "@/hooks/useEngagements";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { useRoles, useRole } from "@/hooks/useRoles";
+import { useRole } from "@/hooks/useRoles";
 import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { convertCurrency } from "@/lib/utils/currency";
-import { estimatesApi } from "@/lib/api/estimates";
+import { engagementsApi } from "@/lib/api/engagements";
 import { useQueryClient } from "@tanstack/react-query";
+import { EngagementAutoFillDialog } from "./auto-fill-dialog";
 
-interface EstimateLineItemRowProps {
-  lineItem: EstimateLineItem;
+interface EngagementLineItemRowProps {
+  lineItem: EngagementLineItem;
   weeks: Date[];
   currency: string;
-  estimateId: string;
+  engagementId: string;
   opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
   invoiceCustomer?: boolean;
   billableExpenses?: boolean;
-  onContextMenu?: (e: React.MouseEvent) => void;
-  readOnly?: boolean;
 }
 
-export function EstimateLineItemRow({
+export function EngagementLineItemRow({
   lineItem,
   weeks,
   currency,
-  estimateId,
+  engagementId,
   opportunityDeliveryCenterId,
   invoiceCustomer = true,
   billableExpenses = true,
-  onContextMenu,
-  readOnly = false,
-}: EstimateLineItemRowProps) {
-  const [isAutoFillOpen, setIsAutoFillOpen] = useState(false);
+}: EngagementLineItemRowProps) {
   const queryClient = useQueryClient();
   const updateLineItem = useUpdateLineItem();
   const deleteLineItemMutation = useDeleteLineItem();
+  const [isAutoFillOpen, setIsAutoFillOpen] = useState(false);
   
   // Debug: Log when lineItem prop changes
   useEffect(() => {
-    console.log("EstimateLineItemRow: lineItem prop changed", {
+    console.log("EngagementLineItemRow: lineItem prop changed", {
       id: lineItem.id,
       weeklyHoursCount: lineItem.weekly_hours?.length ?? 0
     });
@@ -60,8 +55,8 @@ export function EstimateLineItemRow({
   const [endDateValue, setEndDateValue] = useState(
     lineItem.end_date.split("T")[0]
   );
-  const [deliveryCenterValue, setDeliveryCenterValue] = useState(
-    lineItem.delivery_center_id
+  const [payableCenterValue, setPayableCenterValue] = useState(
+    lineItem.payable_center_id
   );
   const [roleValue, setRoleValue] = useState(lineItem.role_id);
   const [employeeValue, setEmployeeValue] = useState(lineItem.employee_id || "");
@@ -81,20 +76,16 @@ export function EstimateLineItemRow({
   // Track if we're currently updating role_id (to prevent sync effect from overwriting)
   const isUpdatingRoleIdRef = useRef(false);
   
-  // Track previous start_date to detect when it's moved later
+  // Track previous start_date and end_date to detect when they change
   const prevStartDateRef = useRef<string>(lineItem.start_date.split("T")[0]);
+  const prevEndDateRef = useRef<string>(lineItem.end_date.split("T")[0]);
   
   // Track previous billableExpenses to detect when it changes from true to false
   const prevBillableExpensesRef = useRef<boolean>(billableExpenses);
-  
+
   // Update local state when lineItem prop changes (from refetch)
   // Only update if values actually changed to prevent unnecessary re-renders and feedback loops
   useEffect(() => {
-    // Skip updates if we're currently in the middle of an update to prevent feedback loops
-    if (isUpdatingRef.current) {
-      return;
-    }
-    
     const startDateStr = lineItem.start_date.split("T")[0];
     const endDateStr = lineItem.end_date.split("T")[0];
     
@@ -102,6 +93,9 @@ export function EstimateLineItemRow({
     // CRITICAL: Don't sync rate/cost from backend if we're updating them from role change
     // This prevents backend data from overwriting the calculated role-based rates
     if (!isUpdatingRatesFromRoleRef.current) {
+      // CRITICAL: Allow cost/rate sync even when isUpdatingRef.current is true
+      // This ensures backend-calculated costs (e.g., from employee_id changes) sync through
+      // The check `prev !== newValue` prevents overwriting manual edits
       setCostValue((prev) => {
         const newValue = lineItem.cost || "0";
         return prev !== newValue ? newValue : prev;
@@ -112,6 +106,11 @@ export function EstimateLineItemRow({
       });
     } else {
       console.log("Skipping rate/cost sync - updating from role change");
+    }
+    
+    // Skip other updates if we're currently in the middle of an update to prevent feedback loops
+    if (isUpdatingRef.current) {
+      return;
     }
     setStartDateValue((prev) => {
       const newValue = startDateStr;
@@ -124,10 +123,15 @@ export function EstimateLineItemRow({
     });
     setEndDateValue((prev) => {
       const newValue = endDateStr;
-      return prev !== newValue ? newValue : prev;
+      if (prev !== newValue) {
+        // Update the ref when end_date changes from prop
+        prevEndDateRef.current = newValue;
+        return newValue;
+      }
+      return prev;
     });
-    setDeliveryCenterValue((prev) => {
-      const newValue = lineItem.delivery_center_id;
+    setPayableCenterValue((prev) => {
+      const newValue = lineItem.payable_center_id;
       return prev !== newValue ? newValue : prev;
     });
     
@@ -153,7 +157,7 @@ export function EstimateLineItemRow({
       const newValue = lineItem.billable_expense_percentage || "0";
       return prev !== newValue ? newValue : prev;
     });
-  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable, lineItem.billable_expense_percentage, roleValue]);
+  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.payable_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable, lineItem.billable_expense_percentage, roleValue]);
 
   // Weekly hours editing state
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
@@ -165,7 +169,7 @@ export function EstimateLineItemRow({
 
   // Only show roles that have RoleRate associations with Opportunity Invoice Center
   const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
-  const { data: deliveryCentersData, isLoading: isLoadingDeliveryCenters, isFetching: isFetchingDeliveryCenters } = useDeliveryCenters();
+  const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: employeesData } = useEmployees({ limit: 100 });
 
   // Fetch role details when role is selected (to get role rates)
@@ -207,7 +211,7 @@ export function EstimateLineItemRow({
       return;
     }
     
-    console.log("EstimateLineItemRow: Building hoursMap from weekly_hours", {
+    console.log("EngagementLineItemRow: Building hoursMap from weekly_hours", {
       weeklyHoursCount: lineItem.weekly_hours?.length ?? 0,
       weeklyHours: lineItem.weekly_hours,
       activelyEditingWeeks: Array.from(activelyEditingWeeksRef.current)
@@ -278,7 +282,7 @@ export function EstimateLineItemRow({
       }
     });
     
-    console.log("EstimateLineItemRow: Final hoursMap", {
+    console.log("EngagementLineItemRow: Final hoursMap", {
       size: hoursMap.size,
       keys: Array.from(hoursMap.keys()),
       entries: Array.from(hoursMap.entries())
@@ -368,24 +372,12 @@ export function EstimateLineItemRow({
     ? (marginAmount / totalRevenue) * 100 
     : 0;
 
-  // Note: formatDate reserved for future use
-  // const formatDate = (dateStr: string) => {
-  //   return new Date(dateStr).toLocaleDateString("en-US", {
-  //     month: "short",
-  //     day: "numeric",
-  //     year: "numeric",
-  //   });
-  // };
-
   // Auto-save function with debouncing (spreadsheet style)
   const handleFieldUpdate = useCallback(async (
     field: string,
     value: string | undefined,
     originalValue: string
   ) => {
-    if (readOnly) {
-      return; // Don't allow updates when read-only
-    }
     if (value === originalValue) {
       return;
     }
@@ -402,7 +394,7 @@ export function EstimateLineItemRow({
     saveTimeoutRef.current = setTimeout(async () => {
       try {
         // Only send the specific field being changed, not all fields
-        const updateData: Partial<EstimateLineItemUpdate> = {};
+        const updateData: Partial<EngagementLineItemUpdate> = {};
         if (field === "billable") {
           // Handle billable as boolean - value is string "true"/"false"
           updateData.billable = value === "true" || value === "True";
@@ -412,6 +404,10 @@ export function EstimateLineItemRow({
           // For employee_id, send null when clearing (empty string becomes null)
           // This allows the backend to properly clear the association
           updateData.employee_id = value === "" || value === undefined ? null : value;
+        } else if (field === "role_id") {
+          // For role_id, send null when clearing (empty string becomes null)
+          // This allows the backend to properly clear the role
+          updateData.role_id = value === "" || value === undefined ? null : value;
         } else if (field === "cost") {
           updateData.cost = value;
         } else if (field === "rate") {
@@ -454,7 +450,7 @@ export function EstimateLineItemRow({
                 console.log(`Clearing ${Object.keys(weeksToClear).length} weeks before new start date:`, weeksToClear);
                 
                 // Use autoFillHours API to set hours to 0
-                estimatesApi.autoFillHours(estimateId, lineItem.id, {
+                engagementsApi.autoFillHours(engagementId, lineItem.id, {
                   pattern: "custom",
                   custom_hours: weeksToClear,
                 }).then(() => {
@@ -469,7 +465,7 @@ export function EstimateLineItemRow({
                   
                   // Invalidate cache to trigger refetch
                   queryClient.invalidateQueries({
-                    queryKey: ["estimates", "detail", estimateId, true],
+                    queryKey: ["engagements", "detail", engagementId],
                   });
                 }).catch((err) => {
                   console.error("Failed to clear hours for weeks before new start date:", err);
@@ -482,8 +478,87 @@ export function EstimateLineItemRow({
           }
         } else if (field === "end_date") {
           updateData.end_date = value;
-        } else if (field === "delivery_center_id") {
-          updateData.delivery_center_id = value;
+          
+          // If end_date changed, clear hours for weeks outside the date range
+          if (value && prevEndDateRef.current) {
+            const parseLocalDate = (dateStr: string): Date => {
+              const datePart = dateStr.split("T")[0];
+              const [year, month, day] = datePart.split("-").map(Number);
+              return new Date(year, month - 1, day);
+            };
+            
+            const oldEndDate = parseLocalDate(prevEndDateRef.current);
+            const newEndDate = parseLocalDate(value);
+            const startDate = parseLocalDate(startDateValue);
+            
+            // Find weeks to clear
+            const weeksToClear: Record<string, string> = {};
+            
+            // If end date moved earlier, clear weeks after new end
+            if (newEndDate < oldEndDate) {
+              weeks.forEach((week) => {
+                const weekKey = getWeekKey(week);
+                const weekDate = week;
+                const weekEnd = new Date(weekDate);
+                weekEnd.setDate(weekEnd.getDate() + 6); // Saturday
+                
+                // If week ends after new end date and has hours, mark it for clearing
+                if (weekEnd > newEndDate) {
+                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
+                  if (hours && parseFloat(hours) > 0) {
+                    weeksToClear[weekKey] = "0";
+                  }
+                }
+              });
+            }
+            
+            // Also clear weeks before start date (if start date exists)
+            if (startDate) {
+              weeks.forEach((week) => {
+                const weekKey = getWeekKey(week);
+                const weekDate = week;
+                
+                // If week is before start date and has hours, mark it for clearing
+                if (weekDate < startDate) {
+                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
+                  if (hours && parseFloat(hours) > 0) {
+                    weeksToClear[weekKey] = "0";
+                  }
+                }
+              });
+            }
+            
+            // Clear hours for weeks outside date range
+            if (Object.keys(weeksToClear).length > 0) {
+              console.log(`Clearing ${Object.keys(weeksToClear).length} weeks outside date range (end date change):`, weeksToClear);
+              
+              engagementsApi.autoFillHours(engagementId, lineItem.id, {
+                pattern: "custom",
+                custom_hours: weeksToClear,
+              }).then(() => {
+                // Update local state to reflect cleared hours
+                setWeeklyHoursValues((prev) => {
+                  const next = new Map(prev);
+                  Object.keys(weeksToClear).forEach((weekKey) => {
+                    next.set(weekKey, "0");
+                  });
+                  return next;
+                });
+                
+                // Invalidate cache to trigger refetch
+                queryClient.invalidateQueries({
+                  queryKey: ["engagements", "detail", engagementId],
+                });
+              }).catch((err) => {
+                console.error("Failed to clear hours for weeks outside date range:", err);
+              });
+            }
+            
+            // Update the ref to track the new end date
+            prevEndDateRef.current = value;
+          }
+        } else if (field === "payable_center_id") {
+          updateData.payable_center_id = value;
         } else if (field === "role_id") {
           updateData.role_id = value;
           // Set flag to prevent sync effect from overwriting role_id during update
@@ -495,7 +570,7 @@ export function EstimateLineItemRow({
         }
 
         await updateLineItem.mutateAsync({
-          estimateId,
+          engagementId,
           lineItemId: lineItem.id,
           data: updateData,
         });
@@ -525,14 +600,14 @@ export function EstimateLineItemRow({
         else if (field === "rate") setRateValue(originalValue);
         else if (field === "start_date") setStartDateValue(originalValue.split("T")[0]);
         else if (field === "end_date") setEndDateValue(originalValue.split("T")[0]);
-        else if (field === "delivery_center_id") setDeliveryCenterValue(originalValue);
+        else if (field === "payable_center_id") setPayableCenterValue(originalValue);
         else if (field === "role_id") setRoleValue(originalValue);
         else if (field === "employee_id") setEmployeeValue(originalValue || "");
         else if (field === "billable") setBillableValue(originalValue === "true" || originalValue === "True");
         else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");
       }
     }, 500); // 500ms debounce
-  }, [estimateId, lineItem.id, updateLineItem, readOnly]);
+  }, [engagementId, lineItem.id, updateLineItem]);
   
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -553,16 +628,14 @@ export function EstimateLineItemRow({
       if (billableExpensePercentageValue !== "0" && billableExpensePercentageValue !== "") {
         setBillableExpensePercentageValue("0");
         // Only update if not read-only and we have a valid line item
-        if (!readOnly) {
-          handleFieldUpdate("billable_expense_percentage", "0", lineItem.billable_expense_percentage || "0");
-        }
+        handleFieldUpdate("billable_expense_percentage", "0", lineItem.billable_expense_percentage || "0");
       }
     }
     prevBillableExpensesRef.current = billableExpenses;
-  }, [billableExpenses, billableExpensePercentageValue, lineItem.billable_expense_percentage, handleFieldUpdate, readOnly]);
+  }, [billableExpenses, billableExpensePercentageValue, lineItem.billable_expense_percentage, handleFieldUpdate]);
 
   // Track previous role and employee to detect changes
-  const prevRoleRef = useRef<string>(roleValue);
+  const prevRoleRef = useRef<string | undefined>(roleValue);
   const prevEmployeeRef = useRef<string>(employeeValue);
   const lastPopulatedRoleDataRef = useRef<string>("");
 
@@ -789,6 +862,11 @@ export function EstimateLineItemRow({
     // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
     if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
       // Employee data not loaded yet, wait for it
+      console.log("Employee useEffect: Waiting for employee data to load", {
+        hasSelectedEmployeeData: !!selectedEmployeeData,
+        isLoadingEmployee,
+        isFetchingEmployee,
+      });
       prevEmployeeRef.current = employeeValue;
       return;
     }
@@ -807,18 +885,9 @@ export function EstimateLineItemRow({
       return;
     }
 
-    // CRITICAL: Wait for delivery centers data to load before calculating centersMatch
-    // If deliveryCentersData isn't loaded, we can't determine the employee's delivery center ID,
-    // which would cause centersMatch to incorrectly default to false
-    if (!deliveryCentersData || isLoadingDeliveryCenters || isFetchingDeliveryCenters) {
-      console.log("Waiting for delivery centers data to load before calculating centersMatch");
-      prevEmployeeRef.current = employeeValue;
-      return;
-    }
-
     // Get employee's delivery center ID from code
     const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
-      ? deliveryCentersData.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
+      ? deliveryCentersData?.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
       : null;
     
     // Compare Opportunity Invoice Center with Employee Delivery Center
@@ -826,20 +895,13 @@ export function EstimateLineItemRow({
     const centersMatch = opportunityDeliveryCenterId && employeeDeliveryCenterId 
       ? String(opportunityDeliveryCenterId) === String(employeeDeliveryCenterId)
       : false;
-    
-    console.log("Calculating centersMatch (line item row):", {
-      opportunityDeliveryCenterId,
-      employeeDeliveryCenterCode: selectedEmployeeData.delivery_center,
-      employeeDeliveryCenterId,
-      centersMatch,
-      deliveryCentersDataLoaded: !!deliveryCentersData,
-      deliveryCentersCount: deliveryCentersData?.items?.length || 0,
-    });
 
     // Determine which rate to use and whether to convert currency
     let employeeCost: number;
+    let employeeRate: number = 0; // Initialize to avoid TypeScript error
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
     const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
+    const hasRole = !!roleValue;
     
     // Apply currency conversion rules for Employee Cost
     // Centers match AND currencies match → use internal_cost_rate, NO conversion
@@ -854,14 +916,24 @@ export function EstimateLineItemRow({
       employeeCost = selectedEmployeeData.internal_bill_rate || 0;
     }
     
+    // If no role selected, also get Rate from employee's external_bill_rate
+    if (!hasRole) {
+      employeeRate = selectedEmployeeData.external_bill_rate || 0;
+    }
+    
     // Convert to Opportunity Invoice Currency if currencies differ
     if (!currenciesMatch) {
       employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
+      if (!hasRole) {
+        employeeRate = convertCurrency(employeeRate, employeeCurrency, currency);
+      }
     }
     
     // Round to 2 decimal places
     const newCost = parseFloat(employeeCost.toFixed(2)).toString();
-    console.log("Updating Cost from Employee (line item row):", {
+    const newRate = !hasRole ? parseFloat(employeeRate.toFixed(2)).toString() : rateValue;
+    
+    console.log("Updating Cost (and Rate if no role) from Employee (line item row):", {
       centersMatch,
       rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
       originalCost: centersMatch ? selectedEmployeeData.internal_cost_rate : selectedEmployeeData.internal_bill_rate,
@@ -869,20 +941,25 @@ export function EstimateLineItemRow({
       convertedCost: employeeCost,
       newCost,
       currentCost: costValue,
+      hasRole,
+      newRate: !hasRole ? newRate : "not updated (role exists)",
     });
     
     // Always update cost from employee (don't check if changed, as it should update when employee changes)
     setCostValue(newCost);
-    // Trigger save - only cost, NOT rate (use original value from lineItem)
+    // Trigger save - only cost, NOT rate (unless no role, then also update rate)
     handleFieldUpdate("cost", newCost, lineItem.cost || "0");
+    
+    // If no role selected, also update rate
+    if (!hasRole && newRate !== rateValue) {
+      setRateValue(newRate);
+      handleFieldUpdate("rate", newRate, lineItem.rate || "0");
+    }
 
     prevEmployeeRef.current = employeeValue;
-  }, [employeeValue, roleValue, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole, isLoadingDeliveryCenters, isFetchingDeliveryCenters]);
+  }, [employeeValue, roleValue, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
-    if (readOnly) {
-      return; // Don't allow updates when read-only
-    }
     // Parse dates as local dates to avoid timezone conversion issues
     const parseLocalDate = (dateStr: string): Date => {
       const [year, month, day] = dateStr.split("T")[0].split("-").map(Number);
@@ -907,7 +984,7 @@ export function EstimateLineItemRow({
         console.log(`Saving weekly hours to database: weekKey=${weekKey}, hours=${hours}, lineItemId=${lineItem.id}`);
         
         // Save to database immediately
-        const response = await estimatesApi.autoFillHours(estimateId, lineItem.id, {
+        const response = await engagementsApi.autoFillHours(engagementId, lineItem.id, {
           pattern: "custom",
           custom_hours: {
             [weekKey]: hours,
@@ -925,16 +1002,16 @@ export function EstimateLineItemRow({
         
         // Invalidate cache to trigger refetch from database
         await queryClient.invalidateQueries({
-          queryKey: ["estimates", "detail", estimateId, true],
+          queryKey: ["engagements", "detail", engagementId],
         });
         
         // Refetch to get fresh data from database
         await queryClient.refetchQueries({
-          queryKey: ["estimates", "detail", estimateId, true],
+          queryKey: ["engagements", "detail", engagementId],
         });
         
         console.log("Refetch completed, checking data...");
-        const freshData = queryClient.getQueryData<EstimateDetailResponse>(["estimates", "detail", estimateId, true]);
+        const freshData = queryClient.getQueryData<EngagementDetailResponse>(["engagements", "detail", engagementId]);
         const freshLineItem = freshData?.line_items?.find(item => item.id === lineItem.id);
         console.log("Fresh line item weekly_hours:", freshLineItem?.weekly_hours);
       } catch (err) {
@@ -955,20 +1032,20 @@ export function EstimateLineItemRow({
 
   return (
     <>
-      <tr className="hover:bg-gray-50" onContextMenu={onContextMenu}>
-        {/* Delivery Center */}
+      <tr className="hover:bg-gray-50">
+        {/* Payable Center */}
         <td className="border border-gray-300 px-2 py-1 text-xs">
           <Select
-            value={deliveryCenterValue}
+            value={payableCenterValue}
             onChange={(e: React.ChangeEvent<HTMLSelectElement>) => {
               const newValue = e.target.value;
-              setDeliveryCenterValue(newValue);
-              // Payable Center (delivery_center_id) can be updated independently
+              setPayableCenterValue(newValue);
+              // Payable Center (payable_center_id) can be updated independently
               // Do NOT clear role when Payable Center changes
               handleFieldUpdate(
-                "delivery_center_id",
+                "payable_center_id",
                 newValue,
-                lineItem.delivery_center_id
+                lineItem.payable_center_id || ""
               );
             }}
             className="text-xs h-7 w-full"
@@ -996,7 +1073,7 @@ export function EstimateLineItemRow({
               // Set flag immediately to prevent sync effect from reverting the change
               isUpdatingRoleIdRef.current = true;
               setRoleValue(newRoleId);
-              handleFieldUpdate("role_id", newRoleId, lineItem.role_id);
+              handleFieldUpdate("role_id", newRoleId, lineItem.role_id || "");
             }}
             className="text-xs h-7 w-full"
           >
@@ -1044,7 +1121,11 @@ export function EstimateLineItemRow({
               value={costValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setCostValue(e.target.value);
-                handleFieldUpdate("cost", e.target.value, lineItem.cost || "0");
+              }}
+              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                if (e.target.value !== (lineItem.cost || "0")) {
+                  handleFieldUpdate("cost", e.target.value, lineItem.cost || "0");
+                }
               }}
               placeholder="Auto"
               className="text-xs h-7 flex-1"
@@ -1062,7 +1143,11 @@ export function EstimateLineItemRow({
               value={rateValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setRateValue(e.target.value);
-                handleFieldUpdate("rate", e.target.value, lineItem.rate || "0");
+              }}
+              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                if (e.target.value !== (lineItem.rate || "0")) {
+                  handleFieldUpdate("rate", e.target.value, lineItem.rate || "0");
+                }
               }}
               placeholder="Auto"
               className="text-xs h-7 flex-1"
@@ -1097,11 +1182,15 @@ export function EstimateLineItemRow({
             value={startDateValue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               setStartDateValue(e.target.value);
-              handleFieldUpdate(
-                "start_date",
-                e.target.value,
-                lineItem.start_date
-              );
+            }}
+            onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+              if (e.target.value !== lineItem.start_date.split("T")[0]) {
+                handleFieldUpdate(
+                  "start_date",
+                  e.target.value,
+                  lineItem.start_date
+                );
+              }
             }}
             className="text-xs h-7 w-full"
           />
@@ -1114,14 +1203,18 @@ export function EstimateLineItemRow({
             value={endDateValue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               setEndDateValue(e.target.value);
-              handleFieldUpdate("end_date", e.target.value, lineItem.end_date);
+            }}
+            onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+              if (e.target.value !== lineItem.end_date.split("T")[0]) {
+                handleFieldUpdate("end_date", e.target.value, lineItem.end_date);
+              }
             }}
             className="text-xs h-7 w-full"
           />
         </td>
 
         {/* Actions */}
-        <td className="border border-gray-300 px-2 py-1" style={{ minWidth: '100px' }}>
+        <td className="border border-gray-300 px-2 py-1 text-xs" style={{ minWidth: '100px' }}>
           <div className="flex gap-2 items-center">
             <button
               onClick={() => setIsAutoFillOpen(true)}
@@ -1140,9 +1233,9 @@ export function EstimateLineItemRow({
                 if (confirm("Are you sure you want to delete this line item and all its weekly hours?")) {
                   console.log("User confirmed deletion");
                   try {
-                    console.log("Calling mutateAsync with:", { estimateId, lineItemId: lineItem.id });
+                    console.log("Calling mutateAsync with:", { engagementId, lineItemId: lineItem.id });
                     await deleteLineItemMutation.mutateAsync({
-                      estimateId,
+                      engagementId,
                       lineItemId: lineItem.id,
                     });
                     // Success - the optimistic update already removed it from UI
@@ -1155,9 +1248,9 @@ export function EstimateLineItemRow({
                   console.log("User cancelled deletion");
                 }
               }}
-              disabled={deleteLineItemMutation.isPending || readOnly}
+              disabled={deleteLineItemMutation.isPending}
               className="text-xs text-red-600 hover:underline cursor-pointer whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
-              title={readOnly ? "Estimate is locked by active quote" : "Delete line item and weekly hours"}
+              title="Delete line item and weekly hours"
             >
               {deleteLineItemMutation.isPending ? "Deleting..." : "Delete"}
             </button>
@@ -1190,11 +1283,15 @@ export function EstimateLineItemRow({
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 if (billableExpenses) {
                   setBillableExpensePercentageValue(e.target.value);
+                }
+              }}
+              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                if (billableExpenses && e.target.value !== (lineItem.billable_expense_percentage || "0")) {
                   handleFieldUpdate("billable_expense_percentage", e.target.value, lineItem.billable_expense_percentage || "0");
                 }
               }}
               placeholder="0"
-              disabled={!billableExpenses || readOnly}
+              disabled={!billableExpenses}
               className="text-xs h-7 flex-1"
             />
             <span className="text-[10px] text-gray-500">%</span>
@@ -1259,7 +1356,7 @@ export function EstimateLineItemRow({
                   }, 500);
                 }}
                 placeholder="0"
-                disabled={!isInRange || readOnly}
+                disabled={!isInRange}
                 className="text-xs h-7 w-full text-center"
               />
             </td>
@@ -1290,7 +1387,7 @@ export function EstimateLineItemRow({
         </td>
       </tr>
       {isAutoFillOpen && (
-        <AutoFillDialog
+        <EngagementAutoFillDialog
           lineItem={lineItem}
           onClose={() => setIsAutoFillOpen(false)}
           onSuccess={() => {

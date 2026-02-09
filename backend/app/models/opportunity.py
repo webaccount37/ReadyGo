@@ -91,4 +91,5 @@ class Opportunity(Base):
     opportunity_owner = relationship("Employee", foreign_keys=[opportunity_owner_id], back_populates="owned_opportunities")
     estimates = relationship("Estimate", back_populates="opportunity", cascade="all, delete-orphan")
     quotes = relationship("Quote", back_populates="opportunity", cascade="all, delete-orphan")
+    engagements = relationship("Engagement", back_populates="opportunity", cascade="all, delete-orphan")
 
