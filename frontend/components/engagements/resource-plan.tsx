@@ -358,16 +358,36 @@ export function ResourcePlan({
                           key={weekIndex}
                           className="border border-gray-300 px-1 py-1 text-xs font-semibold text-center"
                           style={{ ...style, width: '120px', minWidth: '120px' }}
-                          title={phaseNames || undefined}
+                          title={phaseNames || week.toLocaleDateString()}
                         >
-                          {showYear && (
-                            <div className="text-[10px] font-bold mb-1">{week.getFullYear()}</div>
-                          )}
-                          <div>{week.toLocaleDateString("en-US", { month: "short", day: "numeric" })}</div>
+                          <div className="flex flex-col gap-0.5">
+                            {showYear && (
+                              <div className="text-[10px] font-bold text-gray-600">
+                                {week.getFullYear()}
+                              </div>
+                            )}
+                            {overlaps && overlaps.length > 0 ? (
+                              <>
+                                {overlaps.map((overlap: { phase: EngagementPhase; color: string }, idx: number) => (
+                                  <div
+                                    key={idx}
+                                    className="text-[10px] font-medium truncate"
+                                    style={{ color: overlap.color }}
+                                  >
+                                    {overlap.phase.name}
+                                  </div>
+                                ))}
+                              </>
+                            ) : (
+                              <div className="text-[10px] text-gray-400">
+                                {week.toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                              </div>
+                            )}
+                          </div>
                         </th>
                       );
                     })}
-                    <th colSpan={6} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
+                    <th colSpan={7} className="border border-gray-300 px-2 py-1 text-xs font-semibold bg-gray-50">
                       Totals
                     </th>
                   </tr>
@@ -375,13 +395,13 @@ export function ResourcePlan({
                 
                 {/* Column headers */}
                 <tr>
-                  <th className="sticky left-0 z-20 bg-white border border-gray-300 px-2 py-2 text-xs font-semibold">
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
                     Payable Center
                   </th>
-                  <th className="sticky left-[120px] z-20 bg-white border border-gray-300 px-2 py-2 text-xs font-semibold">
+                  <th className="sticky left-0 z-20 bg-white border border-gray-300 px-2 py-2 text-xs font-semibold">
                     Role
                   </th>
-                  <th className="sticky left-[240px] z-20 bg-white border border-gray-300 px-2 py-2 text-xs font-semibold">
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
                     Employee
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
@@ -403,13 +423,13 @@ export function ResourcePlan({
                     End Date
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
+                    Actions
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
                     Billable
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
                     Billable %
-                  </th>
-                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
-                    Actions
                   </th>
                   {weeks.map((week: Date, weekIndex: number) => (
                     <th
@@ -428,6 +448,18 @@ export function ResourcePlan({
                   </th>
                   <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
                     Total Revenue ({currency})
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
+                    Billable Expenses ({currency})
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
+                    Margin ({currency})
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
+                    Margin %
+                  </th>
+                  <th className="border border-gray-300 px-2 py-2 text-xs font-semibold">
+                    Margin % (w/ Expenses)
                   </th>
                 </tr>
               </thead>

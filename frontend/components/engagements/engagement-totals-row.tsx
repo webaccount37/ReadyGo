@@ -61,9 +61,37 @@ export function EngagementTotalsRow({
   const overallTotalHours = weeklyTotals.reduce((sum, week) => sum + week.totalHours, 0);
   const overallTotalCost = weeklyTotals.reduce((sum, week) => sum + week.totalCost, 0);
   const overallTotalRevenue = weeklyTotals.reduce((sum, week) => sum + week.totalRevenue, 0);
+
+  // Calculate billable expenses for each line item based on its own revenue
+  const overallBillableExpenseAmount = lineItems.reduce((sum, item) => {
+    const billable = item.billable ?? true;
+    if (!billable) return sum;
+    
+    const billableExpensePercentage = parseFloat(item.billable_expense_percentage || "0");
+    // Calculate item's revenue from weekly totals
+    let itemRevenue = 0;
+    weeklyTotals.forEach((week, weekIndex) => {
+      const weekKey = formatDateKey(weeks[weekIndex]);
+      const weeklyHour = item.weekly_hours?.find((wh) => {
+        const whDate = parseLocalDate(wh.week_start_date);
+        return formatDateKey(whDate) === weekKey;
+      });
+      const hours = parseFloat(weeklyHour?.hours || "0");
+      const rate = parseFloat(item.rate || "0");
+      const itemWeekRevenue = item.billable ? hours * rate : 0;
+      itemRevenue += itemWeekRevenue;
+    });
+    
+    const itemBillableExpenseAmount = (billableExpensePercentage / 100) * itemRevenue;
+    return sum + itemBillableExpenseAmount;
+  }, 0);
+  
   const overallMarginAmount = overallTotalRevenue - overallTotalCost;
-  const overallMarginPercentage = overallTotalRevenue > 0 
+  const overallMarginPercentageWithoutExpenses = overallTotalRevenue > 0 
     ? (overallMarginAmount / overallTotalRevenue) * 100 
+    : 0;
+  const overallMarginPercentageWithExpenses = (overallTotalRevenue + overallBillableExpenseAmount) > 0 
+    ? (overallMarginAmount / (overallTotalRevenue + overallBillableExpenseAmount)) * 100 
     : 0;
 
   return (
@@ -88,6 +116,18 @@ export function EngagementTotalsRow({
       </td>
       <td className="border border-gray-300 px-2 py-2 text-xs">
         {currency} {overallTotalRevenue.toFixed(2)}
+      </td>
+      <td className="border border-gray-300 px-2 py-2 text-xs">
+        {currency} {overallBillableExpenseAmount.toFixed(2)}
+      </td>
+      <td className="border border-gray-300 px-2 py-2 text-xs">
+        {currency} {overallMarginAmount.toFixed(2)}
+      </td>
+      <td className="border border-gray-300 px-2 py-2 text-xs">
+        {overallMarginPercentageWithoutExpenses.toFixed(1)}%
+      </td>
+      <td className="border border-gray-300 px-2 py-2 text-xs">
+        {overallMarginPercentageWithExpenses.toFixed(1)}%
       </td>
     </tr>
   );

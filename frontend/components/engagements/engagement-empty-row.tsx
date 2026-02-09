@@ -762,7 +762,7 @@ export function EngagementEmptyRow({
         </Select>
       </td>
       {/* Role */}
-      <td className="sticky left-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs">
+      <td className="sticky left-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs" style={{ backgroundColor: 'white' }}>
         <Select
           value={formData.role_id || ""}
           onChange={(e) => setFormData({ ...formData, role_id: e.target.value })}
@@ -982,6 +982,18 @@ export function EngagementEmptyRow({
         );
       })}
       <td className="sticky right-0 z-10 bg-white border border-gray-300 px-2 py-1 text-xs">
+        -
+      </td>
+      <td className="border border-gray-300 px-2 py-1 text-xs">
+        -
+      </td>
+      <td className="border border-gray-300 px-2 py-1 text-xs">
+        -
+      </td>
+      <td className="border border-gray-300 px-2 py-1 text-xs">
+        -
+      </td>
+      <td className="border border-gray-300 px-2 py-1 text-xs">
         -
       </td>
       <td className="border border-gray-300 px-2 py-1 text-xs">
