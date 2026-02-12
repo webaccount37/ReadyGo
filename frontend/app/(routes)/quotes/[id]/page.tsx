@@ -264,9 +264,9 @@ export default function QuoteDetailPage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="flex items-center gap-2">
+                <CardTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
-                {quote.quote_number}
+                {quote.display_name}
               </CardTitle>
               <div className="flex items-center gap-4 mt-2">
                 <QuoteStatusBadge status={quote.status} />

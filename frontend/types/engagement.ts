@@ -68,7 +68,9 @@ export interface Engagement {
   created_at: string;
   attributes?: Record<string, unknown>;
   opportunity_name?: string;
+  account_name?: string;
   quote_number?: string;
+  quote_display_name?: string;
   line_items?: EngagementLineItem[];
   phases?: EngagementPhase[];
 }

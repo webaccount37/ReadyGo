@@ -156,6 +156,7 @@ class QuoteResponse(QuoteBase):
     """Schema for quote response."""
     id: UUID
     quote_number: str
+    display_name: str
     version: int
     status: QuoteStatus
     is_active: bool

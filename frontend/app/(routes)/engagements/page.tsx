@@ -46,7 +46,9 @@ function EngagementsPageContent() {
     return (
       engagement.name.toLowerCase().includes(query) ||
       engagement.quote_number?.toLowerCase().includes(query) ||
-      engagement.opportunity_name?.toLowerCase().includes(query)
+      engagement.quote_display_name?.toLowerCase().includes(query) ||
+      engagement.opportunity_name?.toLowerCase().includes(query) ||
+      engagement.account_name?.toLowerCase().includes(query)
     );
   }) || [];
 
@@ -112,24 +114,29 @@ function EngagementsPageContent() {
                   key={engagement.id}
                   className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
                 >
-                  <div className="flex-1">
+                    <div className="flex-1">
                     <div className="flex items-center gap-2">
                       <FileText className="h-5 w-5 text-gray-400" />
                       <Link
                         href={`/engagements/${engagement.id}`}
                         className="text-lg font-semibold text-blue-600 hover:underline"
                       >
-                        {engagement.name}
+                        Engagement - {engagement.opportunity_name || engagement.opportunity_id}
                       </Link>
                     </div>
                     <div className="mt-2 text-sm text-gray-600 space-y-1">
+                      {engagement.account_name && (
+                        <div>
+                          <span className="font-medium">Account:</span> {engagement.account_name}
+                        </div>
+                      )}
                       <div>
                         <span className="font-medium">Opportunity:</span>{" "}
                         {engagement.opportunity_name || engagement.opportunity_id}
                       </div>
-                      {engagement.quote_number && (
+                      {(engagement.quote_display_name || engagement.quote_number) && (
                         <div>
-                          <span className="font-medium">Quote:</span> {engagement.quote_number}
+                          <span className="font-medium">Quote:</span> {engagement.quote_display_name || engagement.quote_number}
                         </div>
                       )}
                       <div>

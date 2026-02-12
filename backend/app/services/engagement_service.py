@@ -31,6 +31,7 @@ from app.models.quote import Quote, QuoteStatus, QuoteType
 from app.models.estimate import Estimate
 from app.models.role_rate import RoleRate
 from app.utils.currency_converter import convert_currency
+from app.utils.quote_display import compute_quote_display_name
 from app.schemas.engagement import (
     EngagementCreate, EngagementUpdate, EngagementResponse, EngagementDetailResponse, EngagementListResponse,
     EngagementLineItemCreate, EngagementLineItemUpdate, EngagementLineItemResponse,
@@ -89,15 +90,14 @@ class EngagementService(BaseService):
         if not opportunity:
             raise ValueError("Opportunity not found")
         
-        # Generate engagement name from quote number
-        engagement_name = f"Engagement - {quote.quote_number}"
-        
+        engagement_name = f"Engagement - {opportunity.name}"
+
         # Create engagement
         engagement_dict = {
             "quote_id": quote_id,
             "opportunity_id": quote.opportunity_id,
             "name": engagement_name,
-            "description": f"Engagement created from approved quote {quote.quote_number}",
+            "description": f"Engagement created from approved quote {quote_display_name}",
             "created_by": created_by,
             "attributes": {},
         }
@@ -933,6 +933,27 @@ class EngagementService(BaseService):
         opportunity = await self.opportunity_repo.get(engagement.opportunity_id)
         quote = await self.quote_repo.get(engagement.quote_id)
         
+        quote_display_name = None
+        if quote:
+            snapshot = quote.snapshot_data or {}
+            if not snapshot.get("account_name") and not snapshot.get("name"):
+                from app.utils.quote_display import _format_date_mmddyyyy
+                unique_suffix = str(quote.id).replace("-", "")[:4]
+                date_part = _format_date_mmddyyyy(quote.created_at)
+                quote_display_name = f"QT-Quote-{date_part}-{unique_suffix}-v{quote.version}"
+            else:
+                quote_display_name = compute_quote_display_name(
+                    account_name=snapshot.get("account_name"),
+                    opportunity_name=snapshot.get("name") or (quote.opportunity.name if quote.opportunity else None),
+                    version=quote.version,
+                    quote_id=quote.id,
+                    quote_created_at=quote.created_at,
+                )
+
+        account_name = None
+        if opportunity and opportunity.account:
+            account_name = opportunity.account.company_name
+
         response_dict = {
             "id": engagement.id,
             "quote_id": engagement.quote_id,
@@ -943,7 +964,9 @@ class EngagementService(BaseService):
             "created_at": engagement.created_at.isoformat() if engagement.created_at else None,
             "attributes": engagement.attributes or {},
             "opportunity_name": opportunity.name if opportunity else None,
+            "account_name": account_name,
             "quote_number": quote.quote_number if quote else None,
+            "quote_display_name": quote_display_name,
             "created_by_name": None,
             "phases": [],
             "line_items": [],

@@ -69,10 +69,13 @@ export default function EngagementDetailPage() {
           <Link href="/engagements" className="text-blue-600 hover:underline mb-2 inline-block">
             ← Back to Engagements
           </Link>
-          <h1 className="text-3xl font-bold">{engagement.name}</h1>
+          <h1 className="text-3xl font-bold">Engagement - {engagement.opportunity_name || engagement.opportunity_id}</h1>
           <p className="text-sm text-gray-500 mt-1">
+            {(engagement.account_name || opportunity?.account_name) && (
+              <>Account: {engagement.account_name || opportunity?.account_name} • </>
+            )}
             Opportunity: {engagement.opportunity_name || engagement.opportunity_id}
-            {engagement.quote_number && ` • Quote: ${engagement.quote_number}`}
+            {(engagement.quote_display_name || engagement.quote_number) && ` • Quote: ${engagement.quote_display_name || engagement.quote_number}`}
           </p>
         </div>
         <div className="flex gap-2">

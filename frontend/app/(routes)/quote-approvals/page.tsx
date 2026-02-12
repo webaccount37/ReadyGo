@@ -27,8 +27,8 @@ function QuoteApprovalsPageContent() {
   const { data: engagementsData, refetch: refetchEngagements } = useEngagements({ limit: 1000 });
   const queryClient = useQueryClient();
 
-  const handleApprove = async (quoteId: string, quoteNumber: string) => {
-    if (!confirm(`Are you sure you want to approve quote "${quoteNumber}"? This will create an Engagement.`)) {
+  const handleApprove = async (quoteId: string, displayName: string) => {
+    if (!confirm(`Are you sure you want to approve quote "${displayName}"? This will create an Engagement.`)) {
       return;
     }
 
@@ -43,15 +43,15 @@ function QuoteApprovalsPageContent() {
       await new Promise(resolve => setTimeout(resolve, 1500));
       refetch();
       await refetchEngagements();
-      alert(`Quote "${quoteNumber}" approved successfully! An Engagement has been created. Check the Engagements page to view it.`);
+      alert(`Quote "${displayName}" approved successfully! An Engagement has been created. Check the Engagements page to view it.`);
     } catch (err) {
       console.error("Failed to approve quote:", err);
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
-  const handleReject = async (quoteId: string, quoteNumber: string) => {
-    if (!confirm(`Are you sure you want to reject quote "${quoteNumber}"? This will unlock the opportunity.`)) {
+  const handleReject = async (quoteId: string, displayName: string) => {
+    if (!confirm(`Are you sure you want to reject quote "${displayName}"? This will unlock the opportunity.`)) {
       return;
     }
 
@@ -73,6 +73,7 @@ function QuoteApprovalsPageContent() {
 
     const query = searchQuery.toLowerCase();
     const quoteNumber = (quote.quote_number || "").toLowerCase();
+    const displayName = (quote.display_name || "").toLowerCase();
     const opportunityName =
       opportunitiesData?.items.find((o) => o.id === quote.opportunity_id)
         ?.name || "";
@@ -82,6 +83,7 @@ function QuoteApprovalsPageContent() {
 
     return (
       quoteNumber.includes(query) ||
+      displayName.includes(query) ||
       opportunityName.toLowerCase().includes(query) ||
       accountName.toLowerCase().includes(query)
     );
@@ -168,7 +170,7 @@ function QuoteApprovalsPageContent() {
                             className="font-semibold text-lg hover:underline flex items-center gap-2"
                           >
                             <FileText className="h-4 w-4" />
-                            {quote.quote_number}
+                            {quote.display_name}
                           </Link>
                           <QuoteStatusBadge status={quote.status} />
                           <span className="text-sm text-gray-500">
@@ -234,7 +236,7 @@ function QuoteApprovalsPageContent() {
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => handleApprove(quote.id, quote.quote_number)}
+                          onClick={() => handleApprove(quote.id, quote.display_name)}
                           disabled={updateQuoteStatus.isPending}
                           className="bg-green-600 hover:bg-green-700 text-white"
                         >
@@ -244,7 +246,7 @@ function QuoteApprovalsPageContent() {
                         <Button
                           variant="destructive"
                           size="sm"
-                          onClick={() => handleReject(quote.id, quote.quote_number)}
+                          onClick={() => handleReject(quote.id, quote.display_name)}
                           disabled={updateQuoteStatus.isPending}
                         >
                           <XCircle className="h-4 w-4 mr-1" />

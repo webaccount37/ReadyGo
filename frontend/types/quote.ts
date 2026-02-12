@@ -74,6 +74,7 @@ export interface Quote {
   opportunity_id: string;
   estimate_id: string;
   quote_number: string;
+  display_name: string;
   version: number;
   status: QuoteStatus;
   is_active: boolean;

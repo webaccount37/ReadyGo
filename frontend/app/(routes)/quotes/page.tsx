@@ -39,8 +39,8 @@ function QuotesPageContent() {
     }
   });
 
-  const handleDeactivate = async (quoteId: string, quoteNumber: string) => {
-    if (!confirm(`Are you sure you want to deactivate quote "${quoteNumber}"? This will unlock the opportunity and estimates.`)) {
+  const handleDeactivate = async (quoteId: string, displayName: string) => {
+    if (!confirm(`Are you sure you want to deactivate quote "${displayName}"? This will unlock the opportunity and estimates.`)) {
       return;
     }
     
@@ -267,10 +267,12 @@ function QuotesPageContent() {
     Object.entries(groupedByOpportunity).forEach(([opportunityId, group]) => {
       const matchingQuotes = group.quotes.filter((quote) => {
         const quoteNumber = (quote.quote_number || "").toLowerCase();
+        const displayName = (quote.display_name || "").toLowerCase();
         const status = (quote.status || "").toLowerCase();
         const opportunityName = (group.opportunity.name || "").toLowerCase();
         return (
           quoteNumber.includes(query) ||
+          displayName.includes(query) ||
           status.includes(query) ||
           opportunityName.includes(query)
         );
@@ -436,7 +438,7 @@ function QuotesPageContent() {
                                     href={`/quotes/${quote.id}`}
                                     className="font-medium hover:underline"
                                   >
-                                    {highlightText(quote.quote_number, searchQuery)}
+                                    {highlightText(quote.display_name, searchQuery)}
                                   </Link>
                                   <QuoteStatusBadge status={quote.status} />
                                   <span className="flex items-center gap-1 text-green-600 text-sm">
@@ -461,7 +463,7 @@ function QuotesPageContent() {
                                   <Button
                                     variant="destructive"
                                     size="sm"
-                                    onClick={() => handleDeactivate(quote.id, quote.quote_number)}
+                                    onClick={() => handleDeactivate(quote.id, quote.display_name)}
                                     disabled={deactivateQuote.isPending}
                                   >
                                     <Unlock className="h-4 w-4 mr-1" />
@@ -514,7 +516,7 @@ function QuotesPageContent() {
                                                 href={`/quotes/${quote.id}`}
                                                 className="text-xs font-medium hover:underline truncate"
                                               >
-                                                {highlightText(quote.quote_number, searchQuery)}
+                                                {highlightText(quote.display_name, searchQuery)}
                                               </Link>
                                               <QuoteStatusBadge status={quote.status} />
                                               <span className="text-xs text-gray-500 whitespace-nowrap">

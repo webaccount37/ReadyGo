@@ -32,6 +32,7 @@ from app.models.quote import (
 )
 from app.models.estimate import Estimate
 from app.models.opportunity import Opportunity
+from app.utils.quote_display import compute_quote_display_name
 from app.schemas.quote import (
     QuoteCreate, QuoteUpdate, QuoteResponse, QuoteDetailResponse, QuoteListResponse,
     QuoteStatusUpdate, QuoteLineItemResponse, QuotePhaseResponse, QuoteWeeklyHoursResponse,
@@ -520,6 +521,24 @@ class QuoteService(BaseService):
         """Check if opportunity has an active quote."""
         return await self.quote_repo.get_active_quote_by_opportunity(opportunity_id)
     
+    def _compute_display_name(self, quote: Quote) -> str:
+        """Compute friendly ID-style display name from snapshot_data or fallback."""
+        snapshot = quote.snapshot_data or {}
+        account_name = snapshot.get("account_name")
+        opportunity_name = snapshot.get("name")
+        if not account_name and not opportunity_name:
+            from app.utils.quote_display import _format_date_mmddyyyy
+            unique_suffix = str(quote.id).replace("-", "")[:4]
+            date_part = _format_date_mmddyyyy(quote.created_at)
+            return f"QT-Quote-{date_part}-{unique_suffix}-v{quote.version}"
+        return compute_quote_display_name(
+            account_name=account_name,
+            opportunity_name=opportunity_name or (quote.opportunity.name if quote.opportunity else None),
+            version=quote.version,
+            quote_id=quote.id,
+            quote_created_at=quote.created_at,
+        )
+
     async def _to_response(self, quote: Quote) -> QuoteResponse:
         """Convert Quote model to QuoteResponse schema."""
         return QuoteResponse(
@@ -527,6 +546,7 @@ class QuoteService(BaseService):
             opportunity_id=quote.opportunity_id,
             estimate_id=quote.estimate_id,
             quote_number=quote.quote_number,
+            display_name=self._compute_display_name(quote),
             version=quote.version,
             status=quote.status,
             is_active=quote.is_active,

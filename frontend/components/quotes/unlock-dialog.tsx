@@ -41,7 +41,7 @@ export function UnlockDialog({
         </DialogHeader>
         <div className="py-4">
           <p className="text-sm text-gray-600">
-            <strong>Quote:</strong> {quote.quote_number}
+            <strong>Quote:</strong> {quote.display_name}
           </p>
           <p className="text-sm text-gray-600 mt-2">
             <strong>Opportunity:</strong> {quote.opportunity_name}

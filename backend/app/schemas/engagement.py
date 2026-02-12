@@ -173,7 +173,9 @@ class EngagementResponse(EngagementBase):
     quote_id: UUID
     opportunity_id: UUID
     opportunity_name: Optional[str] = None
+    account_name: Optional[str] = None
     quote_number: Optional[str] = None
+    quote_display_name: Optional[str] = None
     created_by: Optional[UUID] = None
     created_by_name: Optional[str] = None
     created_at: str  # ISO datetime string
