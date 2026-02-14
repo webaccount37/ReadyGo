@@ -6,7 +6,7 @@ import logging
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, distinct
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
@@ -87,6 +87,38 @@ class EngagementRepository(BaseRepository[Engagement]):
         query = self._base_query().where(Engagement.quote_id == quote_id)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def list_by_employee_on_resource_plan(
+        self,
+        employee_id: UUID,
+        skip: int = 0,
+        limit: int = 200,
+    ) -> List[Engagement]:
+        """List engagements where the employee has a line item on the resource plan."""
+        from app.models.engagement import EngagementLineItem
+
+        query = (
+            self._base_query()
+            .join(EngagementLineItem, Engagement.id == EngagementLineItem.engagement_id)
+            .where(EngagementLineItem.employee_id == employee_id)
+            .distinct()
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def count_by_employee_on_resource_plan(self, employee_id: UUID) -> int:
+        """Count engagements where the employee has a line item on the resource plan."""
+        from app.models.engagement import EngagementLineItem
+
+        result = await self.session.execute(
+            select(func.count(distinct(Engagement.id)))
+            .select_from(Engagement)
+            .join(EngagementLineItem, Engagement.id == EngagementLineItem.engagement_id)
+            .where(EngagementLineItem.employee_id == employee_id)
+        )
+        return result.scalar() or 0
     
     async def get_with_line_items(self, engagement_id: UUID) -> Optional[Engagement]:
         """Get engagement with all line items and weekly hours."""

@@ -26,6 +26,8 @@ from app.schemas.engagement import (
     EngagementPhaseCreate,
     EngagementPhaseUpdate,
     EngagementPhaseResponse,
+    EngagementTimesheetApproversUpdate,
+    EngagementTimesheetApproverResponse,
     EngagementExcelImportResponse,
     AutoFillRequest,
 )
@@ -39,6 +41,7 @@ async def list_engagements(
     limit: int = Query(100, ge=1, le=1000),
     opportunity_id: Optional[UUID] = Query(None),
     quote_id: Optional[UUID] = Query(None),
+    employee_id: Optional[UUID] = Query(None, description="Filter engagements where employee has resource plan line items"),
     db: AsyncSession = Depends(get_db),
 ) -> EngagementListResponse:
     """List engagements with optional filters."""
@@ -48,6 +51,7 @@ async def list_engagements(
         limit=limit,
         opportunity_id=opportunity_id,
         quote_id=quote_id,
+        employee_id=employee_id,
     )
 
 
@@ -143,6 +147,26 @@ async def delete_phase(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Phase not found",
+        )
+
+
+@router.put(
+    "/{engagement_id}/timesheet-approvers",
+    response_model=List[EngagementTimesheetApproverResponse],
+)
+async def update_timesheet_approvers(
+    engagement_id: UUID,
+    data: EngagementTimesheetApproversUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> List[EngagementTimesheetApproverResponse]:
+    """Update timesheet approvers for an engagement."""
+    controller = EngagementController(db)
+    try:
+        return await controller.update_timesheet_approvers(engagement_id, data)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
         )
 
 

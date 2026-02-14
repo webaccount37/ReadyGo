@@ -223,6 +223,15 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get(estimate_id)
         if not estimate:
             return None
+
+        # Check if opportunity is permanently locked
+        from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
+        lock_repo = OpportunityPermanentLockRepository(self.session)
+        if await lock_repo.is_opportunity_locked(estimate.opportunity_id):
+            raise ValueError(
+                "Opportunity is permanently locked due to timesheet entries. "
+                "No further changes to estimates are allowed."
+            )
         
         # Check if estimate is locked by active quote (only lock active version)
         active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)

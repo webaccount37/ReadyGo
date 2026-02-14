@@ -27,6 +27,13 @@ from app.models import (
     EngagementPhase,
     EngagementLineItem,
     EngagementWeeklyHours,
+    Timesheet,
+    TimesheetEntry,
+    TimesheetDayNote,
+    TimesheetApprovedSnapshot,
+    TimesheetStatusHistory,
+    EngagementTimesheetApprover,
+    OpportunityPermanentLock,
 )
 
 # this is the Alembic Config object, which provides

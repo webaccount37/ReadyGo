@@ -61,6 +61,7 @@ export interface Engagement {
   id: string;
   quote_id: string;
   opportunity_id: string;
+  account_id?: string;
   name: string;
   description?: string;
   created_by?: string;
@@ -75,9 +76,15 @@ export interface Engagement {
   phases?: EngagementPhase[];
 }
 
+export interface EngagementTimesheetApprover {
+  employee_id: string;
+  employee_name?: string;
+}
+
 export interface EngagementDetailResponse extends Engagement {
   line_items: EngagementLineItem[];
   comparative_summary?: ComparativeSummary;
+  timesheet_approvers?: EngagementTimesheetApprover[];
 }
 
 export interface EngagementCreate {

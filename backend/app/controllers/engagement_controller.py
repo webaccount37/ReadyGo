@@ -13,6 +13,7 @@ from app.schemas.engagement import (
     EngagementLineItemCreate, EngagementLineItemUpdate, EngagementLineItemResponse,
     EngagementWeeklyHoursCreate, EngagementWeeklyHoursResponse,
     EngagementPhaseCreate, EngagementPhaseUpdate, EngagementPhaseResponse,
+    EngagementTimesheetApproversUpdate, EngagementTimesheetApproverResponse,
     AutoFillRequest,
 )
 
@@ -40,6 +41,7 @@ class EngagementController(BaseController):
         limit: int = 100,
         opportunity_id: Optional[UUID] = None,
         quote_id: Optional[UUID] = None,
+        employee_id: Optional[UUID] = None,
     ) -> EngagementListResponse:
         """List engagements with optional filters."""
         engagements, total = await self.engagement_service.list_engagements(
@@ -47,6 +49,7 @@ class EngagementController(BaseController):
             limit=limit,
             opportunity_id=opportunity_id,
             quote_id=quote_id,
+            employee_id=employee_id,
         )
         return EngagementListResponse(items=engagements, total=total)
     
@@ -57,6 +60,17 @@ class EngagementController(BaseController):
     ) -> Optional[EngagementResponse]:
         """Update an engagement."""
         return await self.engagement_service.update_engagement(engagement_id, engagement_data)
+
+    async def update_timesheet_approvers(
+        self, engagement_id: UUID, data: EngagementTimesheetApproversUpdate
+    ) -> list[EngagementTimesheetApproverResponse]:
+        """Update timesheet approvers for an engagement."""
+        return [
+            EngagementTimesheetApproverResponse(**a)
+            for a in await self.engagement_service.update_timesheet_approvers(
+                engagement_id, data.employee_ids
+            )
+        ]
     
     async def create_phase(
         self,

@@ -208,6 +208,15 @@ class OpportunityService(BaseService):
         opportunity = await self.opportunity_repo.get(opportunity_id)
         if not opportunity:
             return None
+
+        # Check if opportunity is permanently locked (timesheet entry with hours)
+        from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
+        lock_repo = OpportunityPermanentLockRepository(self.session)
+        if await lock_repo.is_opportunity_locked(opportunity_id):
+            raise ValueError(
+                "Opportunity is permanently locked due to timesheet entries. "
+                "No further changes are allowed."
+            )
         
         # Check if opportunity is locked by active quote
         from app.db.repositories.quote_repository import QuoteRepository
@@ -432,6 +441,15 @@ class OpportunityService(BaseService):
         if hasattr(opportunity, 'account') and opportunity.account:
             account_name = opportunity.account.company_name
         
+        # Check if opportunity is permanently locked (timesheet entries)
+        is_permanently_locked = False
+        try:
+            from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
+            lock_repo = OpportunityPermanentLockRepository(self.session)
+            is_permanently_locked = await lock_repo.is_opportunity_locked(opportunity.id)
+        except Exception:
+            pass
+
         # Check if opportunity is locked by active quote
         is_locked = False
         locked_by_quote_id = None
@@ -478,6 +496,7 @@ class OpportunityService(BaseService):
             # Locked status
             "is_locked": is_locked,
             "locked_by_quote_id": str(locked_by_quote_id) if locked_by_quote_id else None,
+            "is_permanently_locked": is_permanently_locked,
         }
         
         if include_relationships:

@@ -461,17 +461,23 @@ class EngagementService(BaseService):
         limit: int = 100,
         opportunity_id: Optional[UUID] = None,
         quote_id: Optional[UUID] = None,
+        employee_id: Optional[UUID] = None,
     ) -> Tuple[List[EngagementResponse], int]:
         """List engagements with pagination."""
-        filters = {}
-        if opportunity_id:
-            filters["opportunity_id"] = opportunity_id
-        if quote_id:
-            filters["quote_id"] = quote_id
-        
-        engagements = await self.engagement_repo.list(skip=skip, limit=limit, **filters)
-        total = await self.engagement_repo.count(**filters)
-        
+        if employee_id:
+            engagements = await self.engagement_repo.list_by_employee_on_resource_plan(
+                employee_id=employee_id, skip=skip, limit=limit
+            )
+            total = await self.engagement_repo.count_by_employee_on_resource_plan(employee_id)
+        else:
+            filters = {}
+            if opportunity_id:
+                filters["opportunity_id"] = opportunity_id
+            if quote_id:
+                filters["quote_id"] = quote_id
+            engagements = await self.engagement_repo.list(skip=skip, limit=limit, **filters)
+            total = await self.engagement_repo.count(**filters)
+
         responses = [await self._to_response(e, include_line_items=False) for e in engagements]
         return responses, total
     
@@ -488,6 +494,26 @@ class EngagementService(BaseService):
         if not updated:
             return None
         return await self._to_response(updated, include_line_items=False)
+
+    async def update_timesheet_approvers(
+        self, engagement_id: UUID, employee_ids: List[UUID]
+    ) -> List[dict]:
+        """Update timesheet approvers for an engagement."""
+        engagement = await self.engagement_repo.get(engagement_id)
+        if not engagement:
+            raise ValueError("Engagement not found")
+        from app.db.repositories.engagement_timesheet_approver_repository import EngagementTimesheetApproverRepository
+        approver_repo = EngagementTimesheetApproverRepository(self.session)
+        await approver_repo.set_approvers(engagement_id, employee_ids)
+        await self.session.commit()
+        approvers = await approver_repo.list_by_engagement(engagement_id)
+        return [
+            {
+                "employee_id": a.employee_id,
+                "employee_name": f"{a.employee.first_name} {a.employee.last_name}".strip() if a.employee else None,
+            }
+            for a in approvers
+        ]
     
     # Phase CRUD operations
     async def create_phase(
@@ -631,8 +657,23 @@ class EngagementService(BaseService):
         # Pydantic's exclude_unset=True excludes None values, but we need to preserve None when explicitly set
         if hasattr(line_item_data, 'model_fields_set') and 'employee_id' in line_item_data.model_fields_set:
             if line_item_data.employee_id is None:
+                # Cannot remove employee if they have timesheet entries for this engagement
+                if line_item.employee_id:
+                    from sqlalchemy import select, func
+                    from app.models.timesheet import TimesheetEntry
+                    result = await self.session.execute(
+                        select(func.count(TimesheetEntry.id)).where(
+                            TimesheetEntry.engagement_line_item_id == line_item_id,
+                        )
+                    )
+                    has_entries = (result.scalar_one() or 0) > 0
+                    if has_entries:
+                        raise ValueError(
+                            "Cannot remove employee from engagement. "
+                            "Employee has timesheet entries. You may reduce the End Date instead."
+                        )
                 update_dict["employee_id"] = None
-        
+
         # Handle role_id updates - use Opportunity Invoice Center (not Payable Center) for role_rate lookup
         if "role_id" in update_dict:
             # Get currency and opportunity delivery center (Invoice Center) for role_rate lookup
@@ -951,13 +992,16 @@ class EngagementService(BaseService):
                 )
 
         account_name = None
+        account_id = None
         if opportunity and opportunity.account:
             account_name = opportunity.account.company_name
+            account_id = opportunity.account_id
 
         response_dict = {
             "id": engagement.id,
             "quote_id": engagement.quote_id,
             "opportunity_id": engagement.opportunity_id,
+            "account_id": account_id,
             "name": engagement.name,
             "description": engagement.description,
             "created_by": engagement.created_by,
@@ -994,8 +1038,20 @@ class EngagementService(BaseService):
     
     async def _to_detail_response(self, engagement: Engagement) -> EngagementDetailResponse:
         """Convert Engagement model to detail response schema."""
+        from app.schemas.engagement import EngagementTimesheetApproverResponse
+        from app.db.repositories.engagement_timesheet_approver_repository import EngagementTimesheetApproverRepository
+
         base_response = await self._to_response(engagement, include_line_items=True)
-        return EngagementDetailResponse(**base_response.model_dump())
+        detail_dict = base_response.model_dump()
+        approver_repo = EngagementTimesheetApproverRepository(self.session)
+        approvers = await approver_repo.list_by_engagement(engagement.id)
+        detail_dict["timesheet_approvers"] = [
+            EngagementTimesheetApproverResponse(
+                employee_id=a.employee_id,
+                employee_name=f"{a.employee.first_name} {a.employee.last_name}".strip() if a.employee else None,
+            ) for a in approvers
+        ]
+        return EngagementDetailResponse(**detail_dict)
     
     async def _to_line_item_response(self, line_item: EngagementLineItem) -> EngagementLineItemResponse:
         """Convert EngagementLineItem model to response schema."""

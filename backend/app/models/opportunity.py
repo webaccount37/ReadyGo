@@ -92,4 +92,4 @@ class Opportunity(Base):
     estimates = relationship("Estimate", back_populates="opportunity", cascade="all, delete-orphan")
     quotes = relationship("Quote", back_populates="opportunity", cascade="all, delete-orphan")
     engagements = relationship("Engagement", back_populates="opportunity", cascade="all, delete-orphan")
-
+    permanent_lock = relationship("OpportunityPermanentLock", back_populates="opportunity", uselist=False, cascade="all, delete-orphan")

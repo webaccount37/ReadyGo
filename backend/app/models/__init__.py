@@ -22,6 +22,12 @@ from app.models.quote import (
     QuoteType, PaymentTriggerType, TimeType, RevenueType,
     RateBillingUnit, InvoiceDetail, CapType
 )
+from app.models.timesheet import (
+    Timesheet, TimesheetEntry, TimesheetDayNote, TimesheetApprovedSnapshot,
+    TimesheetStatusHistory, TimesheetStatus, TimesheetEntryType
+)
+from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
+from app.models.opportunity_permanent_lock import OpportunityPermanentLock
 
 __all__ = [
     "Employee",
@@ -48,6 +54,15 @@ __all__ = [
     "QuotePhase",
     "QuoteWeeklyHours",
     "QuoteStatus",
+    "Timesheet",
+    "TimesheetEntry",
+    "TimesheetDayNote",
+    "TimesheetApprovedSnapshot",
+    "TimesheetStatusHistory",
+    "TimesheetStatus",
+    "TimesheetEntryType",
+    "EngagementTimesheetApprover",
+    "OpportunityPermanentLock",
 ]
 
 

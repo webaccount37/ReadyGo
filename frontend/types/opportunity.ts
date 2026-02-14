@@ -53,6 +53,8 @@ export interface Opportunity {
   // Locked status
   is_locked?: boolean;
   locked_by_quote_id?: string;
+  // Permanent lock (timesheet entries exist; no unlock)
+  is_permanently_locked?: boolean;
 }
 
 export interface OpportunityCreate {

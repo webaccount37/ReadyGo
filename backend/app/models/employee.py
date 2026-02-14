@@ -52,5 +52,6 @@ class Employee(Base):
     availability_calendar = relationship("Calendar", foreign_keys=[availability_calendar_id])
     delivery_center = relationship("DeliveryCenter")
     owned_opportunities = relationship("Opportunity", foreign_keys="Opportunity.opportunity_owner_id", back_populates="opportunity_owner")
+    timesheets = relationship("Timesheet", back_populates="employee", foreign_keys="Timesheet.employee_id")
 
 

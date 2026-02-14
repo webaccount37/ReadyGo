@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import Link from "next/link";
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Lock, AlertTriangle, AlertCircle, Calendar } from "lucide-react";
+import { Lock, AlertTriangle, AlertCircle, Calendar, FileCheck } from "lucide-react";
 import { CURRENCIES } from "@/types/currency";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EstimateDetailResponse } from "@/types/estimate";
@@ -158,21 +158,25 @@ export default function EstimateDetailPage() {
     }
   }, [estimate?.id, opportunity?.id]); // Reset when estimate or opportunity ID changes
   
-  // Check if opportunity is locked
+  // Check if opportunity is locked (quote lock or permanent lock)
   const isOpportunityLocked = useMemo(() => {
     return opportunity?.is_locked || false;
   }, [opportunity?.is_locked]);
+  const isPermanentlyLocked = useMemo(() => {
+    return opportunity?.is_permanently_locked || false;
+  }, [opportunity?.is_permanently_locked]);
+  const isLockedForEditing = isOpportunityLocked || isPermanentlyLocked;
 
   // Detect Invoice Center/Currency changes for active estimates
   const hasInvoiceCenterOrCurrencyChange = useMemo(() => {
-    if (!opportunity || !estimate || estimate.is_locked || isOpportunityLocked) return false;
+    if (!opportunity || !estimate || estimate.is_locked || isLockedForEditing) return false;
     if (!originalInvoiceCenterId || !originalInvoiceCurrency) return false;
     
     const centerChanged = opportunity.delivery_center_id !== originalInvoiceCenterId;
     const currencyChanged = (opportunity.default_currency || "USD") !== originalInvoiceCurrency;
     
     return centerChanged || currencyChanged;
-  }, [opportunity, estimate, originalInvoiceCenterId, originalInvoiceCurrency, isOpportunityLocked]);
+  }, [opportunity, estimate, originalInvoiceCenterId, originalInvoiceCurrency, isLockedForEditing]);
 
   // Check for date mismatches
   const hasDateMismatch = useMemo(() => {
@@ -189,7 +193,7 @@ export default function EstimateDetailPage() {
   // Auto-save opportunity fields when they change (skip if opportunity is locked)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!opportunity || !estimate || isOpportunityLocked) return;
+    if (!opportunity || !estimate || isLockedForEditing) return;
     
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
@@ -247,7 +251,7 @@ export default function EstimateDetailPage() {
         clearTimeout(saveTimeoutRef.current);
       }
     };
-  }, [startDate, endDate, invoiceCurrency, invoiceCustomer, billableExpenses, opportunity, estimate, updateOpportunity, refetchOpportunity, isOpportunityLocked]);
+  }, [startDate, endDate, invoiceCurrency, invoiceCustomer, billableExpenses, opportunity, estimate, updateOpportunity, refetchOpportunity, isLockedForEditing]);
 
   const handleDuplicate = async () => {
     setIsCloning(true);
@@ -376,6 +380,14 @@ export default function EstimateDetailPage() {
               </Button>
             </Link>
           )}
+          {estimate.active_version && !estimate.is_locked && (
+            <Link href={`/quotes/create?opportunity_id=${estimate.opportunity_id}&estimate_id=${estimate.id}`}>
+              <Button variant="outline" size="sm" className="text-green-600 hover:text-green-700">
+                <FileCheck className="w-4 h-4 mr-2" />
+                Create Quote
+              </Button>
+            </Link>
+          )}
           <Button onClick={handleNew} variant="outline" disabled={isCreating} title="">
             {isCreating ? "Creating..." : "NEW"}
           </Button>
@@ -406,12 +418,18 @@ export default function EstimateDetailPage() {
         </div>
       </div>
 
-      <Card className={`mb-6 ${isOpportunityLocked ? 'border-yellow-200 bg-yellow-50' : ''}`}>
+      <Card className={`mb-6 ${isPermanentlyLocked ? 'border-slate-200 bg-slate-50' : isOpportunityLocked ? 'border-yellow-200 bg-yellow-50' : ''}`}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            {isOpportunityLocked && <Lock className="w-5 h-5 text-yellow-800" />}
+            {isPermanentlyLocked && <Lock className="w-5 h-5 text-slate-600" />}
+            {isOpportunityLocked && !isPermanentlyLocked && <Lock className="w-5 h-5 text-yellow-800" />}
             Estimate Details
-            {isOpportunityLocked && (
+            {isPermanentlyLocked && (
+              <span className="text-sm font-normal text-slate-700 ml-2">
+                (Permanently locked — timesheet entries exist)
+              </span>
+            )}
+            {isOpportunityLocked && !isPermanentlyLocked && (
               <span className="text-sm font-normal text-yellow-800 ml-2">
                 (Locked by active quote - {opportunity?.locked_by_quote_id && (
                   <Link href={`/quotes/${opportunity.locked_by_quote_id}`} className="underline">View quote</Link>
@@ -434,7 +452,7 @@ export default function EstimateDetailPage() {
                 id="invoice_currency"
                 value={invoiceCurrency}
                 onChange={(e) => setInvoiceCurrency(e.target.value)}
-                disabled={estimate.is_locked || isOpportunityLocked}
+                disabled={estimate.is_locked || isLockedForEditing}
                 className="mt-1"
               >
                 {CURRENCIES.map((c) => (
@@ -451,7 +469,7 @@ export default function EstimateDetailPage() {
                 type="date"
                 value={startDate}
                 onChange={(e) => setStartDate(e.target.value)}
-                disabled={estimate.is_locked || isOpportunityLocked}
+                disabled={estimate.is_locked || isLockedForEditing}
                 className="mt-1"
               />
             </div>
@@ -462,7 +480,7 @@ export default function EstimateDetailPage() {
                 type="date"
                 value={endDate}
                 onChange={(e) => setEndDate(e.target.value)}
-                disabled={estimate.is_locked || isOpportunityLocked}
+                disabled={estimate.is_locked || isLockedForEditing}
                 className="mt-1"
               />
             </div>
@@ -472,7 +490,7 @@ export default function EstimateDetailPage() {
                 id="invoice_customer"
                 checked={invoiceCustomer}
                 onChange={(e) => setInvoiceCustomer(e.target.checked)}
-                disabled={estimate.is_locked || isOpportunityLocked}
+                disabled={estimate.is_locked || isLockedForEditing}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <Label htmlFor="invoice_customer" className="cursor-pointer">
@@ -485,7 +503,7 @@ export default function EstimateDetailPage() {
                 id="billable_expenses"
                 checked={billableExpenses}
                 onChange={(e) => setBillableExpenses(e.target.checked)}
-                disabled={estimate.is_locked || isOpportunityLocked}
+                disabled={estimate.is_locked || isLockedForEditing}
                 className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
               />
               <Label htmlFor="billable_expenses" className="cursor-pointer">
@@ -536,7 +554,7 @@ export default function EstimateDetailPage() {
         </Card>
       )}
 
-      <PhaseManagement estimateId={estimate.id} readOnly={estimate.is_locked || false} />
+      <PhaseManagement estimateId={estimate.id} readOnly={estimate.is_locked || isLockedForEditing} />
 
       <EstimateSpreadsheet 
         estimate={estimate} 
@@ -546,7 +564,7 @@ export default function EstimateDetailPage() {
         opportunityCurrency={invoiceCurrency}
         invoiceCustomer={invoiceCustomer}
         billableExpenses={billableExpenses}
-        readOnly={estimate.is_locked || false}
+        readOnly={estimate.is_locked || isLockedForEditing}
       />
       
       <GanttViewDialog

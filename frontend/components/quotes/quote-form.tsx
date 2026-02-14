@@ -20,8 +20,9 @@ export function QuoteForm() {
   const createQuote = useCreateQuote();
   
   const opportunityIdParam = searchParams.get("opportunity_id");
+  const estimateIdParam = searchParams.get("estimate_id");
   const [opportunityId, setOpportunityId] = useState<string>(opportunityIdParam || "");
-  const [estimateId, setEstimateId] = useState<string>("");
+  const [estimateId, setEstimateId] = useState<string>(estimateIdParam || "");
   const [notes, setNotes] = useState<string>("");
   const [quoteType, setQuoteType] = useState<QuoteType | "">("");
   
@@ -55,19 +56,22 @@ export function QuoteForm() {
   // Fetch employees for variable compensation
   const { data: employeesData } = useEmployees({ limit: 1000 });
 
-  // Set default estimate to active estimate when opportunity changes
+  // Set default estimate: use estimate_id from URL if it belongs to the opportunity, else use active estimate
   useEffect(() => {
-    if (opportunityId && estimatesData?.items) {
-      const activeEstimate = estimatesData.items.find((e) => e.active_version);
-      if (activeEstimate) {
-        setEstimateId(activeEstimate.id);
-      } else {
-        setEstimateId("");
-      }
-    } else {
+    if (!opportunityId) {
       setEstimateId("");
+      return;
     }
-  }, [opportunityId, estimatesData]);
+    if (estimatesData?.items) {
+      // If estimate_id was provided in URL and belongs to this opportunity (e.g. from estimate detail page), use it
+      if (estimateIdParam && estimatesData.items.some((e) => e.id === estimateIdParam)) {
+        setEstimateId(estimateIdParam);
+      } else {
+        const activeEstimate = estimatesData.items.find((e) => e.active_version);
+        setEstimateId(activeEstimate?.id || "");
+      }
+    }
+  }, [opportunityId, estimatesData, estimateIdParam]);
 
   // Calculate estimate summary
   const estimateSummary = useMemo(() => {

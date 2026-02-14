@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     currency_rates,
     quotes,
     engagements,
+    timesheets,
 )
 
 api_router = APIRouter()
@@ -112,6 +113,12 @@ api_router.include_router(
     engagements.router,
     prefix="/engagements",
     tags=["engagements"],
+    dependencies=[Depends(require_authentication)],
+)
+api_router.include_router(
+    timesheets.router,
+    prefix="/timesheets",
+    tags=["timesheets"],
     dependencies=[Depends(require_authentication)],
 )
 

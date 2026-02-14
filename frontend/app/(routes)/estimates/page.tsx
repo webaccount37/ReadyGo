@@ -15,6 +15,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { highlightText } from "@/lib/utils/highlight";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
+import { useQuotes } from "@/hooks/useQuotes";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Trash2, Lock, FileCheck, Calendar } from "lucide-react";
@@ -54,9 +55,38 @@ function EstimatesPageContent() {
     }
   };
 
-  // Fetch opportunities and delivery centers to get display info
+  // Fetch opportunities, delivery centers, and quotes to get display info
   const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
+  const { data: allQuotesData } = useQuotes({ limit: 1000 });
+
+  // Helper function to check if there are quotes for an opportunity
+  const hasQuotes = (opportunityId: string): boolean => {
+    if (!allQuotesData?.items) return false;
+    return allQuotesData.items.some((quote) => quote.opportunity_id === opportunityId);
+  };
+
+  // Helper function to get active quote ID for an opportunity
+  const getActiveQuoteId = (opportunityId: string): string | null => {
+    if (!allQuotesData?.items || !opportunityId) return null;
+    const activeQuote = allQuotesData.items.find(
+      (quote) => quote.opportunity_id === opportunityId && quote.is_active === true
+    );
+    return activeQuote?.id || null;
+  };
+
+  // Handler for Quote button - navigate to active quote if exists, otherwise quotes page or create
+  const handleQuotesClick = (opportunityId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const activeQuoteId = getActiveQuoteId(opportunityId);
+    if (activeQuoteId) {
+      router.push(`/quotes/${activeQuoteId}`);
+    } else if (hasQuotes(opportunityId)) {
+      router.push(`/quotes?opportunity_id=${opportunityId}`);
+    } else {
+      router.push(`/quotes/create?opportunity_id=${opportunityId}`);
+    }
+  };
 
   // Group estimates by opportunity
   const groupedByOpportunity = useMemo(() => {
@@ -425,17 +455,16 @@ function EstimatesPageContent() {
                                 >
                                   Edit
                                 </Button>
-                                {estimate.is_locked && estimate.locked_by_quote_id && (
-                                  <Link href={`/quotes/${estimate.locked_by_quote_id}`}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      title="View Quote"
-                                      className="text-green-600 hover:text-green-700"
-                                    >
-                                      <FileCheck className="w-4 h-4" />
-                                    </Button>
-                                  </Link>
+                                {estimate.active_version && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(e) => handleQuotesClick(estimate.opportunity_id, e)}
+                                    title={getActiveQuoteId(estimate.opportunity_id) ? "View Active Quote" : hasQuotes(estimate.opportunity_id) ? "View Quotes" : "Create Quote"}
+                                    className="text-green-600 hover:text-green-700"
+                                  >
+                                    <FileCheck className="w-4 h-4" />
+                                  </Button>
                                 )}
                               </div>
                             </div>

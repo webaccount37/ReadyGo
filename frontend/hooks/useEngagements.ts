@@ -24,6 +24,7 @@ import type {
   EngagementPhase,
   EngagementPhaseCreate,
   EngagementPhaseUpdate,
+  EngagementTimesheetApprover,
   EngagementExcelImportResponse,
   AutoFillRequest,
 } from "@/types/engagement";
@@ -47,6 +48,7 @@ export function useEngagements(
     limit?: number;
     opportunity_id?: string;
     quote_id?: string;
+    employee_id?: string;
   },
   options?: Omit<UseQueryOptions<EngagementListResponse>, "queryKey" | "queryFn">
 ) {
@@ -316,6 +318,32 @@ export function useImportEngagementExcel(
     { engagementId: string; file: File }
   >({
     mutationFn: ({ engagementId, file }) => engagementsApi.importFromExcel(engagementId, file),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+    },
+    ...options,
+  });
+}
+
+/**
+ * Update timesheet approvers for an engagement.
+ */
+export function useUpdateTimesheetApprovers(
+  options?: UseMutationOptions<
+    EngagementTimesheetApprover[],
+    Error,
+    { engagementId: string; employeeIds: string[] }
+  >
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    EngagementTimesheetApprover[],
+    Error,
+    { engagementId: string; employeeIds: string[] }
+  >({
+    mutationFn: ({ engagementId, employeeIds }) =>
+      engagementsApi.updateTimesheetApprovers(engagementId, employeeIds),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
     },

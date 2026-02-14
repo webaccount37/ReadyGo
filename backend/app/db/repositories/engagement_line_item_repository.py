@@ -38,6 +38,24 @@ class EngagementLineItemRepository(BaseRepository[EngagementLineItem]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
+    async def list_by_employee_and_week(
+        self,
+        employee_id: UUID,
+        week_start_date: date,
+    ) -> List[EngagementLineItem]:
+        """List line items for employee where the week overlaps [start_date, end_date]."""
+        from datetime import timedelta
+
+        week_end_date = week_start_date + timedelta(days=6)
+        query = self._base_query().where(
+            EngagementLineItem.employee_id == employee_id,
+            EngagementLineItem.start_date <= week_end_date,
+            EngagementLineItem.end_date >= week_start_date,
+        )
+        query = query.order_by(EngagementLineItem.row_order)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def list_by_engagement(
         self,
         engagement_id: UUID,

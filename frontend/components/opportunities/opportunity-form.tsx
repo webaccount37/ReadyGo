@@ -47,13 +47,15 @@ export function OpportunityForm({
   const { data: billingTermsData, isLoading: billingTermsLoading } = useBillingTerms();
   const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
   
-  // Check if opportunity has active quote (for locking fields)
+  // Check if opportunity has active quote or is permanently locked
   const opportunityId = 'id' in (initialData || {}) ? (initialData as Opportunity).id : undefined;
+  const hasPermanentLock = (initialData as Opportunity)?.is_permanently_locked || false;
   const { data: quotesData } = useQuotes({ 
     opportunity_id: opportunityId || "", 
     limit: 100 
   }, { enabled: !!opportunityId });
   const hasActiveQuote = quotesData?.items?.some(q => q.is_active) || false;
+  const isLocked = hasActiveQuote || hasPermanentLock;
 
   const [formData, setFormData] = useState<OpportunityCreate>({
     name: initialData?.name || "",
@@ -369,7 +371,7 @@ export function OpportunityForm({
               if (errors.account_id) setErrors({ ...errors, account_id: undefined });
             }}
             required
-            disabled={hasActiveQuote}
+            disabled={isLocked}
             className={errors.account_id ? "border-red-500" : ""}
             title={hasActiveQuote ? "Cannot change account when quote is active" : ""}
           >
@@ -481,7 +483,7 @@ export function OpportunityForm({
               if (errors.default_currency) setErrors({ ...errors, default_currency: undefined });
             }}
             required
-            disabled={hasActiveQuote}
+            disabled={isLocked}
             className={errors.default_currency ? "border-red-500" : ""}
             title={hasActiveQuote ? "Cannot change invoice currency when quote is active" : ""}
           >
@@ -509,7 +511,7 @@ export function OpportunityForm({
               if (errors.start_date) setErrors({ ...errors, start_date: undefined });
             }}
             required
-            disabled={hasActiveQuote}
+            disabled={isLocked}
             className={errors.start_date ? "border-red-500" : ""}
             title={hasActiveQuote ? "Cannot change start date when quote is active" : ""}
           />
@@ -528,7 +530,7 @@ export function OpportunityForm({
               if (errors.end_date) setErrors({ ...errors, end_date: undefined });
             }}
             required
-            disabled={hasActiveQuote}
+            disabled={isLocked}
             className={errors.end_date ? "border-red-500" : ""}
             title={hasActiveQuote ? "Cannot change end date when quote is active" : ""}
           />
@@ -562,7 +564,7 @@ export function OpportunityForm({
                 opportunity_owner_id: e.target.value || undefined,
               })
             }
-            disabled={hasActiveQuote}
+            disabled={isLocked}
             title={hasActiveQuote ? "Cannot change opportunity owner when quote is active" : ""}
           >
             <option value="">Select opportunity owner</option>
@@ -598,7 +600,7 @@ export function OpportunityForm({
               onChange={(e) =>
                 setFormData({ ...formData, billable_expenses: e.target.checked })
               }
-              disabled={hasActiveQuote}
+              disabled={isLocked}
               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             <Label htmlFor="billable_expenses" className="cursor-pointer">
@@ -613,7 +615,7 @@ export function OpportunityForm({
               onChange={(e) =>
                 setFormData({ ...formData, invoice_customer: e.target.checked })
               }
-              disabled={hasActiveQuote}
+              disabled={isLocked}
               className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
             />
             <Label htmlFor="invoice_customer" className="cursor-pointer">
@@ -788,7 +790,7 @@ export function OpportunityForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading || billingTermsLoading}>
+        <Button type="submit" disabled={isLoading || billingTermsLoading || isLocked}>
           {isLoading ? "Saving..." : initialData ? "Update" : "Create"}
         </Button>
       </div>

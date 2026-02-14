@@ -426,6 +426,11 @@ function OpportunitiesPageContent() {
                             <td className="p-1.5 font-medium max-w-[120px] truncate text-xs" title={opportunity.name}>
                               <div className="flex items-center gap-1.5">
                                 {highlightText(opportunity.name, searchQuery)}
+                                {opportunity.is_permanently_locked ? (
+                                  <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-semibold whitespace-nowrap" title="Permanently locked (timesheet entries exist)">
+                                    <Lock className="w-3 h-3" />
+                                  </span>
+                                ) : null}
                                 {hasActiveQuote(opportunity.id) ? (
                                   <span className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold whitespace-nowrap" title="Locked by active quote">
                                     <Lock className="w-3 h-3" />
@@ -734,6 +739,13 @@ function OpportunitiesPageContent() {
           <DialogContent className="space-y-4 max-h-[90vh] overflow-y-auto">
             {/* Basic Information */}
             <div className="space-y-4">
+              {(opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked && (
+                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded border border-slate-200">
+                  <Lock className="w-4 h-4 text-slate-600" />
+                  <span className="text-sm font-medium">Permanently locked</span>
+                  <span className="text-xs text-slate-600">(Timesheet entries exist; edits cannot be made)</span>
+                </div>
+              )}
               <h3 className="text-lg font-semibold border-b pb-2">Basic Information</h3>
               
               <div>
@@ -952,7 +964,12 @@ function OpportunitiesPageContent() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               Edit Opportunity
-              {opportunityToEdit?.id && hasActiveQuote(opportunityToEdit.id) ? (
+              {(opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked ? (
+                <span className="flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-sm font-semibold whitespace-nowrap" title="Permanently locked (timesheet entries exist)">
+                  <Lock className="w-4 h-4" />
+                  Permanently locked
+                </span>
+              ) : opportunityToEdit?.id && hasActiveQuote(opportunityToEdit.id) ? (
                 <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-semibold whitespace-nowrap" title="Locked by active quote">
                   <Lock className="w-4 h-4" />
                   Locked
@@ -977,7 +994,7 @@ function OpportunitiesPageContent() {
                     await refetchEditingOpportunity();
                     await refetch();
                   }}
-                  readOnly={false}
+                  readOnly={(editingOpportunityData as { is_permanently_locked?: boolean })?.is_permanently_locked ?? false}
                 />
               </div>
             )}

@@ -44,6 +44,7 @@ class Engagement(Base):
     # Relationships
     quote = relationship("Quote", foreign_keys=[quote_id])
     opportunity = relationship("Opportunity", back_populates="engagements")
+    timesheet_approvers = relationship("EngagementTimesheetApprover", back_populates="engagement", cascade="all, delete-orphan")
     created_by_employee = relationship("Employee", foreign_keys=[created_by])
     line_items = relationship("EngagementLineItem", back_populates="engagement", cascade="all, delete-orphan", order_by="EngagementLineItem.row_order", foreign_keys="[EngagementLineItem.engagement_id]", primaryjoin="Engagement.id == EngagementLineItem.engagement_id")
     phases = relationship("EngagementPhase", back_populates="engagement", cascade="all, delete-orphan", order_by="EngagementPhase.row_order", foreign_keys="[EngagementPhase.engagement_id]", primaryjoin="Engagement.id == EngagementPhase.engagement_id")

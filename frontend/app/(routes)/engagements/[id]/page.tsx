@@ -7,6 +7,8 @@ import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { ResourcePlan } from "@/components/engagements/resource-plan";
 import { PhaseManagement } from "@/components/engagements/phase-management";
 import { ComparativeSummary } from "@/components/engagements/comparative-summary";
+import { EngagementTimesheetApprovers } from "@/components/engagements/engagement-timesheet-approvers";
+import { EngagementGanttView } from "@/components/engagements/engagement-gantt-view";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
@@ -147,6 +149,30 @@ export default function EngagementDetailPage() {
         billableExpenses={opportunity?.billable_expenses}
         onRefetch={refetch}
       />
+
+      {/* Timesheet Approvers */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Timesheet Approver(s)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <EngagementTimesheetApprovers engagement={engagement} onRefetch={refetch} />
+        </CardContent>
+      </Card>
+
+      {/* Timeline View */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-xl font-bold">Timeline View</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0 overflow-hidden">
+          <EngagementGanttView
+            engagement={engagement}
+            opportunityStartDate={opportunity?.start_date}
+            opportunityEndDate={opportunity?.end_date}
+          />
+        </CardContent>
+      </Card>
     </div>
   );
 }

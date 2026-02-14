@@ -172,6 +172,7 @@ class EngagementResponse(EngagementBase):
     id: UUID
     quote_id: UUID
     opportunity_id: UUID
+    account_id: Optional[UUID] = None
     opportunity_name: Optional[str] = None
     account_name: Optional[str] = None
     quote_number: Optional[str] = None
@@ -210,10 +211,25 @@ class ComparativeSummary(BaseModel):
     currency: str = "USD"
 
 
+class EngagementTimesheetApproverResponse(BaseModel):
+    """Response schema for engagement timesheet approver."""
+    employee_id: UUID
+    employee_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EngagementTimesheetApproversUpdate(BaseModel):
+    """Request to update timesheet approvers."""
+    employee_ids: List[UUID] = Field(default_factory=list)
+
+
 class EngagementDetailResponse(EngagementResponse):
     """Detailed engagement response with all relationships and comparative summary."""
     line_items: List[EngagementLineItemResponse]
     comparative_summary: Optional[ComparativeSummary] = None
+    timesheet_approvers: Optional[List[EngagementTimesheetApproverResponse]] = None
 
 
 class EngagementListResponse(BaseModel):

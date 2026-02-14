@@ -5,6 +5,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
+import { useTimesheetIncompleteCount } from "@/hooks/useTimesheets";
+import { useAccounts } from "@/hooks/useAccounts";
+import { useOpportunities } from "@/hooks/useOpportunities";
+import { useEngagements } from "@/hooks/useEngagements";
+import { useTimesheetPendingApprovals } from "@/hooks/useTimesheets";
 import {
   LayoutDashboard,
   Briefcase,
@@ -33,6 +38,7 @@ interface NavItem {
   href: string;
   icon?: React.ComponentType<{ className?: string }>;
   comingSoon?: boolean;
+  badgeKey?: "timesheet-incomplete" | "timesheet-pending";
 }
 
 interface NavGroup {
@@ -64,7 +70,8 @@ const navGroups: NavGroup[] = [
   {
     title: "Time & Expenses",
     items: [
-      { title: "Timesheet Management", href: "#", comingSoon: true, icon: Clock },
+      { title: "Timesheet Management", href: "/timesheets", icon: Clock, badgeKey: "timesheet-incomplete" },
+      { title: "Timesheet Approvals", href: "/timesheet-approvals", icon: CheckCircle2, badgeKey: "timesheet-pending" },
       { title: "Expense Management", href: "#", comingSoon: true, icon: Receipt },
     ],
   },
@@ -96,6 +103,16 @@ interface SidebarContentProps {
 
 export function SidebarContent({ onNavigate }: SidebarContentProps) {
   const pathname = usePathname();
+  const { isAuthenticated } = useAuth();
+  const { data: incompleteData } = useTimesheetIncompleteCount();
+  const { data: pendingData } = useTimesheetPendingApprovals({ limit: 1 });
+  useAccounts({ limit: 500 }, { enabled: isAuthenticated });
+  useOpportunities({ limit: 500 }, { enabled: isAuthenticated });
+  useEngagements({ limit: 500 }, { enabled: isAuthenticated });
+  const badgeCounts = {
+    "timesheet-incomplete": incompleteData?.count ?? 0,
+    "timesheet-pending": pendingData?.total ?? 0,
+  };
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => {
     const initial = new Set<number>();
     navGroups.forEach((group, index) => {
@@ -185,6 +202,7 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
                     );
                   }
                   
+                  const badgeCount = item.badgeKey ? badgeCounts[item.badgeKey] : 0;
                   return (
                     <Link
                       key={item.href}
@@ -198,7 +216,12 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
                       )}
                     >
                       {Icon && <Icon className="w-5 h-5" />}
-                      <span>{item.title}</span>
+                      <span className="flex-1">{item.title}</span>
+                      {badgeCount > 0 && (
+                        <span className="ml-auto min-w-[20px] h-5 px-1.5 flex items-center justify-center rounded-full bg-amber-500 text-gray-900 text-xs font-semibold">
+                          {badgeCount > 99 ? "99+" : badgeCount}
+                        </span>
+                      )}
                     </Link>
                   );
                 })}

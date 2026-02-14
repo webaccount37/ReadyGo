@@ -276,13 +276,19 @@ export default function QuoteDetailPage() {
                     Active (Locking Opportunity)
                   </span>
                 )}
+                {opportunity?.is_permanently_locked && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-sm font-medium">
+                    <Lock className="h-4 w-4" />
+                    Permanently locked
+                  </span>
+                )}
                 <span className="text-sm text-gray-500">
                   Version {quote.version}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {quote.is_active && (
+              {quote.is_active && !opportunity?.is_permanently_locked && (
                 <Button
                   variant="destructive"
                   onClick={() => setIsUnlockDialogOpen(true)}

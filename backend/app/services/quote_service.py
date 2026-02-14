@@ -332,6 +332,15 @@ class QuoteService(BaseService):
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return None
+
+        # Check if opportunity is permanently locked
+        from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
+        lock_repo = OpportunityPermanentLockRepository(self.session)
+        if await lock_repo.is_opportunity_locked(quote.opportunity_id):
+            raise ValueError(
+                "Opportunity is permanently locked due to timesheet entries. "
+                "No further changes to quotes are allowed."
+            )
         
         update_dict = {
             "status": status_data.status,
