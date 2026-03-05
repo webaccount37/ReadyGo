@@ -16,7 +16,7 @@ import { useRoles, useRole } from "@/hooks/useRoles";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { useQuotes } from "@/hooks/useQuotes";
-import { normalizeDateForInput } from "@/lib/utils";
+import { normalizeDateForInput, cn } from "@/lib/utils";
 import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import type { Employee } from "@/types/employee";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
@@ -328,8 +328,10 @@ export function EmployeeRelationships({
                 // Get employee's association data for this opportunity
                 const employeeOpportunityData = employee.opportunities?.find(o => o.id === opportunityId);
                 
-                // Check if opportunity is locked (use is_locked field if available, otherwise fallback to checking quotes)
-                const isLocked = opportunity.is_locked ?? hasActiveQuote(opportunityId);
+                // Check if opportunity is locked (permanent lock or quote lock)
+                const isPermanentlyLocked = (opportunity as { is_permanently_locked?: boolean })?.is_permanently_locked || false;
+                const hasQuote = opportunity.is_locked ?? hasActiveQuote(opportunityId);
+                const isLocked = isPermanentlyLocked || hasQuote;
                 
                 return (
                   <div
@@ -347,9 +349,14 @@ export function EmployeeRelationships({
                             {opportunity.name}
                           </span>
                           {isLocked && (
-                            <span className="flex items-center gap-1 text-yellow-700 text-xs px-2 py-1 bg-yellow-100 border border-yellow-300 rounded font-semibold">
-                              <Lock className="w-3 h-3" />
-                              Locked
+                            <span
+                              className={cn(
+                                "inline-flex items-center justify-center w-5 h-5 rounded shrink-0",
+                                isPermanentlyLocked ? "text-violet-700 bg-violet-100 border border-violet-200" : "text-yellow-700 bg-yellow-100 border border-yellow-300"
+                              )}
+                              title={isPermanentlyLocked ? "Permanently Locked by Active Timesheets" : "Locked by Active Quote"}
+                            >
+                              <Lock className="w-3 h-3 shrink-0" />
                             </span>
                           )}
                         </div>
@@ -383,7 +390,7 @@ export function EmployeeRelationships({
                             onClick={() => handleUnlinkOpportunity(opportunityId)}
                             disabled={unlinkFromOpportunity.isPending || isLocked}
                             className={`w-full sm:w-auto ${isLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
-                            title={isLocked ? "Cannot unlink opportunity - it is locked by an active quote" : "Unlink this opportunity"}
+                            title={isLocked ? (isPermanentlyLocked ? "Cannot unlink — Permanently Locked by Active Timesheets" : "Cannot unlink — Locked by Active Quote") : "Unlink this opportunity"}
                           >
                             Unlink Opportunity
                           </Button>

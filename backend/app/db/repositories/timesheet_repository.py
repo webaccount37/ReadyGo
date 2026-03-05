@@ -2,9 +2,9 @@
 Timesheet repository for database operations.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Dict
 from uuid import UUID
-from datetime import date
+from datetime import date, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
@@ -165,6 +165,23 @@ class TimesheetRepository(BaseRepository[Timesheet]):
     async def list_incomplete_past_weeks(self, employee_id: UUID, today: date, limit: int = 20) -> List[date]:
         """List week_start_date for incomplete weeks, earliest first."""
         return await self.list_incomplete_weeks(employee_id, today, limit)
+
+    async def get_week_statuses(
+        self,
+        employee_id: UUID,
+        start_date: date,
+        end_date: date,
+    ) -> Dict[str, str]:
+        """Get timesheet status by week_start_date for employee in range. Returns {week_iso: status}."""
+        result = await self.session.execute(
+            select(Timesheet.week_start_date, Timesheet.status)
+            .where(
+                Timesheet.employee_id == employee_id,
+                Timesheet.week_start_date >= start_date,
+                Timesheet.week_start_date <= end_date,
+            )
+        )
+        return {row[0].isoformat(): row[1].value for row in result.fetchall()}
 
     async def list_pending_approvals_for_approver(
         self,

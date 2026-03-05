@@ -22,8 +22,8 @@ export default function QuoteDetailPage() {
   const deactivateQuote = useDeactivateQuote();
   const [isUnlockDialogOpen, setIsUnlockDialogOpen] = useState(false);
   
-  // Fetch opportunity for date range
-  const { data: opportunity } = useOpportunity(quote?.opportunity_id || "", false, {
+  // Fetch opportunity for date range and lock status (required to decide Unlock button visibility)
+  const { data: opportunity, isLoading: isOpportunityLoading } = useOpportunity(quote?.opportunity_id || "", false, {
     enabled: !!quote?.opportunity_id,
   });
 
@@ -260,13 +260,21 @@ export default function QuoteDetailPage() {
   return (
     <div className="container mx-auto p-6 space-y-6">
       {/* Header */}
-      <Card>
+      <Card className={opportunity?.is_permanently_locked ? "border-violet-200 bg-violet-50" : ""}>
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
                 <CardTitle className="flex items-center gap-2">
                 <FileText className="h-5 w-5" />
                 {quote.display_name}
+                {opportunity?.is_permanently_locked && (
+                  <>
+                    <Lock className="w-5 h-5 shrink-0 text-violet-700" />
+                    <span className="text-sm font-normal text-violet-800 ml-1">
+                      (Permanently Locked by Active Timesheets)
+                    </span>
+                  </>
+                )}
               </CardTitle>
               <div className="flex items-center gap-4 mt-2">
                 <QuoteStatusBadge status={quote.status} />
@@ -276,19 +284,14 @@ export default function QuoteDetailPage() {
                     Active (Locking Opportunity)
                   </span>
                 )}
-                {opportunity?.is_permanently_locked && (
-                  <span className="flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-sm font-medium">
-                    <Lock className="h-4 w-4" />
-                    Permanently locked
-                  </span>
-                )}
                 <span className="text-sm text-gray-500">
                   Version {quote.version}
                 </span>
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {quote.is_active && !opportunity?.is_permanently_locked && (
+              {/* Only show Unlock when opportunity is loaded and not permanently locked (avoids flash before is_permanently_locked loads) */}
+              {quote.is_active && !isOpportunityLoading && opportunity && !opportunity.is_permanently_locked && (
                 <Button
                   variant="destructive"
                   onClick={() => setIsUnlockDialogOpen(true)}

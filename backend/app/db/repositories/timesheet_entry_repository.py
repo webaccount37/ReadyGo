@@ -83,3 +83,13 @@ class TimesheetEntryRepository(BaseRepository[TimesheetEntry]):
         result = await self.session.execute(delete(TimesheetEntry).where(TimesheetEntry.id == id))
         await self.session.flush()
         return result.rowcount > 0
+
+    async def delete_by_engagement_ids(self, engagement_ids: List[UUID]) -> int:
+        """Delete all timesheet entries referencing the given engagement IDs. Returns count deleted."""
+        if not engagement_ids:
+            return 0
+        result = await self.session.execute(
+            delete(TimesheetEntry).where(TimesheetEntry.engagement_id.in_(engagement_ids))
+        )
+        await self.session.flush()
+        return result.rowcount or 0

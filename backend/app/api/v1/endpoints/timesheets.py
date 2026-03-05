@@ -68,6 +68,20 @@ async def get_my_incomplete_weeks(
     return {"count": len(weeks), "weeks": [w.isoformat() for w in weeks]}
 
 
+@router.get("/me/week-statuses")
+async def get_my_week_statuses(
+    past_weeks: int = Query(52, ge=1, le=104),
+    future_weeks: int = Query(12, ge=0, le=52),
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """Get timesheet status by week for carousel. Returns {week_iso: status}."""
+    controller = TimesheetController(db)
+    return await controller.get_week_statuses(
+        current_employee.id, past_weeks, future_weeks
+    )
+
+
 @router.get("/{timesheet_id}", response_model=TimesheetResponse)
 async def get_timesheet(
     timesheet_id: UUID,

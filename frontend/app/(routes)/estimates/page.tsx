@@ -101,6 +101,7 @@ function EstimatesPageContent() {
           account_name?: string;
           delivery_center_id?: string;
           delivery_center_name?: string;
+          is_permanently_locked?: boolean;
         };
         estimates: Estimate[];
       }
@@ -131,6 +132,7 @@ function EstimatesPageContent() {
               account_name: opportunity.account_name,
               delivery_center_id: opportunity.delivery_center_id,
               delivery_center_name: getDeliveryCenterName(opportunity.delivery_center_id),
+              is_permanently_locked: (opportunity as { is_permanently_locked?: boolean }).is_permanently_locked,
             },
             estimates: [],
           };
@@ -411,9 +413,9 @@ function EstimatesPageContent() {
                                   </span>
                                 )}
                                 {estimate.is_locked && (
-                                  <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold">
-                                    <Lock className="w-3 h-3" />
-                                    LOCKED
+                                  <span className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold ${group.opportunity.is_permanently_locked ? "bg-violet-100 text-violet-800" : "bg-yellow-100 text-yellow-800"}`}>
+                                    <Lock className="w-3 h-3 shrink-0" />
+                                    {group.opportunity.is_permanently_locked ? "PERMANENTLY LOCKED" : "LOCKED"}
                                   </span>
                                 )}
                                 {estimate.description && (

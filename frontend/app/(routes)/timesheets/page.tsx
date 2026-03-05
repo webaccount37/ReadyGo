@@ -9,6 +9,7 @@ import {
   useSubmitTimesheet,
   useTimesheetIncompleteCount,
   useTimesheetIncompleteWeeks,
+  useWeekStatuses,
 } from "@/hooks/useTimesheets";
 import { useAuth } from "@/hooks/useAuth";
 import { useAccounts } from "@/hooks/useAccounts";
@@ -69,6 +70,7 @@ function TimesheetPageContent() {
   const { data: incompleteWeeksData } = useTimesheetIncompleteWeeks({
     enabled: (incompleteData?.count ?? 0) > 0,
   });
+  const { data: weekStatuses } = useWeekStatuses({ past_weeks: 104, future_weeks: 12 });
   const { data: accountsData } = useAccounts({ limit: 500 });
   const { data: opportunitiesData } = useOpportunities({ limit: 500 });
   const saveEntries = useSaveTimesheetEntries();
@@ -287,6 +289,7 @@ function TimesheetPageContent() {
             selectedWeek={selectedWeek}
             onSelectWeek={handleSelectWeek}
             incompleteWeeks={incompleteWeeksData?.weeks ?? []}
+            weekStatuses={weekStatuses ?? {}}
             visibleCount={5}
           />
         </CardContent>

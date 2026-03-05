@@ -445,6 +445,14 @@ function QuotesPageContent() {
                                     <Lock className="h-4 w-4" />
                                     Active
                                   </span>
+                                  {opportunity?.is_permanently_locked && (
+                                    <span
+                                      className="inline-flex items-center justify-center w-5 h-5 rounded shrink-0 bg-violet-100 text-violet-700 border border-violet-200"
+                                      title="Permanently Locked by Active Timesheets"
+                                    >
+                                      <Lock className="h-3 w-3 shrink-0" />
+                                    </span>
+                                  )}
                                   <span className="text-sm text-gray-500">
                                     Version {quote.version}
                                   </span>
@@ -460,15 +468,17 @@ function QuotesPageContent() {
                                       View
                                     </Button>
                                   </Link>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={() => handleDeactivate(quote.id, quote.display_name)}
-                                    disabled={deactivateQuote.isPending}
-                                  >
-                                    <Unlock className="h-4 w-4 mr-1" />
-                                    Unlock
-                                  </Button>
+                                  {!opportunity?.is_permanently_locked && (
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      onClick={() => handleDeactivate(quote.id, quote.display_name)}
+                                      disabled={deactivateQuote.isPending}
+                                    >
+                                      <Unlock className="h-4 w-4 mr-1" />
+                                      Unlock
+                                    </Button>
+                                  )}
                                 </div>
                               </div>
                             ))}

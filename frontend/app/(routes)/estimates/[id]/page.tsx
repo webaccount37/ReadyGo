@@ -368,9 +368,9 @@ export default function EstimateDetailPage() {
             </span>
           )}
           {estimate.is_locked && (
-            <span className="flex items-center gap-1 px-3 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-semibold">
-              <Lock className="w-4 h-4" />
-              LOCKED
+            <span className={`flex items-center gap-1 px-3 py-1 rounded text-sm font-semibold ${isPermanentlyLocked ? "bg-violet-100 text-violet-800" : "bg-yellow-100 text-yellow-800"}`}>
+              <Lock className="w-4 h-4 shrink-0" />
+              {isPermanentlyLocked ? "PERMANENTLY LOCKED" : "LOCKED"}
             </span>
           )}
           {estimate.is_locked && estimate.locked_by_quote_id && (
@@ -418,20 +418,19 @@ export default function EstimateDetailPage() {
         </div>
       </div>
 
-      <Card className={`mb-6 ${isPermanentlyLocked ? 'border-slate-200 bg-slate-50' : isOpportunityLocked ? 'border-yellow-200 bg-yellow-50' : ''}`}>
+      <Card className={`mb-6 ${isPermanentlyLocked ? 'border-violet-200 bg-violet-50' : isOpportunityLocked ? 'border-yellow-200 bg-yellow-50' : ''}`}>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            {isPermanentlyLocked && <Lock className="w-5 h-5 text-slate-600" />}
-            {isOpportunityLocked && !isPermanentlyLocked && <Lock className="w-5 h-5 text-yellow-800" />}
+            {(isPermanentlyLocked || isOpportunityLocked) && <Lock className={`w-5 h-5 shrink-0 ${isPermanentlyLocked ? 'text-violet-700' : 'text-yellow-700'}`} />}
             Estimate Details
             {isPermanentlyLocked && (
-              <span className="text-sm font-normal text-slate-700 ml-2">
-                (Permanently locked — timesheet entries exist)
+              <span className="text-sm font-normal text-violet-800 ml-2">
+                (Permanently Locked by Active Timesheets)
               </span>
             )}
             {isOpportunityLocked && !isPermanentlyLocked && (
               <span className="text-sm font-normal text-yellow-800 ml-2">
-                (Locked by active quote - {opportunity?.locked_by_quote_id && (
+                (Locked — Active Quote {opportunity?.locked_by_quote_id && (
                   <Link href={`/quotes/${opportunity.locked_by_quote_id}`} className="underline">View quote</Link>
                 )} to unlock)
               </span>

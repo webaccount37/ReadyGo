@@ -22,6 +22,7 @@ from app.db.repositories.estimate_line_item_repository import EstimateLineItemRe
 from app.db.repositories.estimate_phase_repository import EstimatePhaseRepository
 from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
 from app.db.repositories.quote_repository import QuoteRepository
+from app.db.repositories.timesheet_entry_repository import TimesheetEntryRepository
 from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
@@ -55,6 +56,7 @@ class EngagementService(BaseService):
         self.estimate_phase_repo = EstimatePhaseRepository(session)
         self.estimate_weekly_hours_repo = EstimateWeeklyHoursRepository(session)
         self.quote_repo = QuoteRepository(session)
+        self.timesheet_entry_repo = TimesheetEntryRepository(session)
         self.role_rate_repo = RoleRateRepository(session)
         self.role_repo = RoleRepository(session)
         self.employee_repo = EmployeeRepository(session)
@@ -187,22 +189,29 @@ class EngagementService(BaseService):
     async def delete_engagements_by_quote(self, quote_id: UUID) -> int:
         """Delete all engagements associated with a quote.
         
+        Deletes timesheet entries for those engagements first (to satisfy FK constraints),
+        then deletes the engagements.
+        
         Returns:
             Number of engagements deleted.
         """
         engagements = await self.engagement_repo.list_by_quote(quote_id)
+        if not engagements:
+            return 0
+
+        engagement_ids = [e.id for e in engagements]
+        # Delete timesheet entries before engagements (FK from timesheet_entries.engagement_id)
+        entries_deleted = await self.timesheet_entry_repo.delete_by_engagement_ids(engagement_ids)
+        if entries_deleted > 0:
+            logger.info(f"Deleted {entries_deleted} timesheet entry(ies) for quote {quote_id} engagements")
+
         deleted_count = 0
-        
         for engagement in engagements:
             result = await self.engagement_repo.delete(engagement.id)
             if result:
                 deleted_count += 1
                 logger.info(f"Deleted engagement {engagement.id} for quote {quote_id}")
-        
-        if deleted_count > 0:
-            await self.session.commit()
-            logger.info(f"Deleted {deleted_count} engagement(s) for quote {quote_id}")
-        
+
         return deleted_count
     
     async def get_engagement_detail(self, engagement_id: UUID) -> EngagementDetailResponse:

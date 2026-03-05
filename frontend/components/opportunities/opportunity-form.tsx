@@ -334,12 +334,20 @@ export function OpportunityForm({
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      {hasActiveQuote && (
-        <div className="flex items-center gap-2 px-4 py-3 bg-yellow-50 border border-yellow-200 rounded-md">
-          <Lock className="w-5 h-5 text-yellow-600" />
+      {isLocked && (
+        <div className={`flex items-center gap-2 px-4 py-3 rounded-md border ${hasPermanentLock ? "bg-violet-50 border-violet-200" : "bg-yellow-50 border-yellow-200"}`}>
+          <Lock className={`w-5 h-5 shrink-0 ${hasPermanentLock ? "text-violet-600" : "text-yellow-600"}`} />
           <div className="flex-1">
-            <p className="text-sm font-semibold text-yellow-800">Opportunity Locked</p>
-            <p className="text-xs text-yellow-700">This opportunity is locked by an active quote. Some fields cannot be modified until the quote is deactivated.</p>
+            <p className={`text-sm font-semibold ${hasPermanentLock ? "text-violet-800" : "text-yellow-800"}`}>
+              {hasPermanentLock
+                ? "Permanently Locked by Active Timesheets"
+                : "Locked by Active Quote"}
+            </p>
+            <p className={`text-xs ${hasPermanentLock ? "text-violet-700" : "text-yellow-700"}`}>
+              {hasPermanentLock
+                ? "This opportunity cannot be modified or deleted."
+                : "Some fields cannot be modified until the quote is deactivated."}
+            </p>
           </div>
         </div>
       )}

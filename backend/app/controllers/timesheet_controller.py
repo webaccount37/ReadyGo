@@ -106,3 +106,13 @@ class TimesheetController(BaseController):
 
     async def list_incomplete_past_weeks(self, employee_id: UUID, limit: int = 20) -> List[date]:
         return await self.timesheet_service.list_incomplete_past_weeks(employee_id, limit)
+
+    async def get_week_statuses(
+        self,
+        employee_id: UUID,
+        past_weeks: int = 52,
+        future_weeks: int = 12,
+    ) -> dict:
+        return await self.timesheet_service.get_week_statuses(
+            employee_id, past_weeks, future_weeks
+        )

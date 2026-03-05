@@ -7,7 +7,7 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, delete
 
 from app.services.base_service import BaseService
 from app.db.repositories.timesheet_repository import TimesheetRepository
@@ -15,10 +15,13 @@ from app.db.repositories.timesheet_entry_repository import TimesheetEntryReposit
 from app.db.repositories.timesheet_status_history_repository import TimesheetStatusHistoryRepository
 from app.db.repositories.timesheet_approved_snapshot_repository import TimesheetApprovedSnapshotRepository
 from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.db.repositories.engagement_timesheet_approver_repository import EngagementTimesheetApproverRepository
 from app.db.repositories.delivery_center_approver_repository import DeliveryCenterApproverRepository
 from app.models.timesheet import Timesheet, TimesheetEntry, TimesheetStatus
+from app.models.engagement import Engagement
+from app.models.opportunity_permanent_lock import OpportunityPermanentLock
 from app.utils.currency_converter import convert_currency
 from app.schemas.timesheet import TimesheetResponse, TimesheetApprovalSummary, TimesheetApprovalListResponse
 
@@ -37,6 +40,7 @@ class TimesheetApprovalService(BaseService):
         self.engagement_repo = EngagementRepository(session)
         self.opportunity_repo = OpportunityRepository(session)
         self.eng_approver_repo = EngagementTimesheetApproverRepository(session)
+        self.lock_repo = OpportunityPermanentLockRepository(session)
 
     def _can_approve(self, approver_employee_id: UUID, timesheet: Timesheet) -> bool:
         """Check if employee can approve this timesheet."""
@@ -130,10 +134,76 @@ class TimesheetApprovalService(BaseService):
             to_status=TimesheetStatus.APPROVED,
             changed_by_employee_id=approver_employee_id,
         )
+        # Create permanent lock for each entry with engagement + hours > 0 (APPROVED triggers lock)
+        await self._ensure_permanent_lock_for_timesheet(timesheet_id)
         await self.session.commit()
         from app.services.timesheet_service import TimesheetService
         svc = TimesheetService(self.session)
         return await svc._to_response(await self.timesheet_repo.get(timesheet_id))
+
+    async def _ensure_permanent_lock_for_timesheet(self, timesheet_id: UUID) -> None:
+        """Ensure opportunity permanent lock for each entry with engagement + hours > 0."""
+        timesheet = await self.timesheet_repo.get(timesheet_id)
+        if not timesheet or not timesheet.entries:
+            return
+        for entry in timesheet.entries:
+            entry_total = sum(
+                Decimal(str(getattr(entry, f"{d}_hours") or 0))
+                for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+            )
+            if entry.engagement_id and entry_total > 0:
+                engagement = await self.engagement_repo.get(entry.engagement_id)
+                if engagement:
+                    opp_id = engagement.opportunity_id
+                    existing = await self.lock_repo.get_by_opportunity(opp_id)
+                    if not existing:
+                        await self.lock_repo.create(
+                            opportunity_id=opp_id,
+                            locked_by_timesheet_id=timesheet_id,
+                        )
+                        logger.info(f"Permanent lock created for opportunity {opp_id}")
+
+    BLOCKING_STATUSES = (TimesheetStatus.SUBMITTED, TimesheetStatus.APPROVED, TimesheetStatus.INVOICED)
+
+    async def _recalculate_permanent_lock_after_status_change(self, timesheet_id: UUID) -> None:
+        """
+        After reject/reopen: if an opportunity no longer has any SUBMITTED/APPROVED/INVOICED
+        timesheet entries with hours, remove its permanent lock.
+        """
+        timesheet = await self.timesheet_repo.get(timesheet_id)
+        if not timesheet or not timesheet.entries:
+            return
+        opp_ids = set()
+        for entry in timesheet.entries:
+            if entry.engagement_id:
+                eng = await self.engagement_repo.get(entry.engagement_id)
+                if eng:
+                    opp_ids.add(eng.opportunity_id)
+        await self.session.flush()  # Ensure status change is visible to following query
+        hours_expr = (
+            func.coalesce(TimesheetEntry.sun_hours, 0) + func.coalesce(TimesheetEntry.mon_hours, 0)
+            + func.coalesce(TimesheetEntry.tue_hours, 0) + func.coalesce(TimesheetEntry.wed_hours, 0)
+            + func.coalesce(TimesheetEntry.thu_hours, 0) + func.coalesce(TimesheetEntry.fri_hours, 0)
+            + func.coalesce(TimesheetEntry.sat_hours, 0)
+        )
+        for opp_id in opp_ids:
+            eng_ids_subq = select(Engagement.id).where(Engagement.opportunity_id == opp_id)
+            count_result = await self.session.execute(
+                select(func.count())
+                .select_from(TimesheetEntry)
+                .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+                .where(TimesheetEntry.engagement_id.in_(eng_ids_subq))
+                .where(Timesheet.status.in_(self.BLOCKING_STATUSES))
+                .where(hours_expr > 0)
+            )
+            count = count_result.scalar_one() or 0
+            if count == 0:
+                await self.session.execute(
+                    delete(OpportunityPermanentLock).where(
+                        OpportunityPermanentLock.opportunity_id == opp_id
+                    )
+                )
+                logger.info(f"Permanent lock removed for opportunity {opp_id} (no blocking timesheets)")
 
     async def _can_approve_async(self, approver_employee_id: UUID, timesheet: Timesheet) -> bool:
         """Async check if employee can approve."""
@@ -183,6 +253,7 @@ class TimesheetApprovalService(BaseService):
             to_status=TimesheetStatus.REOPENED,
             changed_by_employee_id=approver_employee_id,
         )
+        await self._recalculate_permanent_lock_after_status_change(timesheet_id)
         await self.session.commit()
         from app.services.timesheet_service import TimesheetService
         svc = TimesheetService(self.session)
@@ -220,6 +291,7 @@ class TimesheetApprovalService(BaseService):
             to_status=TimesheetStatus.REOPENED,
             changed_by_employee_id=reopener_employee_id,
         )
+        await self._recalculate_permanent_lock_after_status_change(timesheet_id)
         await self.session.commit()
         from app.services.timesheet_service import TimesheetService
         svc = TimesheetService(self.session)
@@ -244,6 +316,8 @@ class TimesheetApprovalService(BaseService):
             to_status=TimesheetStatus.INVOICED,
             changed_by_employee_id=None,
         )
+        # Create permanent lock (INVOICED treats same as APPROVED - lock may already exist from approve)
+        await self._ensure_permanent_lock_for_timesheet(timesheet_id)
         await self.session.commit()
         from app.services.timesheet_service import TimesheetService
         svc = TimesheetService(self.session)

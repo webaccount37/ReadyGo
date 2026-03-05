@@ -21,6 +21,8 @@ const QUERY_KEYS = {
   all: ["timesheets"] as const,
   my: (week?: string) => [...QUERY_KEYS.all, "me", week] as const,
   incompleteCount: () => [...QUERY_KEYS.all, "me", "incomplete-count"] as const,
+  weekStatuses: (params?: Record<string, unknown>) =>
+    [...QUERY_KEYS.all, "me", "week-statuses", params] as const,
   detail: (id: string) => [...QUERY_KEYS.all, "detail", id] as const,
   pendingApprovals: (params?: Record<string, unknown>) =>
     [...QUERY_KEYS.all, "approvals", "pending", params] as const,
@@ -62,6 +64,20 @@ export function useTimesheetIncompleteWeeks(
   return useQuery<{ count: number; weeks: string[] }>({
     queryKey: [...QUERY_KEYS.incompleteCount(), "weeks"] as const,
     queryFn: () => timesheetsApi.getMyIncompleteWeeks(52),
+    ...options,
+  });
+}
+
+/**
+ * Get week statuses for carousel (Submitted, Approved, Invoiced, etc.).
+ */
+export function useWeekStatuses(
+  params?: { past_weeks?: number; future_weeks?: number },
+  options?: Omit<UseQueryOptions<Record<string, string>>, "queryKey" | "queryFn">
+) {
+  return useQuery<Record<string, string>>({
+    queryKey: QUERY_KEYS.weekStatuses(params),
+    queryFn: () => timesheetsApi.getMyWeekStatuses(params),
     ...options,
   });
 }
@@ -120,6 +136,9 @@ export function useSubmitTimesheet(
     onSuccess: (_, { timesheetId }) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(timesheetId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      // Submission creates permanent lock - invalidate so Quote Unlock button hides
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
     },
     ...options,
   });
@@ -137,6 +156,8 @@ export function useApproveTimesheet(
     onSuccess: (_, timesheetId) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(timesheetId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
     },
     ...options,
   });
@@ -154,6 +175,8 @@ export function useRejectTimesheet(
     onSuccess: (_, timesheetId) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(timesheetId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
     },
     ...options,
   });
@@ -171,6 +194,8 @@ export function useReopenTimesheet(
     onSuccess: (_, timesheetId) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(timesheetId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
     },
     ...options,
   });

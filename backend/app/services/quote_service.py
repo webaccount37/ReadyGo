@@ -25,6 +25,7 @@ from app.db.repositories.estimate_phase_repository import EstimatePhaseRepositor
 from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyHoursRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.db.repositories.delivery_center_approver_repository import DeliveryCenterApproverRepository
+from app.db.repositories.engagement_repository import EngagementRepository
 from app.models.quote import (
     Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus,
     QuotePaymentTrigger, QuoteVariableCompensation, QuoteType, PaymentTriggerType,
@@ -57,6 +58,7 @@ class QuoteService(BaseService):
         self.estimate_weekly_hours_repo = EstimateWeeklyHoursRepository(session)
         self.opportunity_repo = OpportunityRepository(session)
         self.approver_repo = DeliveryCenterApproverRepository(session)
+        self.engagement_repo = EngagementRepository(session)
     
     async def create_quote(self, quote_data: QuoteCreate, created_by: Optional[UUID] = None) -> QuoteResponse:
         """Create quote from estimate snapshot."""
@@ -333,15 +335,13 @@ class QuoteService(BaseService):
         if not quote:
             return None
 
-        # Check if opportunity is permanently locked
-        from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
-        lock_repo = OpportunityPermanentLockRepository(self.session)
-        if await lock_repo.is_opportunity_locked(quote.opportunity_id):
+        # Check if opportunity is permanently locked (blocking timesheets: SUBMITTED/APPROVED/INVOICED with hours)
+        if await self._has_blocking_timesheets_for_quote(quote_id):
             raise ValueError(
                 "Opportunity is permanently locked due to timesheet entries. "
                 "No further changes to quotes are allowed."
             )
-        
+
         update_dict = {
             "status": status_data.status,
             "sent_date": status_data.sent_date,
@@ -387,11 +387,45 @@ class QuoteService(BaseService):
             return None
         return await self._to_response(updated)
     
+    async def _has_blocking_timesheets_for_quote(self, quote_id: UUID) -> bool:
+        """Check if any SUBMITTED/APPROVED/INVOICED timesheet entry with hours > 0 exists for this quote's engagements."""
+        from app.models.timesheet import TimesheetEntry, Timesheet
+        from app.models.engagement import Engagement
+        from app.models.timesheet import TimesheetStatus
+
+        # Subquery: engagement ids for this quote
+        engagements_subq = select(Engagement.id).where(Engagement.quote_id == quote_id)
+        # Entries with hours > 0 for those engagements, where timesheet status is blocking
+        blocking_statuses = (TimesheetStatus.SUBMITTED, TimesheetStatus.APPROVED, TimesheetStatus.INVOICED)
+        hours_expr = (
+            func.coalesce(TimesheetEntry.sun_hours, 0) + func.coalesce(TimesheetEntry.mon_hours, 0)
+            + func.coalesce(TimesheetEntry.tue_hours, 0) + func.coalesce(TimesheetEntry.wed_hours, 0)
+            + func.coalesce(TimesheetEntry.thu_hours, 0) + func.coalesce(TimesheetEntry.fri_hours, 0)
+            + func.coalesce(TimesheetEntry.sat_hours, 0)
+        )
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(TimesheetEntry)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(TimesheetEntry.engagement_id.in_(engagements_subq))
+            .where(Timesheet.status.in_(blocking_statuses))
+            .where(hours_expr > 0)
+        )
+        count = result.scalar_one() or 0
+        return count > 0
+
     async def deactivate_quote(self, quote_id: UUID) -> Optional[QuoteResponse]:
         """Deactivate quote and unlock opportunity/estimates."""
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return None
+
+        # Block if there are SUBMITTED/APPROVED/INVOICED timesheet entries with hours (permanent lock)
+        if await self._has_blocking_timesheets_for_quote(quote_id):
+            raise ValueError(
+                "Cannot unlock: this quote has SUBMITTED, APPROVED, or INVOICED timesheet entries "
+                "with hours. Permanent lock prevents changes."
+            )
         
         # Set quote as inactive
         update_dict = {"is_active": False}

@@ -21,6 +21,7 @@ import { OpportunityRelationships } from "@/components/opportunities/opportunity
 import type { OpportunityCreate, OpportunityUpdate } from "@/types/opportunity";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
+import { cn } from "@/lib/utils";
 import { useOpportunity } from "@/hooks/useOpportunities";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
@@ -423,19 +424,24 @@ function OpportunitiesPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingOpportunity(opportunity.id)}
                           >
-                            <td className="p-1.5 font-medium max-w-[120px] truncate text-xs" title={opportunity.name}>
-                              <div className="flex items-center gap-1.5">
-                                {highlightText(opportunity.name, searchQuery)}
-                                {opportunity.is_permanently_locked ? (
-                                  <span className="flex items-center gap-1 px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-xs font-semibold whitespace-nowrap" title="Permanently locked (timesheet entries exist)">
-                                    <Lock className="w-3 h-3" />
+                            <td className="p-1.5 font-medium max-w-[120px] text-xs" title={opportunity.name}>
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="truncate">{highlightText(opportunity.name, searchQuery)}</span>
+                                {(opportunity.is_permanently_locked || hasActiveQuote(opportunity.id)) && (
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center justify-center w-5 h-5 rounded shrink-0",
+                                      opportunity.is_permanently_locked
+                                        ? "bg-violet-100 text-violet-700 border border-violet-200"
+                                        : "bg-yellow-100 text-yellow-700 border border-yellow-200"
+                                    )}
+                                    title={opportunity.is_permanently_locked
+                                      ? "Permanently Locked by Active Timesheets"
+                                      : "Locked by Active Quote"}
+                                  >
+                                    <Lock className="w-3 h-3 shrink-0" />
                                   </span>
-                                ) : null}
-                                {hasActiveQuote(opportunity.id) ? (
-                                  <span className="flex items-center gap-1 px-1.5 py-0.5 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold whitespace-nowrap" title="Locked by active quote">
-                                    <Lock className="w-3 h-3" />
-                                  </span>
-                                ) : null}
+                                )}
                               </div>
                             </td>
                             <td className="p-1.5 max-w-[100px] truncate text-xs" title={getAccountName(opportunity.account_id)}>
@@ -579,12 +585,21 @@ function OpportunitiesPageContent() {
                                 </div>
                                 <div className="flex items-center gap-2">
                                   <div className="text-sm font-medium">{highlightText(opportunity.name, searchQuery)}</div>
-                                  {hasActiveQuote(opportunity.id) ? (
-                                    <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-xs font-semibold whitespace-nowrap" title="Locked by active quote">
-                                      <Lock className="w-3 h-3" />
-                                      Locked
+                                  {(opportunity.is_permanently_locked || hasActiveQuote(opportunity.id)) && (
+                                    <span
+                                      className={cn(
+                                        "inline-flex items-center justify-center w-5 h-5 rounded shrink-0",
+                                        opportunity.is_permanently_locked
+                                          ? "bg-violet-100 text-violet-700 border border-violet-200"
+                                          : "bg-yellow-100 text-yellow-700 border border-yellow-200"
+                                      )}
+                                      title={opportunity.is_permanently_locked
+                                        ? "Permanently Locked by Active Timesheets"
+                                        : "Locked by Active Quote"}
+                                    >
+                                      <Lock className="w-3 h-3 shrink-0" />
                                     </span>
-                                  ) : null}
+                                  )}
                                 </div>
                               </div>
                               <div>
@@ -739,11 +754,19 @@ function OpportunitiesPageContent() {
           <DialogContent className="space-y-4 max-h-[90vh] overflow-y-auto">
             {/* Basic Information */}
             <div className="space-y-4">
-              {(opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked && (
-                <div className="flex items-center gap-2 px-3 py-2 bg-slate-100 text-slate-700 rounded border border-slate-200">
-                  <Lock className="w-4 h-4 text-slate-600" />
-                  <span className="text-sm font-medium">Permanently locked</span>
-                  <span className="text-xs text-slate-600">(Timesheet entries exist; edits cannot be made)</span>
+              {((opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked || (opportunityToView?.id && hasActiveQuote(opportunityToView.id))) && (
+                <div className={cn(
+                  "flex items-center gap-2 px-3 py-2 rounded border",
+                  (opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked
+                    ? "bg-violet-50 text-violet-800 border-violet-200"
+                    : "bg-yellow-50 text-yellow-800 border-yellow-200"
+                )}>
+                  <Lock className="w-4 h-4 shrink-0" />
+                  <span className="text-sm font-medium">
+                    {(opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked
+                      ? "Permanently Locked by Active Timesheets"
+                      : "Locked by Active Quote"}
+                  </span>
                 </div>
               )}
               <h3 className="text-lg font-semibold border-b pb-2">Basic Information</h3>
@@ -964,17 +987,21 @@ function OpportunitiesPageContent() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               Edit Opportunity
-              {(opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked ? (
-                <span className="flex items-center gap-1 px-2 py-1 bg-slate-100 text-slate-700 rounded text-sm font-semibold whitespace-nowrap" title="Permanently locked (timesheet entries exist)">
-                  <Lock className="w-4 h-4" />
-                  Permanently locked
+              {((opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked || (opportunityToEdit?.id && hasActiveQuote(opportunityToEdit.id))) && (
+                <span
+                  className={cn(
+                    "inline-flex items-center justify-center w-6 h-6 rounded shrink-0",
+                    (opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked
+                      ? "bg-violet-100 text-violet-700 border border-violet-200"
+                      : "bg-yellow-100 text-yellow-700 border border-yellow-200"
+                  )}
+                  title={(opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked
+                    ? "Permanently Locked by Active Timesheets"
+                    : "Locked by Active Quote"}
+                >
+                  <Lock className="w-4 h-4 shrink-0" />
                 </span>
-              ) : opportunityToEdit?.id && hasActiveQuote(opportunityToEdit.id) ? (
-                <span className="flex items-center gap-1 px-2 py-1 bg-yellow-100 text-yellow-800 rounded text-sm font-semibold whitespace-nowrap" title="Locked by active quote">
-                  <Lock className="w-4 h-4" />
-                  Locked
-                </span>
-              ) : null}
+              )}
             </DialogTitle>
           </DialogHeader>
           <DialogContent className="max-h-[90vh] overflow-y-auto">

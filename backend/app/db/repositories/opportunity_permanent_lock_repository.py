@@ -5,7 +5,7 @@ Opportunity permanent lock repository for database operations.
 from typing import Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.opportunity_permanent_lock import OpportunityPermanentLock
@@ -38,3 +38,13 @@ class OpportunityPermanentLockRepository(BaseRepository[OpportunityPermanentLock
         await self.session.flush()
         await self.session.refresh(instance)
         return instance
+
+    async def delete_by_opportunity(self, opportunity_id: UUID) -> bool:
+        """Remove permanent lock for an opportunity. Returns True if a lock was deleted."""
+        result = await self.session.execute(
+            delete(OpportunityPermanentLock).where(
+                OpportunityPermanentLock.opportunity_id == opportunity_id
+            )
+        )
+        await self.session.flush()
+        return result.rowcount > 0

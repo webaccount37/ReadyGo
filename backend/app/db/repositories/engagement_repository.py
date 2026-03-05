@@ -94,14 +94,22 @@ class EngagementRepository(BaseRepository[Engagement]):
         skip: int = 0,
         limit: int = 200,
     ) -> List[Engagement]:
-        """List engagements where the employee has a line item on the resource plan."""
+        """List engagements where the employee has a line item on the resource plan.
+        
+        Uses subquery for distinct IDs to avoid PostgreSQL 'equality operator for type json'
+        error when DISTINCT is applied to full Engagement rows (attributes column is JSON).
+        """
         from app.models.engagement import EngagementLineItem
 
-        query = (
-            self._base_query()
+        subq = (
+            select(Engagement.id)
             .join(EngagementLineItem, Engagement.id == EngagementLineItem.engagement_id)
             .where(EngagementLineItem.employee_id == employee_id)
             .distinct()
+        )
+        query = (
+            self._base_query()
+            .where(Engagement.id.in_(subq))
             .offset(skip)
             .limit(limit)
         )

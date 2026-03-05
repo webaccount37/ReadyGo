@@ -244,7 +244,7 @@ class TimesheetService(BaseService):
         entries: List[TimesheetEntryUpsert],
         current_employee_id: UUID,
     ) -> TimesheetResponse:
-        """Save timesheet entries. Triggers permanent lock if any entry has hours > 0."""
+        """Save timesheet entries (draft/REOPENED). Does NOT create permanent lock - that only happens on SUBMIT/APPROVE/INVOICE."""
         timesheet = await self.timesheet_repo.get(timesheet_id)
         if not timesheet:
             raise ValueError("Timesheet not found")
@@ -275,13 +275,6 @@ class TimesheetService(BaseService):
                     await self.entry_repo.update(entry_id, **update_data)
                     if day_notes is not None:
                         await self._save_day_notes(entry_id, day_notes)
-                    total = sum(
-                        Decimal(str(update_data.get(f"{d}_hours") or getattr(entry, f"{d}_hours") or 0))
-                        for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
-                    )
-                    engagement_id = update_data.get("engagement_id") or entry.engagement_id
-                    if engagement_id and total > 0:
-                        await self._ensure_permanent_lock(engagement_id, timesheet_id)
                     continue
 
             create_data = {
@@ -309,12 +302,6 @@ class TimesheetService(BaseService):
             )
             if day_notes:
                 await self._save_day_notes(entry.id, day_notes)
-            total = sum(
-                Decimal(str(getattr(entry, f"{d}_hours") or 0))
-                for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
-            )
-            if entry.engagement_id and total > 0:
-                await self._ensure_permanent_lock(entry.engagement_id, timesheet_id)
 
         await self.session.commit()
         timesheet = await self.timesheet_repo.get(timesheet_id)
@@ -411,6 +398,14 @@ class TimesheetService(BaseService):
             to_status=TimesheetStatus.SUBMITTED,
             changed_by_employee_id=current_employee_id,
         )
+        # Create permanent lock for each entry with engagement + hours > 0 (SUBMITTED triggers lock)
+        for entry in timesheet.entries or []:
+            entry_total = sum(
+                Decimal(str(getattr(entry, f"{d}_hours") or 0))
+                for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+            )
+            if entry.engagement_id and entry_total > 0:
+                await self._ensure_permanent_lock(entry.engagement_id, timesheet_id)
         await self.session.commit()
         timesheet = await self.timesheet_repo.get(timesheet_id)
         return await self._to_response(timesheet), None
@@ -495,3 +490,21 @@ class TimesheetService(BaseService):
         """List week_start_date for past weeks with NOT_SUBMITTED or REOPENED."""
         today = date.today()
         return await self.timesheet_repo.list_incomplete_past_weeks(employee_id, today, limit)
+
+    async def get_week_statuses(
+        self,
+        employee_id: UUID,
+        past_weeks: int = 52,
+        future_weeks: int = 12,
+    ) -> dict:
+        """Get timesheet status by week for carousel. Returns {week_iso: status}."""
+        from datetime import timedelta
+
+        today = date.today()
+        days_since_sunday = (today.weekday() + 1) % 7
+        this_sunday = today - timedelta(days=days_since_sunday)
+        start_date = this_sunday - timedelta(weeks=past_weeks)
+        end_date = this_sunday + timedelta(weeks=future_weeks)
+        return await self.timesheet_repo.get_week_statuses(
+            employee_id, start_date, end_date
+        )

@@ -2,7 +2,7 @@
 Timesheet models for time entry and approval workflows.
 """
 
-from sqlalchemy import Column, String, Date, ForeignKey, Numeric, Integer, Boolean, DateTime, UniqueConstraint, Enum as SQLEnum
+from sqlalchemy import Column, String, Date, ForeignKey, Numeric, Integer, Boolean, DateTime, UniqueConstraint, Enum as SQLEnum, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 import uuid
@@ -39,7 +39,7 @@ class Timesheet(Base):
     week_start_date = Column(Date, nullable=False, index=True)  # Sunday of the week
     status = Column(SQLEnum(TimesheetStatus), nullable=False, default=TimesheetStatus.NOT_SUBMITTED, index=True)
     created_at = Column(DateTime, nullable=False, server_default="now()")
-    updated_at = Column(DateTime, nullable=False, server_default="now()", onupdate="now()")
+    updated_at = Column(DateTime, nullable=False, server_default=func.now(), onupdate=func.now())
     
     # Relationships
     employee = relationship("Employee", back_populates="timesheets")

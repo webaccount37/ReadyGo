@@ -51,10 +51,13 @@ function generateWeekOptions(): string[] {
   return opts;
 }
 
+export type WeekStatus = "NOT_SUBMITTED" | "REOPENED" | "SUBMITTED" | "APPROVED" | "INVOICED";
+
 interface WeekCarouselProps {
   selectedWeek: string;
   onSelectWeek: (weekStart: string) => void;
   incompleteWeeks?: string[];
+  weekStatuses?: Record<string, string>;
   visibleCount?: number;
   className?: string;
 }
@@ -65,6 +68,7 @@ export function WeekCarousel({
   selectedWeek,
   onSelectWeek,
   incompleteWeeks = [],
+  weekStatuses = {},
   visibleCount = 5,
   className,
 }: WeekCarouselProps) {
@@ -110,6 +114,11 @@ export function WeekCarousel({
           {weeks.map((w) => {
             const isSelected = w === selectedWeek;
             const isIncomplete = incompleteWeeks.includes(w);
+            const status = weekStatuses[w];
+            const isSubmitted = status === "SUBMITTED";
+            const isApproved = status === "APPROVED";
+            const isInvoiced = status === "INVOICED";
+            const statusLabel = isInvoiced ? "Invoiced" : isApproved ? "Approved" : isSubmitted ? "Submitted" : isIncomplete ? "Incomplete" : null;
             return (
               <button
                 key={w}
@@ -123,15 +132,23 @@ export function WeekCarousel({
                   isSelected
                     ? "bg-blue-600 border-blue-600 text-white shadow-md scale-105"
                     : "bg-white border-gray-200 text-gray-700 hover:border-blue-300 hover:bg-blue-50",
-                  isIncomplete && !isSelected && "border-amber-300 bg-amber-50/50"
+                  isIncomplete && !isSelected && "border-amber-300 bg-amber-50/50",
+                  isSubmitted && !isSelected && !isIncomplete && "border-blue-200 bg-blue-50/50",
+                  isApproved && !isSelected && !isIncomplete && "border-emerald-300 bg-emerald-50/50",
+                  isInvoiced && !isSelected && !isIncomplete && "border-slate-300 bg-slate-50/50"
                 )}
               >
                 <span className="block leading-tight">{formatWeekLabel(w)}</span>
                 <span className={cn(
                   "block text-xs mt-0.5 min-h-[1rem] leading-4",
-                  isIncomplete ? (isSelected ? "text-blue-200" : "text-amber-600") : "invisible"
+                  isSelected ? "text-blue-200" : "",
+                  !isSelected && isIncomplete ? "text-amber-600" : "",
+                  !isSelected && isSubmitted ? "text-blue-600" : "",
+                  !isSelected && isApproved ? "text-emerald-600" : "",
+                  !isSelected && isInvoiced ? "text-slate-600" : "",
+                  !statusLabel && "invisible"
                 )}>
-                  {isIncomplete ? "Incomplete" : "\u00A0"}
+                  {statusLabel ?? "\u00A0"}
                 </span>
               </button>
             );

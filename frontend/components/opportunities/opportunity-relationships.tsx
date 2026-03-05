@@ -15,8 +15,9 @@ import { useRoles, useRole } from "@/hooks/useRoles";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { useQuotes } from "@/hooks/useQuotes";
-import { normalizeDateForInput } from "@/lib/utils";
+import { normalizeDateForInput, cn } from "@/lib/utils";
 import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
+import { Lock } from "lucide-react";
 import type { Opportunity } from "@/types/opportunity";
 
 interface OpportunityRelationshipsProps {
@@ -58,9 +59,11 @@ export function OpportunityRelationships({
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
   
-  // Check if opportunity has active quote (for locking)
+  // Check if opportunity has active quote or is permanently locked
   const { data: quotesData } = useQuotes({ opportunity_id: opportunity.id, limit: 100 });
   const hasActiveQuote = quotesData?.items?.some(q => q.is_active) || false;
+  const isPermanentlyLocked = (opportunity as { is_permanently_locked?: boolean })?.is_permanently_locked || false;
+  const isLocked = isPermanentlyLocked || hasActiveQuote;
   
   // Update currency rates cache when rates are fetched
   useEffect(() => {
@@ -320,15 +323,21 @@ export function OpportunityRelationships({
                                 }
                               }
                             }}
-                            disabled={unlinkFromOpportunity.isPending || hasActiveQuote}
+                            disabled={unlinkFromOpportunity.isPending || isLocked}
                             className="w-full sm:w-auto text-red-600 hover:text-red-800"
-                            title={hasActiveQuote ? "Opportunity is locked by active quote" : ""}
+                            title={isLocked ? (isPermanentlyLocked ? "Permanently Locked by Active Timesheets" : "Locked by Active Quote") : ""}
                           >
                             Unlink
                           </Button>
-                          {hasActiveQuote && (
-                            <span className="flex items-center gap-1 text-yellow-600 text-xs px-2 py-1 bg-yellow-50 rounded">
-                              Locked
+                          {isLocked && (
+                            <span
+                              className={cn(
+                                "inline-flex items-center justify-center w-5 h-5 rounded shrink-0",
+                                isPermanentlyLocked ? "text-violet-700 bg-violet-100 border border-violet-200" : "text-yellow-600 bg-yellow-50"
+                              )}
+                              title={isPermanentlyLocked ? "Permanently Locked by Active Timesheets" : "Locked by Active Quote"}
+                            >
+                              <Lock className="w-3 h-3 shrink-0" />
                             </span>
                           )}
                         </div>
@@ -360,8 +369,8 @@ export function OpportunityRelationships({
                   variant="outline"
                   size="sm"
                   className="w-full sm:w-auto"
-                  disabled={hasActiveQuote}
-                  title={hasActiveQuote ? "Opportunity is locked by active quote" : ""}
+                  disabled={isLocked}
+                  title={isLocked ? (isPermanentlyLocked ? "Permanently Locked by Active Timesheets" : "Locked by Active Quote") : ""}
                 >
                   + Link Employee
                 </Button>
@@ -498,11 +507,11 @@ export function OpportunityRelationships({
                         !employeeFormData.project_rate ||
                         !employeeFormData.delivery_center ||
                         linkToOpportunity.isPending ||
-                        hasActiveQuote
+                        isLocked
                       }
                       size="sm"
                       className="flex-1"
-                      title={hasActiveQuote ? "Opportunity is locked by active quote" : ""}
+                      title={isLocked ? (isPermanentlyLocked ? "Permanently Locked by Active Timesheets" : "Locked by Active Quote") : ""}
                     >
                       {linkToOpportunity.isPending ? "Linking..." : "Link Employee"}
                     </Button>
