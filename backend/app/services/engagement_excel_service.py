@@ -4,9 +4,9 @@ Excel export/import service for engagements (Resource Plan).
 
 import logging
 import io
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from uuid import UUID
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -14,6 +14,7 @@ from sqlalchemy import select
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Protection
 from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.datavalidation import DataValidation
 
 from app.db.repositories.engagement_repository import EngagementRepository
 from app.db.repositories.engagement_line_item_repository import EngagementLineItemRepository
@@ -87,11 +88,11 @@ class EngagementExcelService:
         )
         filtered_roles = list(roles_result.scalars().all())
         
-        # Generate weeks from line items (flexible dates)
+        # Generate weeks from earliest Start Date week and latest End Date week of any line item (resource plan role)
         if engagement.line_items and len(engagement.line_items) > 0:
             weeks = self._generate_weeks_from_line_items(engagement.line_items)
         else:
-            # Default to 1 year from today
+            # Default to 1 year from today when no line items
             from datetime import datetime
             today = datetime.now().date()
             start = today
@@ -190,47 +191,28 @@ class EngagementExcelService:
         if len(actual_weeks) != len(expected_weeks):
             raise ValueError(f"Week column count mismatch: expected {len(expected_weeks)}, found {len(actual_weeks)}")
         
-        # Parse data rows
+        # Parse data rows - use actual_weeks from sheet for exact column alignment
         line_items_data = self._parse_data_rows(
             data_ws,
-            expected_weeks,
+            actual_weeks,
             metadata,
             opportunity.delivery_center_id,
             opportunity.default_currency or "USD"
         )
         
         # Upsert line items
-        results = await self._upsert_line_items(engagement_id, line_items_data, expected_weeks)
+        results = await self._upsert_line_items(engagement_id, line_items_data, actual_weeks)
         
         return results
     
     def _generate_weeks_from_line_items(self, line_items: List[EngagementLineItem]) -> List[date]:
-        """Generate list of week start dates from line items (flexible dates)."""
+        """Generate weeks from earliest Start Date week to latest End Date week of any resource plan role (line item)."""
         if not line_items:
             return []
         
-        week_dates = set()
-        for line_item in line_items:
-            if line_item.weekly_hours:
-                for weekly_hour in line_item.weekly_hours:
-                    week_dates.add(weekly_hour.week_start_date)
-        
         min_date = min(li.start_date for li in line_items)
         max_date = max(li.end_date for li in line_items)
-        
-        weeks = []
-        current = self._get_week_start(min_date)
-        end_week_start = self._get_week_start(max_date)
-        
-        while current <= end_week_start:
-            weeks.append(current)
-            current += timedelta(days=7)
-        
-        for week_date in week_dates:
-            if week_date not in weeks:
-                weeks.append(week_date)
-        
-        return sorted(weeks)
+        return self._generate_weeks_from_dates(min_date, max_date)
     
     def _generate_weeks_from_dates(self, start_date: date, end_date: date) -> List[date]:
         """Generate list of week start dates between two dates."""
@@ -248,6 +230,25 @@ class EngagementExcelService:
         """Get the Sunday (week start) for a given date."""
         days_since_sunday = (d.weekday() + 1) % 7
         return d - timedelta(days=days_since_sunday)
+    
+    def _week_overlaps_date_range(self, week_start: date, start_date: date, end_date: date) -> bool:
+        """True if week (Sun-Sat) overlaps [start_date, end_date]."""
+        week_end = week_start + timedelta(days=6)
+        return week_start <= end_date and week_end >= start_date
+    
+    def _parse_excel_date(self, value, field_name: str) -> date:
+        """Parse date from Excel cell (datetime, date, or string)."""
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, date):
+            return value
+        s = str(value).strip()
+        for fmt in ["%Y-%m-%d", "%m/%d/%Y", "%m-%d-%Y"]:
+            try:
+                return datetime.strptime(s, fmt).date()
+            except ValueError:
+                continue
+        raise ValueError(f"Invalid {field_name} format: {value}")
     
     def _write_metadata(self, ws, engagement, opportunity, weeks: List[date], 
                         delivery_centers, roles, employees):
@@ -319,32 +320,134 @@ class EngagementExcelService:
             cell.alignment = Alignment(horizontal="center", vertical="center")
     
     def _write_data_rows(self, ws, line_items: List[EngagementLineItem], weeks: List[date], num_phases: int, min_rows: int = 20):
-        """Write data rows (simplified version)."""
+        """Write data rows - Excel row N aligns with line item at row_order N-4 (kill & fill)."""
         start_row = 4
-        for row_idx, line_item in enumerate(line_items):
+        week_col_start = 12
+        totals_start_col = week_col_start + len(weeks)
+        num_rows_to_write = max(len(line_items), min_rows)
+        
+        for row_idx in range(num_rows_to_write):
             row = start_row + row_idx
-            # Write line item data (simplified - full implementation would match estimate export)
-            # This is a placeholder - full implementation would write all fields
-            pass
+            line_item = line_items[row_idx] if row_idx < len(line_items) else None
+            
+            if line_item is None:
+                # Empty row - apply number formatting only
+                for col in [4, 5, 6, 7]:
+                    ws.cell(row=row, column=col).number_format = '#,##0.00'
+                ws.cell(row=row, column=11).number_format = '0.00%'
+                # Write formula placeholders for totals
+                first_week_col = get_column_letter(week_col_start)
+                last_week_col = get_column_letter(week_col_start + len(weeks) - 1)
+                ws.cell(row=row, column=totals_start_col).value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
+                ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
+                ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+                continue
+            
+            # Payable Center (A)
+            if hasattr(line_item, 'payable_center') and line_item.payable_center:
+                ws.cell(row=row, column=1).value = line_item.payable_center.name
+            elif line_item.role_rate and line_item.role_rate.delivery_center:
+                ws.cell(row=row, column=1).value = line_item.role_rate.delivery_center.name
+            
+            # Role (B)
+            if line_item.role_rate and line_item.role_rate.role:
+                ws.cell(row=row, column=2).value = line_item.role_rate.role.role_name
+            
+            # Employee (C)
+            if line_item.employee:
+                ws.cell(row=row, column=3).value = f"{line_item.employee.first_name} {line_item.employee.last_name}"
+            
+            # Cost (D), Rate (E)
+            ws.cell(row=row, column=4).value = float(line_item.cost)
+            ws.cell(row=row, column=4).number_format = '#,##0.00'
+            ws.cell(row=row, column=5).value = float(line_item.rate)
+            ws.cell(row=row, column=5).number_format = '#,##0.00'
+            
+            # Cost Daily (F), Rate Daily (G)
+            ws.cell(row=row, column=6).value = float(line_item.cost) * 8
+            ws.cell(row=row, column=6).number_format = '#,##0.00'
+            ws.cell(row=row, column=7).value = float(line_item.rate) * 8
+            ws.cell(row=row, column=7).number_format = '#,##0.00'
+            
+            # Start Date (H), End Date (I)
+            ws.cell(row=row, column=8).value = line_item.start_date
+            ws.cell(row=row, column=9).value = line_item.end_date
+            
+            # Billable (J), Billable % (K)
+            ws.cell(row=row, column=10).value = "Yes" if line_item.billable else "No"
+            ws.cell(row=row, column=11).value = float(line_item.billable_expense_percentage) / 100
+            ws.cell(row=row, column=11).number_format = '0.00%'
+            
+            # Weekly hours (L+)
+            weekly_hours_dict = {wh.week_start_date: float(wh.hours) for wh in (line_item.weekly_hours or [])}
+            for week_idx, week in enumerate(weeks):
+                hours = weekly_hours_dict.get(week, 0)
+                ws.cell(row=row, column=week_col_start + week_idx).value = hours
+            
+            # Totals formulas
+            first_week_col = get_column_letter(week_col_start)
+            last_week_col = get_column_letter(week_col_start + len(weeks) - 1)
+            ws.cell(row=row, column=totals_start_col).value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
+            ws.cell(row=row, column=totals_start_col).number_format = '#,##0.00'
+            ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
+            ws.cell(row=row, column=totals_start_col + 1).number_format = '#,##0.00'
+            ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+            ws.cell(row=row, column=totals_start_col + 2).number_format = '#,##0.00'
     
     def _write_totals_row(self, ws, num_rows: int, num_weeks: int):
         """Write totals row."""
         totals_row = 4 + num_rows
-        # Write totals formulas (simplified)
-        pass
+        ws.cell(row=totals_row, column=1).value = "TOTALS"
+        ws.cell(row=totals_row, column=1).font = Font(bold=True)
     
     def _apply_validation(self, ws, delivery_centers, roles, employees, num_rows: int, num_weeks: int):
-        """Apply data validation (simplified)."""
-        # Apply dropdowns and validation rules
-        pass
+        """Apply data validation."""
+        start_row = 4
+        totals_row = 4 + num_rows
+        max_validation_row = totals_row
+        
+        if delivery_centers:
+            dc_names = [dc.name for dc in delivery_centers]
+            dv = DataValidation(type="list", formula1=f'"{",".join(dc_names)}"', allow_blank=True)
+            dv.add(f"A{start_row}:A{max_validation_row}")
+            ws.add_data_validation(dv)
+        
+        if roles:
+            role_names = [r.role_name for r in roles]
+            dv = DataValidation(type="list", formula1=f'"{",".join(role_names)}"', allow_blank=True)
+            dv.add(f"B{start_row}:B{max_validation_row}")
+            ws.add_data_validation(dv)
+        
+        if employees:
+            emp_names = [f"{e.first_name} {e.last_name}" for e in employees]
+            dv = DataValidation(type="list", formula1=f'"{",".join(emp_names)}"', allow_blank=True)
+            dv.add(f"C{start_row}:C{max_validation_row}")
+            ws.add_data_validation(dv)
+        
+        date_dv = DataValidation(type="date", operator="between", formula1="1900-01-01", formula2="2100-12-31", allow_blank=True)
+        date_dv.add(f"H{start_row}:I{max_validation_row}")
+        ws.add_data_validation(date_dv)
+        
+        number_dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+        number_dv.add(f"D{start_row}:E{max_validation_row}")
+        number_dv.add(f"K{start_row}:K{max_validation_row}")
+        ws.add_data_validation(number_dv)
     
     def _create_excel_table(self, ws, num_rows: int, num_weeks: int):
         """Create Excel Table."""
-        # Create table structure (simplified)
-        pass
+        from openpyxl.worksheet.table import Table, TableStyleInfo
+        start_row = 1
+        end_row = 4 + num_rows  # Include totals row
+        totals_start_col = 12 + num_weeks
+        end_col = totals_start_col + 2  # Total Hours, Total Cost, Total Revenue
+        ref = f"A{start_row}:{get_column_letter(end_col)}{end_row}"
+        tab = Table(displayName="ResourcePlanTable", ref=ref)
+        style = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
+        tab.tableStyleInfo = style
+        ws.add_table(tab)
     
     def _read_metadata(self, ws) -> Dict:
-        """Read metadata from metadata sheet."""
+        """Read metadata from metadata sheet (delivery_centers, roles, employees for import)."""
         metadata = {}
         for row in range(1, 200):
             key = ws[f"A{row}"].value
@@ -357,45 +460,376 @@ class EngagementExcelService:
                 metadata["opportunity_delivery_center_id"] = UUID(value)
             elif key == "week_start_dates":
                 metadata["week_start_dates"] = [date.fromisoformat(d) for d in value.split(",") if d]
+            elif key == "phases":
+                metadata["phases"] = []
+                row_idx = row
+                while ws[f"B{row_idx}"].value:
+                    phase_str = ws[f"B{row_idx}"].value
+                    parts = phase_str.split("|")
+                    if len(parts) >= 4:
+                        metadata["phases"].append({
+                            "name": parts[0],
+                            "start_date": date.fromisoformat(parts[1]),
+                            "end_date": date.fromisoformat(parts[2]),
+                            "color": parts[3],
+                        })
+                    row_idx += 1
+            elif key == "delivery_centers":
+                metadata["delivery_centers"] = {}
+                row_idx = row
+                while ws[f"B{row_idx}"].value:
+                    dc_str = ws[f"B{row_idx}"].value
+                    parts = dc_str.split("|")
+                    if len(parts) >= 2:
+                        metadata["delivery_centers"][parts[1]] = UUID(parts[0])
+                    row_idx += 1
+            elif key == "roles":
+                metadata["roles"] = {}
+                row_idx = row
+                while ws[f"B{row_idx}"].value:
+                    role_str = ws[f"B{row_idx}"].value
+                    parts = role_str.split("|")
+                    if len(parts) >= 2:
+                        metadata["roles"][parts[1]] = UUID(parts[0])
+                    row_idx += 1
+            elif key == "employees":
+                metadata["employees"] = {}
+                row_idx = row
+                while ws[f"B{row_idx}"].value:
+                    emp_str = ws[f"B{row_idx}"].value
+                    parts = emp_str.split("|")
+                    if len(parts) >= 2:
+                        emp_name = parts[1].strip()
+                        metadata["employees"][emp_name] = UUID(parts[0])
+                    row_idx += 1
+        if "delivery_centers" not in metadata:
+            metadata["delivery_centers"] = {}
+        if "roles" not in metadata:
+            metadata["roles"] = {}
+        if "employees" not in metadata:
+            metadata["employees"] = {}
         return metadata
     
     def _extract_week_columns(self, ws, expected_count: int) -> List[date]:
-        """Extract week columns from data sheet."""
-        from datetime import datetime
-        # Extract week dates from headers
+        """Extract week start dates from header row 3 - exact column alignment."""
         weeks = []
-        col = 12  # Week columns start at column L
+        col = 12
         for idx in range(expected_count):
-            cell = ws[f"{get_column_letter(col + idx)}3"]
-            if cell.value:
-                # Parse date from header
-                try:
-                    week_date = datetime.strptime(str(cell.value), "%m/%d/%Y").date()
-                    weeks.append(self._get_week_start(week_date))
-                except:
-                    pass
+            cell = ws.cell(row=3, column=col + idx)
+            val = cell.value
+            week_date = None
+            if val is not None:
+                if isinstance(val, datetime):
+                    week_date = val.date()
+                elif isinstance(val, date):
+                    week_date = val
+                elif isinstance(val, (int, float)) and not isinstance(val, bool):
+                    base = date(1899, 12, 30)
+                    week_date = base + timedelta(days=int(val))
+                else:
+                    s = str(val).strip()
+                    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
+                        try:
+                            week_date = datetime.strptime(s, fmt).date()
+                            break
+                        except ValueError:
+                            continue
+            if week_date:
+                weeks.append(self._get_week_start(week_date))
         return weeks
     
     def _parse_data_rows(self, ws, weeks: List[date], metadata: Dict, 
                          opportunity_delivery_center_id: UUID, currency: str) -> List[Dict]:
-        """Parse data rows from Excel."""
-        # Parse line items from data sheet (simplified)
+        """Parse data rows from Excel - kill & fill: Excel row N = plan row N-4."""
         line_items = []
-        # Full implementation would parse all rows and extract line item data
+        start_row = 4
+        row = start_row
+        while True:
+            payable_center = ws[f"A{row}"].value
+            if payable_center == "TOTALS" or (payable_center is None and row > start_row):
+                break
+            if payable_center is None:
+                row += 1
+                continue
+            try:
+                line_item = self._parse_line_item_row(ws, row, weeks, metadata, opportunity_delivery_center_id, currency)
+                if line_item:
+                    line_items.append(line_item)
+            except Exception as e:
+                logger.error(f"Error parsing row {row}: {e}", exc_info=True)
+                raise ValueError(f"Row {row}: {e}") from e
+            row += 1
+        logger.info(f"Parsed {len(line_items)} line items from Resource Plan Excel (rows {start_row} to {row - 1})")
         return line_items
     
-    async def _upsert_line_items(self, engagement_id: UUID, line_items_data: List[Dict], weeks: List[date]) -> Dict:
-        """Upsert line items from parsed data."""
-        created = 0
-        updated = 0
-        errors = []
+    def _parse_line_item_row(self, ws, row: int, weeks: List[date], metadata: Dict,
+                             opportunity_delivery_center_id: UUID, currency: str) -> Optional[Dict]:
+        """Parse a single line item row."""
+        payable_center_name = ws[f"A{row}"].value
+        if not payable_center_name or str(payable_center_name).strip() == "":
+            return None
+        if str(payable_center_name).strip().upper() == "TOTALS":
+            return None
         
-        # Full implementation would create/update line items and weekly hours
-        # This is a placeholder
+        delivery_centers = metadata.get("delivery_centers", {})
+        delivery_center_id = delivery_centers.get(payable_center_name)
+        if not delivery_center_id:
+            raise ValueError(f"Invalid Payable Center '{payable_center_name}'")
+        
+        role_name = ws[f"B{row}"].value
+        if not role_name:
+            raise ValueError("Role is required")
+        roles = metadata.get("roles", {})
+        role_id = roles.get(role_name)
+        if not role_id:
+            raise ValueError(f"Invalid Role '{role_name}'")
+        
+        employee_id = None
+        employee_name_raw = ws[f"C{row}"].value
+        if employee_name_raw:
+            employee_name = str(employee_name_raw).strip()
+            employees = metadata.get("employees", {})
+            employee_id = employees.get(employee_name)
+            if not employee_id:
+                for emp_name, emp_id in employees.items():
+                    if emp_name.strip().lower() == employee_name.lower():
+                        employee_id = emp_id
+                        break
+                if not employee_id:
+                    normalized_excel = " ".join(employee_name.split())
+                    for emp_name, emp_id in employees.items():
+                        if " ".join(emp_name.split()).lower() == normalized_excel.lower():
+                            employee_id = emp_id
+                            break
+                if not employee_id:
+                    raise ValueError(f"Employee '{employee_name}' not found in metadata. Available: {list(employees.keys())[:5]}")
+        
+        cost_value = ws[f"D{row}"].value
+        cost = Decimal(str(cost_value)) if cost_value is not None else None
+        rate_value = ws[f"E{row}"].value
+        rate = Decimal(str(rate_value)) if rate_value is not None else None
+        
+        start_date_value = ws[f"H{row}"].value
+        if not start_date_value:
+            raise ValueError("Start Date is required")
+        start_date = self._parse_excel_date(start_date_value, "Start Date")
+        
+        end_date_value = ws[f"I{row}"].value
+        if not end_date_value:
+            raise ValueError("End Date is required")
+        end_date = self._parse_excel_date(end_date_value, "End Date")
+        
+        if start_date > end_date:
+            raise ValueError("Start Date must be <= End Date")
+        
+        billable_value = ws[f"J{row}"].value
+        billable = str(billable_value).strip().lower() in ["yes", "true", "1", "y"] if billable_value else True
+        
+        billable_pct_value = ws[f"K{row}"].value
+        billable_pct = Decimal("0")
+        if billable_pct_value is not None:
+            pct_decimal = Decimal(str(billable_pct_value))
+            billable_pct = pct_decimal * 100 if pct_decimal <= 1 else pct_decimal
+            if billable_pct < 0 or billable_pct > 100:
+                raise ValueError("Billable % must be between 0 and 100")
+        
+        # Weekly hours: read each week column explicitly via ws.cell(row, col) for reliable per-row values.
+        # Direct cell access avoids any iter_rows/iterator quirks. Empty = 0.
+        weekly_hours = []
+        week_col_start = 12
+        for idx, week in enumerate(weeks):
+            col = week_col_start + idx
+            hours_value = ws.cell(row=row, column=col).value
+            hours = Decimal("0")
+            if hours_value is not None:
+                if isinstance(hours_value, (int, float)) and not isinstance(hours_value, bool):
+                    hours = Decimal(str(hours_value))
+                elif str(hours_value).strip() != "":
+                    try:
+                        hours = Decimal(str(hours_value).strip())
+                    except (ValueError, TypeError):
+                        pass
+            if hours < 0:
+                raise ValueError(f"Week {week.isoformat()}: Hours must be >= 0")
+            weekly_hours.append((week, hours))
         
         return {
-            "created": created,
-            "updated": updated,
-            "deleted": 0,
-            "errors": errors,
+            "delivery_center_id": delivery_center_id,
+            "role_id": role_id,
+            "employee_id": employee_id,
+            "cost": cost,
+            "rate": rate,
+            "currency": currency,
+            "start_date": start_date,
+            "end_date": end_date,
+            "billable": billable,
+            "billable_expense_percentage": billable_pct,
+            "weekly_hours": weekly_hours,
         }
+    
+    async def _upsert_line_items(self, engagement_id: UUID, line_items_data: List[Dict], weeks: List[date]) -> Dict:
+        """Kill & fill: Excel row N maps to plan row N-4. Update in place, delete unmatched (skip if has timesheet entries)."""
+        from app.models.role_rate import RoleRate
+        from sqlalchemy import func
+        
+        existing_line_items = await self.line_item_repo.list_by_engagement(engagement_id)
+        existing_line_items = sorted(existing_line_items, key=lambda li: li.row_order if li.row_order is not None else 999999)
+        existing_by_row_order = {li.row_order: li for li in existing_line_items if li.row_order is not None}
+        
+        engagement = await self.engagement_repo.get(engagement_id)
+        opportunity = await self.opportunity_repo.get(engagement.opportunity_id)
+        opportunity_delivery_center_id = opportunity.delivery_center_id
+        currency = opportunity.default_currency or "USD"
+        
+        created = 0
+        updated = 0
+        deleted = 0
+        errors = []
+        matched_line_item_ids = set()
+        max_order = await self.line_item_repo.get_max_row_order(engagement_id)
+        next_order = max_order + 1
+        
+        for idx, item_data in enumerate(line_items_data):
+            excel_row = idx + 4
+            row_order = idx
+            try:
+                role_rate_result = await self.session.execute(
+                    select(RoleRate).where(
+                        RoleRate.role_id == item_data["role_id"],
+                        RoleRate.delivery_center_id == opportunity_delivery_center_id,
+                        RoleRate.default_currency == item_data["currency"],
+                    ).limit(1)
+                )
+                opportunity_role_rate = role_rate_result.scalars().first()
+                if not opportunity_role_rate:
+                    raise ValueError(
+                        f"RoleRate not found for Role, Invoice Center, Currency. "
+                        f"Create the RoleRate association first."
+                    )
+                
+                final_cost = item_data["cost"]
+                final_rate = item_data["rate"]
+                if final_cost is None or final_rate is None:
+                    default_rate, default_cost = await self._get_default_rates_from_role_rate(
+                        opportunity_role_rate.id, item_data["role_id"], opportunity_delivery_center_id,
+                        item_data["employee_id"], item_data["currency"],
+                    )
+                    final_rate = final_rate if final_rate is not None else default_rate
+                    final_cost = final_cost if final_cost is not None else default_cost
+                
+                if item_data["cost"] is not None and item_data["rate"] is not None:
+                    cost_changed = abs(float(opportunity_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
+                    rate_changed = abs(float(opportunity_role_rate.external_rate) - float(item_data["rate"])) > 0.01
+                    if cost_changed or rate_changed:
+                        opportunity_role_rate.internal_cost_rate = float(item_data["cost"])
+                        opportunity_role_rate.external_rate = float(item_data["rate"])
+                        await self.session.flush()
+                
+                line_item = existing_by_row_order.get(row_order)
+                if line_item:
+                    await self.line_item_repo.update(
+                        line_item.id,
+                        role_rates_id=opportunity_role_rate.id,
+                        payable_center_id=item_data["delivery_center_id"],
+                        employee_id=item_data["employee_id"],
+                        rate=final_rate, cost=final_cost,
+                        start_date=item_data["start_date"], end_date=item_data["end_date"],
+                        billable=item_data["billable"],
+                        billable_expense_percentage=item_data["billable_expense_percentage"],
+                        row_order=row_order,
+                    )
+                    updated += 1
+                    matched_line_item_ids.add(line_item.id)
+                else:
+                    line_item = await self.line_item_repo.create(
+                        engagement_id=engagement_id,
+                        role_rates_id=opportunity_role_rate.id,
+                        payable_center_id=item_data["delivery_center_id"],
+                        employee_id=item_data["employee_id"],
+                        rate=final_rate, cost=final_cost, currency=item_data["currency"],
+                        start_date=item_data["start_date"], end_date=item_data["end_date"],
+                        row_order=row_order,
+                        billable=item_data["billable"],
+                        billable_expense_percentage=item_data["billable_expense_percentage"],
+                    )
+                    created += 1
+                    matched_line_item_ids.add(line_item.id)
+                
+                await self.session.flush()
+                
+                await self.weekly_hours_repo.delete_by_line_item(line_item.id)
+                start_date = item_data["start_date"]
+                end_date = item_data["end_date"]
+                for week, hours in item_data["weekly_hours"]:
+                    if self._week_overlaps_date_range(week, start_date, end_date):
+                        await self.weekly_hours_repo.create(
+                            engagement_line_item_id=line_item.id,
+                            week_start_date=week,
+                            hours=hours,
+                        )
+            except Exception as e:
+                errors.append(f"Row {excel_row}: {str(e)}")
+                logger.error(f"Row {excel_row}: {e}", exc_info=True)
+        
+        if line_items_data:
+            from app.models.timesheet import TimesheetEntry
+            all_existing_ids = {li.id for li in existing_line_items}
+            unmatched_ids = all_existing_ids - matched_line_item_ids
+            for line_item_id in unmatched_ids:
+                try:
+                    result = await self.session.execute(
+                        select(func.count(TimesheetEntry.id)).where(
+                            TimesheetEntry.engagement_line_item_id == line_item_id,
+                        )
+                    )
+                    has_timesheet_entries = (result.scalar_one() or 0) > 0
+                    if has_timesheet_entries:
+                        errors.append(f"Cannot delete line item (has timesheet entries); row was removed from Excel")
+                        logger.warning(f"Skip delete of line_item {line_item_id}: has timesheet entries")
+                        continue
+                    await self.weekly_hours_repo.delete_by_line_item(line_item_id)
+                    await self.line_item_repo.delete(line_item_id)
+                    deleted += 1
+                except Exception as e:
+                    errors.append(f"Failed to delete line item: {str(e)}")
+        
+        await self.session.commit()
+        return {"created": created, "updated": updated, "deleted": deleted, "errors": errors}
+    
+    async def _get_default_rates_from_role_rate(
+        self, role_rates_id: Optional[UUID], role_id: UUID, delivery_center_id: UUID,
+        employee_id: Optional[UUID], target_currency: str,
+    ) -> Tuple[Decimal, Decimal]:
+        """Get default rate and cost from RoleRate, with employee override for cost."""
+        role_rate = await self.role_rate_repo.get(role_rates_id) if role_rates_id else None
+        if not role_rate:
+            result = await self.session.execute(
+                select(RoleRate).where(
+                    RoleRate.role_id == role_id,
+                    RoleRate.delivery_center_id == delivery_center_id,
+                    RoleRate.default_currency == target_currency,
+                ).limit(1)
+            )
+            role_rate = result.scalars().first()
+        if not role_rate:
+            return Decimal("0"), Decimal("0")
+        rate = Decimal(str(role_rate.external_rate))
+        cost = Decimal(str(role_rate.internal_cost_rate))
+        rate_currency = role_rate.default_currency
+        if employee_id:
+            employee = await self.employee_repo.get(employee_id)
+            if employee:
+                centers_match = delivery_center_id == employee.delivery_center_id if delivery_center_id and employee.delivery_center_id else False
+                if centers_match:
+                    cost = Decimal(str(employee.internal_cost_rate))
+                else:
+                    emp_cost = Decimal(str(employee.internal_bill_rate))
+                    emp_currency = employee.default_currency or "USD"
+                    if target_currency and emp_currency.upper() != target_currency.upper():
+                        emp_cost = Decimal(str(await convert_currency(float(emp_cost), emp_currency, target_currency, self.session)))
+                    cost = emp_cost
+        if target_currency and rate_currency and rate_currency.upper() != target_currency.upper():
+            rate = Decimal(str(await convert_currency(float(rate), rate_currency, target_currency, self.session)))
+            if not employee_id:
+                cost = Decimal(str(await convert_currency(float(cost), rate_currency, target_currency, self.session)))
+        return rate, cost

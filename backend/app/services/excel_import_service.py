@@ -5,7 +5,7 @@ Excel import service for estimates.
 import logging
 from typing import List, Dict, Optional, Tuple
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -91,17 +91,17 @@ class ExcelImportService:
                 raise ValueError(f"Week column {idx + 1} mismatch: expected {expected.isoformat()}, found {actual.isoformat()}. "
                                f"Please ensure you're importing the correct template for this estimate.")
         
-        # Parse data rows
+        # Parse data rows - use actual_weeks from sheet (validated to match metadata)
         line_items_data = self._parse_data_rows(
-            data_ws, 
-            expected_weeks,
+            data_ws,
+            actual_weeks,  # Use sheet's week columns for correct column alignment
             metadata,
             opportunity.delivery_center_id,
             opportunity.default_currency or "USD"
         )
         
         # Upsert line items
-        results = await self._upsert_line_items(estimate_id, line_items_data, expected_weeks)
+        results = await self._upsert_line_items(estimate_id, line_items_data, actual_weeks)
         
         return results
     
@@ -184,29 +184,31 @@ class ExcelImportService:
     def _extract_week_columns(self, ws, expected_count: int) -> List[date]:
         """Extract week start dates from week header row (row 3 - column headers)."""
         weeks = []
-        col = 12  # Start after fixed columns (Payable Center, Role, Employee, Cost, Rate, Cost Daily, Rate Daily, Start Date, End Date, Billable, Billable %)
+        col = 12  # Start after fixed columns
         
         for idx in range(expected_count):
-            cell = ws[f"{self._get_column_letter(col + idx)}3"]  # Row 3 is now the header row with week dates
-            if cell.value:
-                # Parse date from cell value
-                if isinstance(cell.value, datetime):
-                    week_date = cell.value.date()
-                elif isinstance(cell.value, date):
-                    week_date = cell.value
+            cell = ws.cell(row=3, column=col + idx)
+            val = cell.value
+            week_date = None
+            if val is not None:
+                if isinstance(val, datetime):
+                    week_date = val.date()
+                elif isinstance(val, date):
+                    week_date = val
+                elif isinstance(val, (int, float)) and not isinstance(val, bool):
+                    # Excel serial date number
+                    base = date(1899, 12, 30)
+                    week_date = base + timedelta(days=int(val))
                 else:
-                    # Try parsing string (format: MM/DD/YYYY)
-                    try:
-                        week_date = datetime.strptime(str(cell.value), "%m/%d/%Y").date()
-                    except:
-                        # Try other formats
+                    s = str(val).strip()
+                    for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m-%d-%Y"):
                         try:
-                            week_date = datetime.strptime(str(cell.value), "%Y-%m-%d").date()
-                        except:
-                            week_date = None
-                
-                if week_date:
-                    weeks.append(week_date)
+                            week_date = datetime.strptime(s, fmt).date()
+                            break
+                        except ValueError:
+                            continue
+            if week_date:
+                weeks.append(week_date)
         
         return weeks
     
@@ -214,6 +216,11 @@ class ExcelImportService:
         """Get Excel column letter from 1-based column number."""
         from openpyxl.utils import get_column_letter
         return get_column_letter(col)
+    
+    def _week_overlaps_date_range(self, week_start: date, start_date: date, end_date: date) -> bool:
+        """True if week (Sun-Sat) overlaps [start_date, end_date]."""
+        week_end = week_start + timedelta(days=6)
+        return week_start <= end_date and week_end >= start_date
     
     def _parse_data_rows(self, ws, weeks: List[date], metadata: Dict, 
                         opportunity_delivery_center_id: UUID, currency: str) -> List[Dict]:
@@ -411,19 +418,28 @@ class ExcelImportService:
                 if billable_pct < 0 or billable_pct > 100:
                     raise ValueError(f"Row {row}: Billable % must be between 0 and 100")
         
-        # Weekly hours (Columns L onwards)
-        weekly_hours = {}
+        # Weekly hours: read each week column explicitly via ws.cell(row, col) for reliable per-row values.
+        # Direct cell access avoids any iter_rows/iterator quirks. Empty = 0.
+        weekly_hours = []
         week_col_start = 12
         for idx, week in enumerate(weeks):
             col = week_col_start + idx
-            col_letter = self._get_column_letter(col)
-            hours_value = ws[f"{col_letter}{row}"].value
-            
+            hours_value = ws.cell(row=row, column=col).value
+            hours = Decimal("0")
             if hours_value is not None:
-                hours = Decimal(str(hours_value))
-                if hours < 0:
-                    raise ValueError(f"Row {row}, Week {week.isoformat()}: Hours must be >= 0")
-                weekly_hours[week] = hours
+                if isinstance(hours_value, (int, float)) and not isinstance(hours_value, bool):
+                    hours = Decimal(str(hours_value))
+                elif str(hours_value).strip() != "":
+                    try:
+                        hours = Decimal(str(hours_value).strip())
+                    except (ValueError, TypeError):
+                        pass
+            if hours < 0:
+                raise ValueError(f"Row {row}, Week {week.isoformat()}: Hours must be >= 0")
+            weekly_hours.append((week, hours))
+        # Log overlapping weeks (those we'll persist) for debugging; use row's start/end for context
+        overlapping = [(w, h) for w, h in weekly_hours if self._week_overlaps_date_range(w, start_date, end_date)]
+        logger.info(f"Excel row {row}: parsed {len(weekly_hours)} weeks, {len(overlapping)} overlap {start_date}–{end_date}: {[(w.isoformat(), float(h)) for w, h in overlapping]}")
         
         return {
             "delivery_center_id": delivery_center_id,
@@ -441,13 +457,11 @@ class ExcelImportService:
     
     async def _upsert_line_items(self, estimate_id: UUID, line_items_data: List[Dict], 
                                  weeks: List[date]) -> Dict:
-        """Upsert line items from parsed data.
+        """Kill & fill: Excel row N maps exactly to plan row N-4 (row_order).
         
-        Matching strategy: Simple positional matching
-        - Excel row N (data starts at row 4) matches estimate line item with row_order = N-4 (0-indexed)
-        - This is a direct overwrite: row 4 in Excel updates row_order 0, row 5 updates row_order 1, etc.
-        - If there are more Excel rows than existing line items, create new ones
-        - If there are fewer Excel rows than existing line items, delete the extra ones
+        - Excel row 4 -> row_order 0, row 5 -> row_order 1, etc. (exact alignment)
+        - Update existing line items in place (avoids table bloat; no delete+reinsert churn)
+        - Create new line items for extra Excel rows; delete line items removed from Excel
         """
         # Get existing line items sorted by row_order
         existing_line_items = await self.line_item_repo.list_by_estimate(estimate_id)
@@ -623,21 +637,21 @@ class ExcelImportService:
                 
                 await self.session.flush()
                 
-                # Update weekly hours - always replace with Excel values
-                # Delete existing weekly hours for this line item
+                # Update weekly hours: exact row/column from Excel
+                # Only create for weeks that fall within this row's Start Date - End Date
                 await self.weekly_hours_repo.delete_by_line_item(line_item.id)
-                
-                # Create new weekly hours from Excel data
-                # Only create entries for weeks with hours > 0
-                for week, hours in item_data["weekly_hours"].items():
-                    if hours > 0:
+                start_date = item_data["start_date"]
+                end_date = item_data["end_date"]
+                hours_written = []
+                for week, hours in item_data["weekly_hours"]:
+                    if self._week_overlaps_date_range(week, start_date, end_date):
                         await self.weekly_hours_repo.create(
                             estimate_line_item_id=line_item.id,
                             week_start_date=week,
                             hours=hours,
                         )
-                
-                logger.debug(f"Updated weekly hours for line item {line_item.id}: {len(item_data['weekly_hours'])} weeks")
+                        hours_written.append((week.isoformat(), float(hours)))
+                logger.info(f"Excel row {excel_row_number} → line_item {line_item.id}: wrote {len(hours_written)} weekly hours (range {start_date}–{end_date}): {hours_written}")
                 
             except Exception as e:
                 error_msg = f"Row {idx + 4}: {str(e)}"

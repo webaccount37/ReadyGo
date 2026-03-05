@@ -80,21 +80,19 @@ class ExcelExportService:
         )
         filtered_roles = list(roles_result.scalars().all())
         
-        # Generate weeks based on estimate line items
-        # If no line items, use opportunity dates or default range
-        if estimate.line_items and len(estimate.line_items) > 0:
+        # Generate weeks from Opportunity start and end dates (all weeks in Opportunity period)
+        if opportunity.start_date and opportunity.end_date:
+            weeks = self._generate_weeks_from_dates(opportunity.start_date, opportunity.end_date)
+        elif estimate.line_items and len(estimate.line_items) > 0:
+            # Fallback: use line item date range if Opportunity has no dates
             weeks = self._generate_weeks_from_line_items(estimate.line_items)
         else:
-            # Use opportunity dates or default range
-            if opportunity.start_date and opportunity.end_date:
-                weeks = self._generate_weeks_from_dates(opportunity.start_date, opportunity.end_date)
-            else:
-                # Default to 1 year from today
-                from datetime import datetime
-                today = datetime.now().date()
-                start = today
-                end = date(today.year + 1, today.month, today.day)
-                weeks = self._generate_weeks_from_dates(start, end)
+            # Default to 1 year from today
+            from datetime import datetime
+            today = datetime.now().date()
+            start = today
+            end = date(today.year + 1, today.month, today.day)
+            weeks = self._generate_weeks_from_dates(start, end)
         
         # Create workbook
         wb = Workbook()
@@ -721,9 +719,9 @@ class ExcelExportService:
                 total_revenue_cell.value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
                 total_revenue_cell.number_format = '#,##0.00'
                 
-                # Billable Expense Amount: Total Revenue * Billable % (Billable % is stored as 0-1 in Excel)
+                # Billable Expense Amount: Total Revenue * Billable % (Billable % is in column 11/K; stored as 0-1 in Excel)
                 billable_expense_cell = ws.cell(row=row, column=totals_start_col + 3)
-                billable_expense_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(9)}{row}"
+                billable_expense_cell.value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(11)}{row}"
                 billable_expense_cell.number_format = '#,##0.00'
                 
                 # Margin Amount: Total Revenue - Total Cost (currency format)
@@ -1126,12 +1124,12 @@ class ExcelExportService:
         totals_row = end_row + 1  # Totals row (MUST be INSIDE the table)
         
         # Calculate column ranges
-        # Fixed columns: A-I (Payable Center through Billable %)
-        # Week columns: J onwards (10 + num_weeks)
-        # Totals columns: after week columns
-        week_col_start = 10
+        # Fixed columns: A-K (Payable Center through Billable %) = 11 columns
+        # Week columns: L onwards (col 12 + num_weeks)
+        # Totals columns: 7 columns after weeks
+        week_col_start = 12
         totals_start_col = week_col_start + num_weeks
-        last_col = totals_start_col + 6  # 7 totals columns (column AM)
+        last_col = totals_start_col + 6  # 7 totals columns
         
         # Verify all header cells have values (Excel Tables require this)
         # Check row 4 headers to ensure they're valid
