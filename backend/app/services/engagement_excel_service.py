@@ -15,6 +15,8 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Protection
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.worksheet.filters import AutoFilter
 
 from app.db.repositories.engagement_repository import EngagementRepository
 from app.db.repositories.engagement_line_item_repository import EngagementLineItemRepository
@@ -287,112 +289,179 @@ class EngagementExcelService:
             ws[f"B{employees_start + idx}"] = f"{emp.id}|{emp.first_name} {emp.last_name}"
     
     def _write_headers(self, ws, phases: Optional[List[EngagementPhase]], weeks: List[date], currency: str):
-        """Write header rows (simplified version)."""
-        # Row 3: Column headers
+        """Write header rows - aligned with Estimate export (phase row 1, year row 2, column headers row 3)."""
+        # Row 1: Phase headers (if phases exist) - same structure as Estimate
+        if phases and len(phases) > 0:
+            col = 12  # Week columns start at L
+            week_phases = {}
+            for phase in sorted(phases, key=lambda p: p.start_date):
+                phase_start = self._get_week_start(phase.start_date)
+                phase_end = self._get_week_start(phase.end_date)
+                for idx, week in enumerate(weeks):
+                    week_end = week + timedelta(days=6)
+                    if week <= phase_end and week_end >= phase_start:
+                        if idx not in week_phases:
+                            week_phases[idx] = []
+                        week_phases[idx].append(phase)
+            for week_idx, overlapping in week_phases.items():
+                cell = ws.cell(row=1, column=col + week_idx)
+                if len(overlapping) > 1:
+                    cell.value = " / ".join(p.name for p in overlapping)
+                    color1 = overlapping[0].color.replace("#", "")
+                    color2 = overlapping[1].color.replace("#", "") if len(overlapping) > 1 else color1
+                    if len(color1) == 6 and len(color2) == 6:
+                        cell.fill = PatternFill(start_color=color1, end_color=color2, fill_type="darkUp")
+                        cell.font = Font(bold=True, color="FFFFFF")
+                    else:
+                        cell.font = Font(bold=True)
+                else:
+                    phase = overlapping[0]
+                    cell.value = phase.name
+                    color_hex = phase.color.replace("#", "")
+                    if len(color_hex) == 6:
+                        cell.fill = PatternFill(start_color=color_hex, end_color=color_hex, fill_type="solid")
+                        cell.font = Font(bold=True, color="FFFFFF")
+                    else:
+                        cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Row 2: Year headers for week columns (aligned with Estimate)
+        col = 12
+        current_year = None
+        year_start_col = None
+        year_ranges = []
+        for idx, week in enumerate(weeks):
+            if week.year != current_year:
+                if current_year is not None and year_start_col is not None:
+                    year_ranges.append((year_start_col, col + idx - 1, current_year))
+                current_year = week.year
+                year_start_col = col + idx
+        if current_year is not None and year_start_col is not None:
+            year_ranges.append((year_start_col, col + len(weeks) - 1, current_year))
+        for start_c, end_c, year in year_ranges:
+            for c in range(start_c, end_c + 1):
+                cell = ws.cell(row=2, column=c)
+                cell.value = year
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Row 3: Column headers (including week dates) - same as Estimate
         headers = [
             "Payable Center", "Role", "Employee",
             f"Cost ({currency})", f"Rate ({currency})",
             f"Cost ({currency}) Daily", f"Rate ({currency}) Daily",
             "Start Date", "End Date", "Billable", "Billable %",
         ]
-        
         for idx, header in enumerate(headers):
-            cell = ws[f"{get_column_letter(idx + 1)}3"]
+            cell = ws.cell(row=3, column=idx + 1)
             cell.value = header
             cell.font = Font(bold=True)
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-        
+
         # Week column headers
-        col = 12
         for idx, week in enumerate(weeks):
-            cell = ws[f"{get_column_letter(col + idx)}3"]
+            cell = ws.cell(row=3, column=col + idx)
             cell.value = week.strftime("%m/%d/%Y")
             cell.font = Font(bold=True, size=9)
             cell.alignment = Alignment(horizontal="center", vertical="center")
-        
-        # Totals headers
+            cell.protection = Protection(locked=True)
+
+        # Totals column headers - 7 columns to match Estimate
         totals_start_col = col + len(weeks)
-        total_headers = ["Total Hours", f"Total Cost ({currency})", f"Total Revenue ({currency})"]
+        total_headers = [
+            "Total Hours",
+            "Total Cost",
+            "Total Revenue",
+            "Billable Expense Amount",
+            "Margin Amount",
+            "Margin % (Without Expenses)",
+            "Margin % (With Expenses)",
+        ]
         for idx, header in enumerate(total_headers):
-            cell = ws[f"{get_column_letter(totals_start_col + idx)}3"]
+            cell = ws.cell(row=3, column=totals_start_col + idx)
             cell.value = header
             cell.font = Font(bold=True)
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            cell.protection = Protection(locked=True)
     
     def _write_data_rows(self, ws, line_items: List[EngagementLineItem], weeks: List[date], num_phases: int, min_rows: int = 20):
-        """Write data rows - Excel row N aligns with line item at row_order N-4 (kill & fill)."""
+        """Write data rows - aligned with Estimate (7 totals columns with formulas)."""
         start_row = 4
         week_col_start = 12
         totals_start_col = week_col_start + len(weeks)
         num_rows_to_write = max(len(line_items), min_rows)
-        
+        D, E, K = 4, 5, 11  # Cost, Rate, Billable %
+
         for row_idx in range(num_rows_to_write):
             row = start_row + row_idx
             line_item = line_items[row_idx] if row_idx < len(line_items) else None
-            
+
             if line_item is None:
-                # Empty row - apply number formatting only
-                for col in [4, 5, 6, 7]:
-                    ws.cell(row=row, column=col).number_format = '#,##0.00'
-                ws.cell(row=row, column=11).number_format = '0.00%'
-                # Write formula placeholders for totals
+                for c in [4, 5, 6, 7]:
+                    ws.cell(row=row, column=c).number_format = '#,##0.00'
+                ws.cell(row=row, column=K).number_format = '0.00%'
                 first_week_col = get_column_letter(week_col_start)
                 last_week_col = get_column_letter(week_col_start + len(weeks) - 1)
                 ws.cell(row=row, column=totals_start_col).value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
-                ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
-                ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+                ws.cell(row=row, column=totals_start_col).number_format = '#,##0.00'
+                ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(D)}{row}"
+                ws.cell(row=row, column=totals_start_col + 1).number_format = '#,##0.00'
+                ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(E)}{row}"
+                ws.cell(row=row, column=totals_start_col + 2).number_format = '#,##0.00'
+                ws.cell(row=row, column=totals_start_col + 3).value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(K)}{row}"
+                ws.cell(row=row, column=totals_start_col + 3).number_format = '#,##0.00'
+                ws.cell(row=row, column=totals_start_col + 4).value = f"={get_column_letter(totals_start_col + 2)}{row}-{get_column_letter(totals_start_col + 1)}{row}"
+                ws.cell(row=row, column=totals_start_col + 4).number_format = '#,##0.00'
+                ws.cell(row=row, column=totals_start_col + 5).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,({get_column_letter(totals_start_col + 4)}{row}/{get_column_letter(totals_start_col + 2)}{row}))"
+                ws.cell(row=row, column=totals_start_col + 5).number_format = '0.00%'
+                ws.cell(row=row, column=totals_start_col + 6).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,(({get_column_letter(totals_start_col + 4)}{row}-{get_column_letter(totals_start_col + 3)}{row})/{get_column_letter(totals_start_col + 2)}{row}))"
+                ws.cell(row=row, column=totals_start_col + 6).number_format = '0.00%'
                 continue
-            
-            # Payable Center (A)
+
             if hasattr(line_item, 'payable_center') and line_item.payable_center:
                 ws.cell(row=row, column=1).value = line_item.payable_center.name
             elif line_item.role_rate and line_item.role_rate.delivery_center:
                 ws.cell(row=row, column=1).value = line_item.role_rate.delivery_center.name
-            
-            # Role (B)
             if line_item.role_rate and line_item.role_rate.role:
                 ws.cell(row=row, column=2).value = line_item.role_rate.role.role_name
-            
-            # Employee (C)
             if line_item.employee:
                 ws.cell(row=row, column=3).value = f"{line_item.employee.first_name} {line_item.employee.last_name}"
-            
-            # Cost (D), Rate (E)
+
             ws.cell(row=row, column=4).value = float(line_item.cost)
             ws.cell(row=row, column=4).number_format = '#,##0.00'
             ws.cell(row=row, column=5).value = float(line_item.rate)
             ws.cell(row=row, column=5).number_format = '#,##0.00'
-            
-            # Cost Daily (F), Rate Daily (G)
             ws.cell(row=row, column=6).value = float(line_item.cost) * 8
             ws.cell(row=row, column=6).number_format = '#,##0.00'
             ws.cell(row=row, column=7).value = float(line_item.rate) * 8
             ws.cell(row=row, column=7).number_format = '#,##0.00'
-            
-            # Start Date (H), End Date (I)
             ws.cell(row=row, column=8).value = line_item.start_date
             ws.cell(row=row, column=9).value = line_item.end_date
-            
-            # Billable (J), Billable % (K)
             ws.cell(row=row, column=10).value = "Yes" if line_item.billable else "No"
             ws.cell(row=row, column=11).value = float(line_item.billable_expense_percentage) / 100
             ws.cell(row=row, column=11).number_format = '0.00%'
-            
-            # Weekly hours (L+)
+
             weekly_hours_dict = {wh.week_start_date: float(wh.hours) for wh in (line_item.weekly_hours or [])}
             for week_idx, week in enumerate(weeks):
                 hours = weekly_hours_dict.get(week, 0)
                 ws.cell(row=row, column=week_col_start + week_idx).value = hours
-            
-            # Totals formulas
+
             first_week_col = get_column_letter(week_col_start)
             last_week_col = get_column_letter(week_col_start + len(weeks) - 1)
             ws.cell(row=row, column=totals_start_col).value = f"=SUM({first_week_col}{row}:{last_week_col}{row})"
             ws.cell(row=row, column=totals_start_col).number_format = '#,##0.00'
-            ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(4)}{row}"
+            ws.cell(row=row, column=totals_start_col + 1).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(D)}{row}"
             ws.cell(row=row, column=totals_start_col + 1).number_format = '#,##0.00'
-            ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(5)}{row}"
+            ws.cell(row=row, column=totals_start_col + 2).value = f"={get_column_letter(totals_start_col)}{row}*{get_column_letter(E)}{row}"
             ws.cell(row=row, column=totals_start_col + 2).number_format = '#,##0.00'
+            ws.cell(row=row, column=totals_start_col + 3).value = f"={get_column_letter(totals_start_col + 2)}{row}*{get_column_letter(K)}{row}"
+            ws.cell(row=row, column=totals_start_col + 3).number_format = '#,##0.00'
+            ws.cell(row=row, column=totals_start_col + 4).value = f"={get_column_letter(totals_start_col + 2)}{row}-{get_column_letter(totals_start_col + 1)}{row}"
+            ws.cell(row=row, column=totals_start_col + 4).number_format = '#,##0.00'
+            ws.cell(row=row, column=totals_start_col + 5).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,({get_column_letter(totals_start_col + 4)}{row}/{get_column_letter(totals_start_col + 2)}{row}))"
+            ws.cell(row=row, column=totals_start_col + 5).number_format = '0.00%'
+            ws.cell(row=row, column=totals_start_col + 6).value = f"=IF({get_column_letter(totals_start_col + 2)}{row}=0,0,(({get_column_letter(totals_start_col + 4)}{row}-{get_column_letter(totals_start_col + 3)}{row})/{get_column_letter(totals_start_col + 2)}{row}))"
+            ws.cell(row=row, column=totals_start_col + 6).number_format = '0.00%'
     
     def _write_totals_row(self, ws, num_rows: int, num_weeks: int):
         """Write totals row."""
@@ -401,50 +470,116 @@ class EngagementExcelService:
         ws.cell(row=totals_row, column=1).font = Font(bold=True)
     
     def _apply_validation(self, ws, delivery_centers, roles, employees, num_rows: int, num_weeks: int):
-        """Apply data validation."""
+        """Apply data validation - aligned with Estimate."""
         start_row = 4
-        totals_row = 4 + num_rows
+        totals_row = start_row + num_rows
         max_validation_row = totals_row
-        
+        week_col_start = 12
+
         if delivery_centers:
             dc_names = [dc.name for dc in delivery_centers]
             dv = DataValidation(type="list", formula1=f'"{",".join(dc_names)}"', allow_blank=True)
             dv.add(f"A{start_row}:A{max_validation_row}")
             ws.add_data_validation(dv)
-        
         if roles:
             role_names = [r.role_name for r in roles]
             dv = DataValidation(type="list", formula1=f'"{",".join(role_names)}"', allow_blank=True)
             dv.add(f"B{start_row}:B{max_validation_row}")
             ws.add_data_validation(dv)
-        
         if employees:
             emp_names = [f"{e.first_name} {e.last_name}" for e in employees]
             dv = DataValidation(type="list", formula1=f'"{",".join(emp_names)}"', allow_blank=True)
             dv.add(f"C{start_row}:C{max_validation_row}")
             ws.add_data_validation(dv)
-        
+
         date_dv = DataValidation(type="date", operator="between", formula1="1900-01-01", formula2="2100-12-31", allow_blank=True)
-        date_dv.add(f"H{start_row}:I{max_validation_row}")
+        date_dv.add(f"H{start_row}:H{max_validation_row}")
+        date_dv.add(f"I{start_row}:I{max_validation_row}")
         ws.add_data_validation(date_dv)
-        
+
         number_dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
         number_dv.add(f"D{start_row}:E{max_validation_row}")
         number_dv.add(f"K{start_row}:K{max_validation_row}")
         ws.add_data_validation(number_dv)
+
+        pct_dv = DataValidation(type="decimal", operator="between", formula1="0", formula2="100", allow_blank=True)
+        pct_dv.add(f"K{start_row}:K{max_validation_row}")
+        ws.add_data_validation(pct_dv)
+
+        hours_dv = DataValidation(type="decimal", operator="greaterThanOrEqual", formula1="0", allow_blank=True)
+        for week_idx in range(num_weeks):
+            col = week_col_start + week_idx
+            col_letter = get_column_letter(col)
+            hours_dv.add(f"{col_letter}{start_row}:{col_letter}{max_validation_row}")
+        ws.add_data_validation(hours_dv)
     
     def _create_excel_table(self, ws, num_rows: int, num_weeks: int):
-        """Create Excel Table."""
-        from openpyxl.worksheet.table import Table, TableStyleInfo
-        start_row = 1
-        end_row = 4 + num_rows  # Include totals row
-        totals_start_col = 12 + num_weeks
-        end_col = totals_start_col + 2  # Total Hours, Total Cost, Total Revenue
-        ref = f"A{start_row}:{get_column_letter(end_col)}{end_row}"
-        tab = Table(displayName="ResourcePlanTable", ref=ref)
-        style = TableStyleInfo(name="TableStyleMedium9", showFirstColumn=False, showLastColumn=False, showRowStripes=True, showColumnStripes=False)
-        tab.tableStyleInfo = style
-        ws.add_table(tab)
+        """Create Excel Table - aligned with Estimate (header row 3, totals inside table, 7 totals columns)."""
+        if num_rows == 0:
+            return
+        header_row = 3
+        start_row = 4
+        end_row = start_row + num_rows - 1
+        totals_row = end_row + 1
+        week_col_start = 12
+        totals_start_col = week_col_start + num_weeks
+        last_col = totals_start_col + 6  # 7 totals columns
+
+        for col in range(1, last_col + 1):
+            cell = ws.cell(row=header_row, column=col)
+            if cell.value is None or str(cell.value).strip() == "":
+                cell.value = f"Column{col}"
+                logger.warning(f"Empty header at row {header_row}, col {col}, set to 'Column{col}'")
+
+        table_ref = f"A{header_row}:{get_column_letter(last_col)}{totals_row}"
+        for col in range(2, last_col + 1):
+            cell = ws.cell(row=totals_row, column=col)
+            if cell.value == "":
+                cell.value = None
+
+        table = Table(displayName="ResourcePlanTable", ref=table_ref)
+        table.headerRowCount = 1
+        table.totalsRowCount = 1
+        auto_filter_ref = f"A{header_row}:{get_column_letter(last_col)}{end_row}"
+        table.autoFilter = AutoFilter(ref=auto_filter_ref)
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleLight9",
+            showFirstColumn=False,
+            showLastColumn=False,
+            showRowStripes=True,
+            showColumnStripes=False,
+        )
+        ws.add_table(table)
+
+        for week_idx in range(num_weeks):
+            col = week_col_start + week_idx
+            col_letter = get_column_letter(col)
+            cell = ws.cell(row=totals_row, column=col)
+            cell.value = f"=SUBTOTAL(109,{col_letter}{start_row}:{col_letter}{end_row})"
+            cell.font = Font(bold=True)
+
+        for col_offset in range(7):
+            col = totals_start_col + col_offset
+            col_letter = get_column_letter(col)
+            cell = ws.cell(row=totals_row, column=col)
+            if col_offset == 5:
+                margin_amount_col = get_column_letter(totals_start_col + 4)
+                total_revenue_col = get_column_letter(totals_start_col + 2)
+                cell.value = f"=IF({total_revenue_col}{totals_row}=0,0,({margin_amount_col}{totals_row}/{total_revenue_col}{totals_row}))"
+                cell.number_format = '0.00%'
+            elif col_offset == 6:
+                margin_amount_col = get_column_letter(totals_start_col + 4)
+                billable_expense_col = get_column_letter(totals_start_col + 3)
+                total_revenue_col = get_column_letter(totals_start_col + 2)
+                cell.value = f"=IF({total_revenue_col}{totals_row}=0,0,(({margin_amount_col}{totals_row}-{billable_expense_col}{totals_row})/{total_revenue_col}{totals_row}))"
+                cell.number_format = '0.00%'
+            else:
+                cell.value = f"=SUBTOTAL(109,{col_letter}{start_row}:{col_letter}{end_row})"
+                if col_offset in [1, 2, 3, 4]:
+                    cell.number_format = '#,##0.00'
+                elif col_offset == 0:
+                    cell.number_format = '#,##0.00'
+            cell.font = Font(bold=True)
     
     def _read_metadata(self, ws) -> Dict:
         """Read metadata from metadata sheet (delivery_centers, roles, employees for import)."""
