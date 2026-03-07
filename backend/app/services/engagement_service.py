@@ -5,7 +5,7 @@ Engagement service with business logic.
 import logging
 from typing import List, Optional, Tuple
 from uuid import UUID
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
@@ -245,8 +245,12 @@ class EngagementService(BaseService):
         if not engagement:
             raise ValueError("Engagement not found")
         
-        # Calculate comparative summary
-        comparative_summary = await self.calculate_comparative_summary(engagement)
+        # Calculate comparative summary (full if quote exists, partial with Actuals otherwise)
+        try:
+            comparative_summary = await self.calculate_comparative_summary(engagement)
+        except ValueError:
+            # Quote/estimate missing - return partial summary with Resource Plan + Actuals
+            comparative_summary = await self._calculate_partial_comparative_summary(engagement)
         
         response = await self._to_detail_response(engagement)
         response.comparative_summary = comparative_summary
@@ -301,6 +305,99 @@ class EngagementService(BaseService):
             "currency": currency,
         }
     
+    async def calculate_actuals_from_approved_timesheets(
+        self, engagement: Engagement
+    ) -> Decimal:
+        """Sum hours * invoice_rate from TimesheetApprovedSnapshot for this engagement (billable only)."""
+        summary = await self.calculate_actuals_summary(engagement)
+        return summary["total_revenue"]
+
+    async def calculate_actuals_summary(
+        self, engagement: Engagement
+    ) -> dict:
+        """Calculate Actuals (Revenue, Cost, Margin) from approved timesheet snapshots."""
+        from app.models.timesheet import TimesheetApprovedSnapshot, TimesheetEntry, Timesheet, TimesheetStatus
+        from sqlalchemy import select
+
+        snapshots_query = (
+            select(
+                TimesheetApprovedSnapshot.hours,
+                TimesheetApprovedSnapshot.invoice_rate,
+                TimesheetApprovedSnapshot.invoice_cost,
+                TimesheetApprovedSnapshot.billable,
+            )
+            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetEntry.engagement_id == engagement.id,
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+            )
+        )
+        result = await self.session.execute(snapshots_query)
+        rows = result.all()
+        total_revenue = Decimal("0")
+        total_cost = Decimal("0")
+        for row in rows:
+            hours = Decimal(str(row.hours or 0))
+            rate = Decimal(str(row.invoice_rate or 0))
+            cost = Decimal(str(row.invoice_cost or 0))
+            total_cost += hours * cost
+            if row.billable:
+                total_revenue += hours * rate
+        margin_amount = total_revenue - total_cost
+        margin_percentage = (margin_amount / total_revenue * 100) if total_revenue > 0 else Decimal("0")
+        return {
+            "total_revenue": total_revenue,
+            "total_cost": total_cost,
+            "margin_amount": margin_amount,
+            "margin_percentage": margin_percentage,
+        }
+    
+    async def _calculate_partial_comparative_summary(
+        self,
+        engagement: Engagement,
+    ) -> ComparativeSummary:
+        """Build comparative summary when quote/estimate is missing. Includes Resource Plan + Actuals only."""
+        resource_plan_summary = await self.calculate_resource_plan_summary(engagement)
+        actuals_summary = await self.calculate_actuals_summary(engagement)
+        opportunity = await self.opportunity_repo.get(engagement.opportunity_id)
+        currency = (opportunity and opportunity.default_currency) or "USD"
+        plan_vs_actuals_revenue_deviation = None
+        plan_vs_actuals_revenue_deviation_percentage = None
+        plan_vs_actuals_margin_deviation = None
+        if resource_plan_summary["total_revenue"] is not None and actuals_summary["total_revenue"] is not None:
+            plan_vs_actuals_revenue_deviation = resource_plan_summary["total_revenue"] - actuals_summary["total_revenue"]
+            if resource_plan_summary["total_revenue"] > 0:
+                plan_vs_actuals_revenue_deviation_percentage = (
+                    plan_vs_actuals_revenue_deviation / resource_plan_summary["total_revenue"]
+                ) * 100
+        if resource_plan_summary["margin_percentage"] is not None and actuals_summary["margin_percentage"] is not None:
+            plan_vs_actuals_margin_deviation = (
+                resource_plan_summary["margin_percentage"] - actuals_summary["margin_percentage"]
+            )
+        return ComparativeSummary(
+            quote_amount=None,
+            estimate_cost=None,
+            estimate_revenue=None,
+            estimate_margin_amount=None,
+            estimate_margin_percentage=None,
+            resource_plan_revenue=resource_plan_summary["total_revenue"],
+            resource_plan_cost=resource_plan_summary["total_cost"],
+            resource_plan_margin_amount=resource_plan_summary["margin_amount"],
+            resource_plan_margin_percentage=resource_plan_summary["margin_percentage"],
+            actuals_revenue=actuals_summary["total_revenue"],
+            actuals_cost=actuals_summary["total_cost"],
+            actuals_margin_amount=actuals_summary["margin_amount"],
+            actuals_margin_percentage=actuals_summary["margin_percentage"],
+            revenue_deviation=None,
+            revenue_deviation_percentage=None,
+            margin_deviation=None,
+            plan_vs_actuals_revenue_deviation=plan_vs_actuals_revenue_deviation,
+            plan_vs_actuals_revenue_deviation_percentage=plan_vs_actuals_revenue_deviation_percentage,
+            plan_vs_actuals_margin_deviation=plan_vs_actuals_margin_deviation,
+            currency=currency,
+        )
+    
     async def calculate_comparative_summary(
         self,
         engagement: Engagement,
@@ -344,6 +441,24 @@ class EngagementService(BaseService):
         if estimate_summary.get("margin_percentage") is not None and resource_plan_summary["margin_percentage"] is not None:
             margin_deviation = resource_plan_summary["margin_percentage"] - estimate_summary["margin_percentage"]
         
+        # Calculate Actuals from approved timesheets
+        actuals_summary = await self.calculate_actuals_summary(engagement)
+        
+        # Plan vs Actuals deviations
+        plan_vs_actuals_revenue_deviation = None
+        plan_vs_actuals_revenue_deviation_percentage = None
+        plan_vs_actuals_margin_deviation = None
+        if resource_plan_summary["total_revenue"] is not None and actuals_summary["total_revenue"] is not None:
+            plan_vs_actuals_revenue_deviation = resource_plan_summary["total_revenue"] - actuals_summary["total_revenue"]
+            if resource_plan_summary["total_revenue"] > 0:
+                plan_vs_actuals_revenue_deviation_percentage = (
+                    plan_vs_actuals_revenue_deviation / resource_plan_summary["total_revenue"]
+                ) * 100
+        if resource_plan_summary["margin_percentage"] is not None and actuals_summary["margin_percentage"] is not None:
+            plan_vs_actuals_margin_deviation = (
+                resource_plan_summary["margin_percentage"] - actuals_summary["margin_percentage"]
+            )
+        
         return ComparativeSummary(
             quote_amount=quote_amount,
             estimate_cost=estimate_summary.get("total_cost"),
@@ -354,9 +469,16 @@ class EngagementService(BaseService):
             resource_plan_cost=resource_plan_summary["total_cost"],
             resource_plan_margin_amount=resource_plan_summary["margin_amount"],
             resource_plan_margin_percentage=resource_plan_summary["margin_percentage"],
+            actuals_revenue=actuals_summary["total_revenue"],
+            actuals_cost=actuals_summary["total_cost"],
+            actuals_margin_amount=actuals_summary["margin_amount"],
+            actuals_margin_percentage=actuals_summary["margin_percentage"],
             revenue_deviation=revenue_deviation,
             revenue_deviation_percentage=revenue_deviation_percentage,
             margin_deviation=margin_deviation,
+            plan_vs_actuals_revenue_deviation=plan_vs_actuals_revenue_deviation,
+            plan_vs_actuals_revenue_deviation_percentage=plan_vs_actuals_revenue_deviation_percentage,
+            plan_vs_actuals_margin_deviation=plan_vs_actuals_margin_deviation,
             currency=currency,
         )
     
@@ -395,6 +517,17 @@ class EngagementService(BaseService):
             "margin_percentage": margin_percentage,
         }
     
+    async def get_quote_total_revenue(self, quote_id: UUID) -> Optional[Decimal]:
+        """Calculate Quote total revenue (for opportunity deal_value on approval)."""
+        quote = await self.quote_repo.get(quote_id)
+        if not quote:
+            return None
+        estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
+        if not estimate:
+            return None
+        estimate_summary = await self._calculate_estimate_summary(estimate)
+        return await self._calculate_quote_amount(quote, estimate_summary)
+
     async def _calculate_quote_amount(self, quote: Quote, estimate_summary: dict) -> Optional[Decimal]:
         """Calculate Quote amount based on quote type."""
         if not quote.quote_type:
@@ -679,6 +812,52 @@ class EngagementService(BaseService):
         
         return await self._to_line_item_response(line_item)
     
+    async def _line_item_has_approved_timesheets(self, line_item_id: UUID) -> bool:
+        """Check if a line item has any approved timesheet entries (APPROVED or INVOICED with hours > 0)."""
+        from app.models.timesheet import TimesheetEntry, Timesheet, TimesheetStatus
+        from sqlalchemy import select, func
+
+        hours_expr = (
+            func.coalesce(TimesheetEntry.sun_hours, 0) + func.coalesce(TimesheetEntry.mon_hours, 0)
+            + func.coalesce(TimesheetEntry.tue_hours, 0) + func.coalesce(TimesheetEntry.wed_hours, 0)
+            + func.coalesce(TimesheetEntry.thu_hours, 0) + func.coalesce(TimesheetEntry.fri_hours, 0)
+            + func.coalesce(TimesheetEntry.sat_hours, 0)
+        )
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(TimesheetEntry)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetEntry.engagement_line_item_id == line_item_id,
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                hours_expr > 0,
+            )
+        )
+        return (result.scalar_one() or 0) > 0
+
+    async def _get_approved_weeks_for_line_item(self, line_item_id: UUID) -> List[date]:
+        """Get week_start_date for all approved timesheet entries with hours for this line item."""
+        from app.models.timesheet import TimesheetEntry, Timesheet, TimesheetStatus
+        from sqlalchemy import select, func
+
+        hours_expr = (
+            func.coalesce(TimesheetEntry.sun_hours, 0) + func.coalesce(TimesheetEntry.mon_hours, 0)
+            + func.coalesce(TimesheetEntry.tue_hours, 0) + func.coalesce(TimesheetEntry.wed_hours, 0)
+            + func.coalesce(TimesheetEntry.thu_hours, 0) + func.coalesce(TimesheetEntry.fri_hours, 0)
+            + func.coalesce(TimesheetEntry.sat_hours, 0)
+        )
+        result = await self.session.execute(
+            select(Timesheet.week_start_date)
+            .join(TimesheetEntry, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetEntry.engagement_line_item_id == line_item_id,
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                hours_expr > 0,
+            )
+            .distinct()
+        )
+        return [row[0] for row in result.all() if row[0]]
+
     async def update_line_item(
         self,
         engagement_id: UUID,
@@ -691,6 +870,52 @@ class EngagementService(BaseService):
             return None
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
+
+        # When timesheet is approved: block Payable Center, Role, Billable, Employee; allow Cost, Rate
+        # Start/end dates: allow only if new range still covers all approved weeks
+        has_approved = await self._line_item_has_approved_timesheets(line_item_id)
+        if has_approved:
+            blocked = []
+            old_pc = str(line_item.payable_center_id) if line_item.payable_center_id else None
+            new_pc = str(update_dict["payable_center_id"]) if update_dict.get("payable_center_id") else None
+            if "payable_center_id" in update_dict and new_pc != old_pc:
+                blocked.append("Payable Center")
+            old_role = str(line_item.role_rates_id) if line_item.role_rates_id else None
+            new_role = str(update_dict["role_rates_id"]) if update_dict.get("role_rates_id") else None
+            if "role_rates_id" in update_dict and new_role != old_role:
+                blocked.append("Role")
+            if "billable" in update_dict and update_dict.get("billable") != line_item.billable:
+                blocked.append("Billable")
+            if "employee_id" in update_dict:
+                new_emp = update_dict.get("employee_id")
+                old_emp = str(line_item.employee_id) if line_item.employee_id else None
+                if (new_emp or None) != (old_emp or None):
+                    blocked.append("Employee")
+            if blocked:
+                raise ValueError(
+                    f"Cannot change {', '.join(blocked)}: this line item has approved timesheet entries. "
+                    "Cost and Rate may still be changed."
+                )
+            # Validate start/end dates: new range must cover all approved weeks
+            if "start_date" in update_dict or "end_date" in update_dict:
+                approved_weeks = await self._get_approved_weeks_for_line_item(line_item_id)
+                new_start = update_dict.get("start_date")
+                new_end = update_dict.get("end_date")
+                if new_start is None:
+                    new_start = line_item.start_date
+                elif isinstance(new_start, str):
+                    new_start = datetime.strptime(new_start, "%Y-%m-%d").date() if new_start else line_item.start_date
+                if new_end is None:
+                    new_end = line_item.end_date
+                elif isinstance(new_end, str):
+                    new_end = datetime.strptime(new_end, "%Y-%m-%d").date() if new_end else line_item.end_date
+                for week_start in approved_weeks:
+                    week_end = week_start + timedelta(days=6)
+                    if new_start > week_start or new_end < week_end:
+                        raise ValueError(
+                            f"Cannot change dates: approved timesheet exists for week of {week_start}. "
+                            "New date range must include all weeks with approved timesheets."
+                        )
         
         # CRITICAL: If employee_id was explicitly set to None (clearing), include it in update_dict
         # Pydantic's exclude_unset=True excludes None values, but we need to preserve None when explicitly set
@@ -852,6 +1077,13 @@ class EngagementService(BaseService):
         line_item = await self.line_item_repo.get(line_item_id)
         if not line_item or line_item.engagement_id != engagement_id:
             return False
+
+        # Block delete if line item has approved timesheets
+        if await self._line_item_has_approved_timesheets(line_item_id):
+            raise ValueError(
+                "Cannot delete this line item: it has approved timesheet entries. "
+                "Payable Center, Role, Billable, and Employee cannot be changed or removed once timesheets are approved."
+            )
         
         result = await self.line_item_repo.delete(line_item_id)
         await self.session.commit()

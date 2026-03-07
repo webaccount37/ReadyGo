@@ -3,6 +3,7 @@ Timesheet approval service - approve, reject, reopen, mark invoiced.
 """
 
 import logging
+from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
@@ -21,6 +22,7 @@ from app.db.repositories.engagement_timesheet_approver_repository import Engagem
 from app.db.repositories.delivery_center_approver_repository import DeliveryCenterApproverRepository
 from app.models.timesheet import Timesheet, TimesheetEntry, TimesheetStatus, TimesheetEntryType
 from app.models.engagement import Engagement
+from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.opportunity_permanent_lock import OpportunityPermanentLock
 from app.utils.currency_converter import convert_currency
 from app.schemas.timesheet import (
@@ -163,6 +165,8 @@ class TimesheetApprovalService(BaseService):
         )
         # Create permanent lock for each entry with engagement + hours > 0 (APPROVED triggers lock)
         await self._ensure_permanent_lock_for_timesheet(timesheet_id)
+        # Set Opportunity status to Won for each affected opportunity
+        await self._set_opportunity_won_for_timesheet(timesheet_id)
         await self.session.commit()
         from app.services.timesheet_service import TimesheetService
         svc = TimesheetService(self.session)
@@ -189,6 +193,32 @@ class TimesheetApprovalService(BaseService):
                             locked_by_timesheet_id=timesheet_id,
                         )
                         logger.info(f"Permanent lock created for opportunity {opp_id}")
+
+    async def _set_opportunity_won_for_timesheet(self, timesheet_id: UUID) -> None:
+        """Set Opportunity status to Won for each affected opportunity when timesheet is approved."""
+        from app.models.opportunity import Opportunity, OpportunityStatus
+        from datetime import date
+
+        timesheet = await self.timesheet_repo.get(timesheet_id)
+        if not timesheet or not timesheet.entries:
+            return
+        opp_ids = set()
+        for entry in timesheet.entries:
+            entry_total = sum(
+                Decimal(str(getattr(entry, f"{d}_hours") or 0))
+                for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+            )
+            if entry.engagement_id and entry_total > 0:
+                engagement = await self.engagement_repo.get(entry.engagement_id)
+                if engagement:
+                    opp_ids.add(engagement.opportunity_id)
+        today = date.today()
+        for opp_id in opp_ids:
+            opp = await self.opportunity_repo.get(opp_id)
+            if opp and opp.status != OpportunityStatus.WON:
+                opp.status = OpportunityStatus.WON
+                opp.close_date = today
+                logger.info(f"Opportunity {opp_id} set to Won (timesheet approved)")
 
     BLOCKING_STATUSES = (TimesheetStatus.SUBMITTED, TimesheetStatus.APPROVED, TimesheetStatus.INVOICED)
 
@@ -473,8 +503,8 @@ class TimesheetApprovalService(BaseService):
                 ).distinct()
             )
             for row in result.scalars().all():
-                if row[0]:
-                    employee_ids.add(row[0])
+                if row:
+                    employee_ids.add(row)
 
         # From Employee: delivery_center_id in approver's DCs (active or on-leave only)
         if approver_dc_ids:
@@ -485,7 +515,7 @@ class TimesheetApprovalService(BaseService):
                 )
             )
             for row in result.scalars().all():
-                employee_ids.add(row[0])
+                employee_ids.add(row)
 
         # Fallback: include employees who have timesheets in approver's scope (catches edge cases)
         timesheets = await self.timesheet_repo.list_approvable_timesheets_for_approver(

@@ -32,7 +32,7 @@ from app.models.quote import (
     TimeType, RevenueType, RateBillingUnit, InvoiceDetail, CapType
 )
 from app.models.estimate import Estimate
-from app.models.opportunity import Opportunity
+from app.models.opportunity import Opportunity, OpportunityStatus
 from app.utils.quote_display import compute_quote_display_name
 from app.schemas.quote import (
     QuoteCreate, QuoteUpdate, QuoteResponse, QuoteDetailResponse, QuoteListResponse,
@@ -182,6 +182,7 @@ class QuoteService(BaseService):
                     num_installments=trigger_data.num_installments,
                     milestone_date=trigger_data.milestone_date,
                     row_order=idx,
+                    client_approval=getattr(trigger_data, "client_approval", False),
                 )
         
         # Create variable compensations
@@ -364,10 +365,37 @@ class QuoteService(BaseService):
             await self._unlock_opportunity(quote.opportunity_id)
             await self._unlock_estimates(quote.opportunity_id)
         
-        # If status is ACCEPTED, create Engagement automatically
+        # If status is ACCEPTED, update Opportunity and create Engagement
         if status_data.status == QuoteStatus.ACCEPTED:
             from app.services.engagement_service import EngagementService
+            from app.services.opportunity_service import OpportunityService
+
             engagement_service = EngagementService(self.session)
+            opportunity_service = OpportunityService(self.session)
+
+            # Update Opportunity: status=NEGOTIATION, deal_value=Quote Total Revenue
+            quote_total = await engagement_service.get_quote_total_revenue(quote_id)
+            if quote_total is not None:
+                opportunity = await self.opportunity_repo.get(quote.opportunity_id)
+                if opportunity:
+                    currency = opportunity.default_currency or "USD"
+                    probability = OpportunityService.calculate_probability_from_status(OpportunityStatus.NEGOTIATION)
+                    deal_value_usd = await opportunity_service.calculate_deal_value_usd(quote_total, currency)
+                    forecast_value = opportunity_service.calculate_forecast_value(probability, quote_total)
+                    forecast_value_usd = (
+                        opportunity_service.calculate_forecast_value(probability, deal_value_usd)
+                        if deal_value_usd is not None else None
+                    )
+                    await self.opportunity_repo.update(
+                        quote.opportunity_id,
+                        status=OpportunityStatus.NEGOTIATION,
+                        deal_value=quote_total,
+                        deal_value_usd=deal_value_usd,
+                        probability=probability,
+                        forecast_value=forecast_value,
+                        forecast_value_usd=forecast_value_usd,
+                    )
+
             try:
                 await engagement_service.create_engagement_from_quote(
                     quote_id=quote_id,
@@ -675,6 +703,7 @@ class QuoteService(BaseService):
                 num_installments=trigger.num_installments,
                 milestone_date=trigger.milestone_date,
                 row_order=trigger.row_order,
+                client_approval=getattr(trigger, "client_approval", False),
             )
             for trigger in (quote.payment_triggers or [])
         ]

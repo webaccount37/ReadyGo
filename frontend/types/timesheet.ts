@@ -72,6 +72,17 @@ export interface TimesheetEntry {
   requires_notes?: boolean;
 }
 
+export interface TimesheetStatusHistoryEntry {
+  id: string;
+  timesheet_id: string;
+  from_status?: string;
+  to_status: string;
+  changed_by_employee_id?: string;
+  changed_by_name?: string;
+  changed_at: string;
+  note?: string;
+}
+
 export interface Timesheet {
   id: string;
   employee_id: string;
@@ -83,6 +94,7 @@ export interface Timesheet {
   total_hours: string;
   entries?: TimesheetEntry[];
   rejection_note?: string;
+  status_history?: TimesheetStatusHistoryEntry[];
 }
 
 export interface RejectTimesheetRequest {

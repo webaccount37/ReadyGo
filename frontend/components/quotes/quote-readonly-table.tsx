@@ -69,8 +69,8 @@ export function QuoteReadonlyTable({ quote }: QuoteReadonlyTableProps) {
             <th className="border border-gray-300 px-2 py-1 text-left font-semibold">Delivery Center</th>
             <th className="border border-gray-300 px-2 py-1 text-left font-semibold">Payable Center</th>
             <th className="border border-gray-300 px-2 py-1 text-left font-semibold">Employee</th>
-            <th className="border border-gray-300 px-2 py-1 text-right font-semibold">Rate</th>
             <th className="border border-gray-300 px-2 py-1 text-right font-semibold">Cost</th>
+            <th className="border border-gray-300 px-2 py-1 text-right font-semibold">Rate</th>
             <th className="border border-gray-300 px-2 py-1 text-left font-semibold">Currency</th>
             <th className="border border-gray-300 px-2 py-1 text-left font-semibold">Start Date</th>
             <th className="border border-gray-300 px-2 py-1 text-left font-semibold">End Date</th>
@@ -109,10 +109,10 @@ export function QuoteReadonlyTable({ quote }: QuoteReadonlyTableProps) {
                     {item.employee_name || "N/A"}
                   </td>
                   <td className="border border-gray-300 px-2 py-1 text-right">
-                    {parseFloat(item.rate || "0").toFixed(2)}
+                    {parseFloat(item.cost || "0").toFixed(2)}
                   </td>
                   <td className="border border-gray-300 px-2 py-1 text-right">
-                    {parseFloat(item.cost || "0").toFixed(2)}
+                    {parseFloat(item.rate || "0").toFixed(2)}
                   </td>
                   <td className="border border-gray-300 px-2 py-1">
                     {item.currency}

@@ -10,6 +10,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useRouter, useSearchParams } from "next/navigation";
 import type { QuoteCreate, PaymentTriggerCreate, VariableCompensationCreate, QuoteType, PaymentTriggerType, TimeType, RevenueType, RateBillingUnit, InvoiceDetail, CapType } from "@/types/quote";
 import { Trash2, Plus, AlertTriangle } from "lucide-react";
@@ -212,6 +213,7 @@ export function QuoteForm() {
       trigger_type: "TIME",
       time_type: "IMMEDIATE",
       amount: "0",
+      client_approval: false,
       row_order: paymentTriggers.length,
     }]);
   };
@@ -293,6 +295,7 @@ export function QuoteForm() {
           trigger_type: "MILESTONE" as PaymentTriggerType,
           milestone_date: phase.end_date.split("T")[0], // Use phase end date
           amount: "0", // Will be distributed
+          client_approval: false,
           row_order: index,
         }));
     } else {
@@ -301,6 +304,7 @@ export function QuoteForm() {
         newTriggers = [{
           name: "Default",
           trigger_type: "MILESTONE" as PaymentTriggerType,
+          client_approval: false,
           milestone_date: opportunity.end_date.split("T")[0],
           amount: "0", // Will be distributed
           row_order: 0,
@@ -655,7 +659,8 @@ export function QuoteForm() {
                               <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Name</th>
                               <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Type</th>
                               <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Time/Milestone</th>
-                              <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Amount</th>
+                              <th className="px-3 py-2 text-center text-xs font-semibold text-blue-900">Client Approval?</th>
+                              <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900 min-w-[100px]">Amount</th>
                               <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900 w-12"></th>
                             </tr>
                           </thead>
@@ -726,6 +731,15 @@ export function QuoteForm() {
                                       required
                                     />
                                   )}
+                                </td>
+                                <td className="px-3 py-2 text-center">
+                                  <Checkbox
+                                    checked={trigger.client_approval ?? false}
+                                    onChange={(e) =>
+                                      updatePaymentTrigger(index, { client_approval: e.target.checked })
+                                    }
+                                    className="border-blue-300"
+                                  />
                                 </td>
                                 <td className="px-3 py-2">
                                   <Input

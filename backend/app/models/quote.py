@@ -178,6 +178,7 @@ class QuotePaymentTrigger(Base):
     num_installments = Column(Integer, nullable=True)  # Only for MONTHLY triggers
     milestone_date = Column(Date, nullable=True)  # Only for MILESTONE triggers
     row_order = Column(Integer, nullable=False, default=0)
+    client_approval = Column(Boolean, nullable=False, default=False)
     
     # Relationships
     quote = relationship("Quote", back_populates="payment_triggers")

@@ -39,6 +39,7 @@ from app.schemas.timesheet import (
     TimesheetEntryResponse,
     TimesheetEntryUpsert,
     TimesheetDayNoteResponse,
+    TimesheetStatusHistoryResponse,
 )
 
 logger = logging.getLogger(__name__)
@@ -713,6 +714,15 @@ class TimesheetService(BaseService):
             if day_notes:
                 await self._save_day_notes(entry.id, day_notes)
 
+        # Record "Entries saved" in status history
+        await self.status_history_repo.create(
+            timesheet_id=timesheet_id,
+            from_status=timesheet.status,
+            to_status=timesheet.status,
+            changed_by_employee_id=current_employee_id,
+            note="Entries saved",
+        )
+
         await self.session.commit()
         timesheet = await self.timesheet_repo.get(timesheet_id)
         if timesheet:
@@ -945,11 +955,30 @@ class TimesheetService(BaseService):
                 )
             )
         rejection_note = None
+        status_history_resp = []
         if timesheet.status_history:
             for h in reversed(sorted(timesheet.status_history, key=lambda x: x.changed_at or "")):
                 if h.from_status == TimesheetStatus.SUBMITTED and h.to_status == TimesheetStatus.REOPENED and h.note:
                     rejection_note = h.note
                     break
+            # Build status history for Change History section (newest first)
+            sorted_history = sorted(timesheet.status_history, key=lambda x: x.changed_at or "", reverse=True)
+            for h in sorted_history:
+                changed_by_name = None
+                if h.changed_by_employee:
+                    changed_by_name = f"{h.changed_by_employee.first_name} {h.changed_by_employee.last_name}"
+                status_history_resp.append(
+                    TimesheetStatusHistoryResponse(
+                        id=h.id,
+                        timesheet_id=h.timesheet_id,
+                        from_status=h.from_status.value if h.from_status else None,
+                        to_status=h.to_status.value if h.to_status else None,
+                        changed_by_employee_id=h.changed_by_employee_id,
+                        changed_by_name=changed_by_name,
+                        changed_at=h.changed_at.isoformat() if h.changed_at else "",
+                        note=h.note,
+                    )
+                )
 
         return TimesheetResponse(
             id=timesheet.id,
@@ -962,6 +991,7 @@ class TimesheetService(BaseService):
             total_hours=total,
             entries=entries_resp,
             rejection_note=rejection_note,
+            status_history=status_history_resp,
         )
 
     async def count_incomplete_past_weeks(self, employee_id: UUID) -> int:

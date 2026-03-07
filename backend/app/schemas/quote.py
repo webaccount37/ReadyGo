@@ -83,6 +83,7 @@ class PaymentTriggerBase(BaseModel):
     num_installments: Optional[int] = Field(None, ge=1)  # Only for MONTHLY triggers
     milestone_date: Optional[date] = None  # Only for MILESTONE triggers
     row_order: int = Field(default=0, ge=0)
+    client_approval: bool = False
 
 
 class PaymentTriggerCreate(PaymentTriggerBase):

@@ -594,6 +594,54 @@ function TimesheetPageContent() {
             </CardContent>
           </Card>
 
+          {/* Change History - record of all changes to this week */}
+          {timesheet?.status_history && timesheet.status_history.length > 0 && (
+            <Card className="mt-4 border-0 shadow-md overflow-hidden bg-white/95 dark:bg-slate-900/95">
+              <CardHeader className="flex-shrink-0 bg-slate-50 dark:bg-slate-800/50 border-b px-4 py-3">
+                <CardTitle className="text-base font-semibold text-slate-800 dark:text-slate-100">Change History</CardTitle>
+              </CardHeader>
+              <CardContent className="p-4">
+                <ul className="space-y-2 text-sm">
+                  {timesheet.status_history.map((h) => {
+                    let actionLabel = "Change";
+                    if (h.from_status === h.to_status && h.note === "Entries saved") {
+                      actionLabel = "Entries saved";
+                    } else if (h.from_status && h.to_status && h.from_status !== h.to_status) {
+                      if (h.from_status === "NOT_SUBMITTED" && h.to_status === "SUBMITTED") actionLabel = "Submitted for approval";
+                      else if (h.from_status === "REOPENED" && h.to_status === "SUBMITTED") actionLabel = "Submitted for approval";
+                      else if (h.from_status === "SUBMITTED" && h.to_status === "APPROVED") actionLabel = "Approved";
+                      else if (h.from_status === "SUBMITTED" && h.to_status === "REOPENED") actionLabel = "Rejected";
+                      else if ((h.from_status === "SUBMITTED" || h.from_status === "APPROVED") && h.to_status === "REOPENED") actionLabel = "Reopened";
+                      else if (h.from_status === "APPROVED" && h.to_status === "INVOICED") actionLabel = "Marked invoiced";
+                      else actionLabel = `${h.from_status.replace(/_/g, " ")} → ${h.to_status.replace(/_/g, " ")}`;
+                    } else if (h.to_status) {
+                      actionLabel = h.to_status.replace(/_/g, " ");
+                    }
+                    return (
+                      <li
+                        key={h.id}
+                        className="flex flex-wrap items-baseline gap-x-2 gap-y-1 py-1.5 border-b border-slate-100 dark:border-slate-700 last:border-0"
+                      >
+                        <span className="font-medium text-slate-700 dark:text-slate-200">
+                          {new Date(h.changed_at).toLocaleString()}
+                        </span>
+                        <span className="text-slate-600 dark:text-slate-300">{actionLabel}</span>
+                        {h.changed_by_name && (
+                          <span className="text-slate-500 dark:text-slate-400">by {h.changed_by_name}</span>
+                        )}
+                        {h.note && h.note !== "Entries saved" && (
+                          <span className="w-full text-amber-700 dark:text-amber-400 mt-0.5">
+                            Note: {h.note}
+                          </span>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </CardContent>
+            </Card>
+          )}
+
           {/* Note dialog - rendered at page level so it floats outside Time Entries overflow */}
           <Dialog
             open={noteDialogState !== null}

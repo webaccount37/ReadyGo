@@ -12,7 +12,7 @@ import {
 import { useEstimates } from "@/hooks/useEstimates";
 import { useQuotes } from "@/hooks/useQuotes";
 import { Button } from "@/components/ui/button";
-import { Trash2, Calculator, FileCheck, Lock } from "lucide-react";
+import { Trash2, Calculator, FileCheck, Lock, Briefcase } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
@@ -413,6 +413,8 @@ function OpportunitiesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Invoice Center">IC</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Deal Value (USD)">Deal $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Forecast Value (USD)">Forecast $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Plan Revenue (USD)">Plan $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actuals from Approved Timesheets (USD)">Actuals $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
@@ -516,6 +518,16 @@ function OpportunitiesPageContent() {
                                 ? formatCurrency(opportunity.forecast_value_usd, "USD")
                                 : "—"}
                             </td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.plan_amount ? formatCurrency(opportunity.plan_amount, "USD") : "—"}>
+                              {opportunity.plan_amount != null && opportunity.plan_amount !== undefined && opportunity.plan_amount !== ""
+                                ? formatCurrency(opportunity.plan_amount, "USD")
+                                : "—"}
+                            </td>
+                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.actuals_amount != null ? formatCurrency(opportunity.actuals_amount, "USD") : "—"}>
+                              {opportunity.actuals_amount != null && opportunity.actuals_amount !== undefined && String(opportunity.actuals_amount) !== "0"
+                                ? formatCurrency(opportunity.actuals_amount, "USD")
+                                : "—"}
+                            </td>
                             <td className="p-1.5 whitespace-nowrap text-xs">
                               <Link
                                 href={`/employees?search=${encodeURIComponent(opportunity.name)}`}
@@ -552,6 +564,26 @@ function OpportunitiesPageContent() {
                                   title={getActiveQuoteId(opportunity.id) ? "View Active Quote" : hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
                                 >
                                   <FileCheck className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (opportunity.engagement_id) {
+                                      router.push(`/engagements?opportunity_id=${opportunity.id}`);
+                                    }
+                                  }}
+                                  className={cn(
+                                    "h-6 px-1.5 text-xs",
+                                    opportunity.engagement_id
+                                      ? "text-purple-600 hover:text-purple-700"
+                                      : "text-gray-400 cursor-not-allowed"
+                                  )}
+                                  title={opportunity.engagement_id ? "View Engagement" : "No Engagement"}
+                                  disabled={!opportunity.engagement_id}
+                                >
+                                  <Briefcase className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -644,6 +676,24 @@ function OpportunitiesPageContent() {
                                 </div>
                               </div>
                             )}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Plan $</div>
+                                <div className="text-sm">
+                                  {opportunity.plan_amount != null && opportunity.plan_amount !== undefined && opportunity.plan_amount !== ""
+                                    ? formatCurrency(opportunity.plan_amount, "USD")
+                                    : "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Actuals $</div>
+                                <div className="text-sm">
+                                  {opportunity.actuals_amount != null && opportunity.actuals_amount !== undefined && String(opportunity.actuals_amount) !== "0"
+                                    ? formatCurrency(opportunity.actuals_amount, "USD")
+                                    : "—"}
+                                </div>
+                              </div>
+                            </div>
                             <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
@@ -670,6 +720,26 @@ function OpportunitiesPageContent() {
                                 title={getActiveQuoteId(opportunity.id) ? "View Active Quote" : hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
                               >
                                 <FileCheck className="w-4 h-4" />
+                              </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (opportunity.engagement_id) {
+                                      router.push(`/engagements?opportunity_id=${opportunity.id}`);
+                                    }
+                                  }}
+                                className={cn(
+                                  "flex-1",
+                                  opportunity.engagement_id
+                                    ? "text-purple-600 hover:text-purple-700"
+                                    : "text-gray-400 cursor-not-allowed"
+                                )}
+                                title={opportunity.engagement_id ? "View Engagement" : "No Engagement"}
+                                disabled={!opportunity.engagement_id}
+                              >
+                                <Briefcase className="w-4 h-4" />
                               </Button>
                               <Button
                                 size="sm"

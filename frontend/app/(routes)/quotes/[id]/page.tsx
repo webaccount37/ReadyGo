@@ -511,7 +511,8 @@ export default function QuoteDetailPage() {
                             <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Name</th>
                             <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Type</th>
                             <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Time/Milestone</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900">Amount</th>
+                            <th className="px-3 py-2 text-center text-xs font-semibold text-blue-900">Client Approval?</th>
+                            <th className="px-3 py-2 text-left text-xs font-semibold text-blue-900 w-28">Amount</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -533,7 +534,15 @@ export default function QuoteDetailPage() {
                                     trigger.milestone_date && formatLocalDate(trigger.milestone_date)
                                   )}
                                 </td>
-                                <td className="px-3 py-2 text-sm font-medium">
+                                <td className="px-3 py-2 text-center">
+                                  <input
+                                    type="checkbox"
+                                    checked={trigger.client_approval ?? false}
+                                    readOnly
+                                    className="h-4 w-4 rounded border-gray-300"
+                                  />
+                                </td>
+                                <td className="px-3 py-2 text-sm font-medium w-28">
                                   {new Intl.NumberFormat("en-US", {
                                     style: "currency",
                                     currency: getCurrency(),

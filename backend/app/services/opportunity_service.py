@@ -14,6 +14,7 @@ from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
+from app.db.repositories.engagement_repository import EngagementRepository
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate, OpportunityResponse
 from app.models.opportunity import OpportunityStatus
 from app.utils.currency_converter import convert_to_usd
@@ -31,6 +32,7 @@ class OpportunityService(BaseService):
         self.role_repo = RoleRepository(session)
         self.estimate_repo = EstimateRepository(session)
         self.line_item_repo = EstimateLineItemRepository(session)
+        self.engagement_repo = EngagementRepository(session)
     
     @staticmethod
     def calculate_probability_from_status(status: OpportunityStatus) -> float:
@@ -182,7 +184,7 @@ class OpportunityService(BaseService):
         total = len(opportunities)
         responses = []
         for opp in opportunities:
-            responses.append(await self._to_response(opp))
+            responses.append(await self._to_response(opp, include_plan_actuals=True))
         return responses, total
     
     async def list_child_opportunities(
@@ -435,7 +437,98 @@ class OpportunityService(BaseService):
         
         return list(employees_dict.values())
     
-    async def _to_response(self, opportunity, include_relationships: bool = False) -> OpportunityResponse:
+    async def _calculate_plan_actuals_for_opportunity(
+        self, opportunity_id: UUID
+    ) -> dict:
+        """Calculate Plan $ and Actuals $ for an opportunity. Returns dict with plan_amount, actuals_amount, engagement_id."""
+        from app.models.timesheet import TimesheetApprovedSnapshot, TimesheetEntry, Timesheet, TimesheetStatus
+        from app.models.engagement import Engagement
+        from app.models.quote import Quote, QuoteType, RateBillingUnit
+        from sqlalchemy import func
+
+        result = {"plan_amount": None, "actuals_amount": Decimal("0"), "engagement_id": None}
+
+        # Plan $: Get engagement resource_plan_revenue
+        engagements = await self.engagement_repo.list_by_opportunity(opportunity_id, skip=0, limit=1)
+        if engagements:
+            engagement = engagements[0]
+            result["engagement_id"] = engagement.id
+            try:
+                from app.services.engagement_service import EngagementService
+                eng_svc = EngagementService(self.session)
+                eng_with_items = await self.engagement_repo.get_with_line_items(engagement.id)
+                if eng_with_items:
+                    plan_summary = await eng_svc.calculate_resource_plan_summary(eng_with_items)
+                    rev = plan_summary.get("total_revenue") or Decimal("0")
+                    currency = plan_summary.get("currency", "USD")
+                    if rev > 0:
+                        result["plan_amount"] = await self.calculate_deal_value_usd(rev, currency)
+            except Exception:
+                pass
+
+        # Actuals $: Sum approved timesheet revenue (billable only)
+        # Join: TimesheetApprovedSnapshot -> TimesheetEntry -> Timesheet -> Engagement
+        engagements_subq = select(Engagement.id).where(Engagement.opportunity_id == opportunity_id)
+        entries_subq = (
+            select(TimesheetEntry.id)
+            .where(TimesheetEntry.engagement_id.in_(engagements_subq))
+        )
+        snapshots_query = (
+            select(
+                TimesheetApprovedSnapshot.hours,
+                TimesheetApprovedSnapshot.invoice_rate,
+                TimesheetApprovedSnapshot.billable,
+                TimesheetEntry.engagement_id,
+            )
+            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetEntry.id.in_(entries_subq),
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                TimesheetApprovedSnapshot.billable == True,
+            )
+        )
+        snap_result = await self.session.execute(snapshots_query)
+        rows = snap_result.all()
+
+        # Get quote for each engagement to check blended rate
+        opp = await self.opportunity_repo.get(opportunity_id)
+        opp_currency = (opp.default_currency or "USD") if opp else "USD"
+
+        for row in rows:
+            hours = Decimal(str(row.hours or 0))
+            if hours <= 0:
+                continue
+            engagement_id = row.engagement_id
+            # Check if engagement's quote uses blended rate
+            eng = await self.engagement_repo.get(engagement_id) if engagement_id else None
+            rate = Decimal(str(row.invoice_rate or 0))
+            if eng and eng.quote_id:
+                quote_result = await self.session.execute(
+                    select(Quote).where(Quote.id == eng.quote_id)
+                )
+                quote = quote_result.scalar_one_or_none()
+                if quote and quote.quote_type == QuoteType.TIME_MATERIALS:
+                    if quote.rate_billing_unit in [RateBillingUnit.HOURLY_BLENDED, RateBillingUnit.DAILY_BLENDED]:
+                        if quote.blended_rate_amount:
+                            rate = Decimal(str(quote.blended_rate_amount))
+            revenue = hours * rate
+            result["actuals_amount"] += revenue
+
+        # Convert actuals to USD if not already
+        if result["actuals_amount"] > 0:
+            result["actuals_amount"] = await self.calculate_deal_value_usd(
+                result["actuals_amount"], opp_currency
+            ) or result["actuals_amount"]
+
+        return result
+    
+    async def _to_response(
+        self,
+        opportunity,
+        include_relationships: bool = False,
+        include_plan_actuals: bool = False,
+    ) -> OpportunityResponse:
         """Convert opportunity model to response schema."""
         account_name = None
         if hasattr(opportunity, 'account') and opportunity.account:
@@ -505,6 +598,12 @@ class OpportunityService(BaseService):
             opportunity_dict["employees"] = employees
         else:
             opportunity_dict["employees"] = []
+        
+        if include_plan_actuals:
+            plan_actuals = await self._calculate_plan_actuals_for_opportunity(opportunity.id)
+            opportunity_dict["plan_amount"] = plan_actuals.get("plan_amount")
+            opportunity_dict["actuals_amount"] = plan_actuals.get("actuals_amount")
+            opportunity_dict["engagement_id"] = plan_actuals.get("engagement_id")
         
         return OpportunityResponse.model_validate(opportunity_dict)
 

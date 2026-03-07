@@ -27,24 +27,34 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
     return `${num >= 0 ? "+" : ""}${num.toFixed(1)}%`;
   };
 
-  // Determine if there are significant deviations
-  const revenueDeviationPercent = summary.revenue_deviation_percentage 
-    ? parseFloat(summary.revenue_deviation_percentage) 
+  // Quote/Estimate vs Resource Plan deviations
+  const revenueDeviationPercent = summary.revenue_deviation_percentage
+    ? parseFloat(summary.revenue_deviation_percentage)
     : 0;
-  const marginDeviation = summary.margin_deviation 
-    ? parseFloat(summary.margin_deviation) 
+  const marginDeviation = summary.margin_deviation ? parseFloat(summary.margin_deviation) : 0;
+
+  // Resource Plan vs Actuals deviations
+  const planVsActualsRevenuePercent = summary.plan_vs_actuals_revenue_deviation_percentage
+    ? parseFloat(summary.plan_vs_actuals_revenue_deviation_percentage)
+    : 0;
+  const planVsActualsMarginDeviation = summary.plan_vs_actuals_margin_deviation
+    ? parseFloat(summary.plan_vs_actuals_margin_deviation)
     : 0;
 
-  // Thresholds for alerts (configurable)
-  const REVENUE_DEVIATION_THRESHOLD = 5; // 5%
-  const MARGIN_DEVIATION_THRESHOLD = 5; // 5 percentage points
-  const REVENUE_AMOUNT_THRESHOLD = 10000; // $10k
+  const REVENUE_DEVIATION_THRESHOLD = 5;
+  const MARGIN_DEVIATION_THRESHOLD = 5;
+  const REVENUE_AMOUNT_THRESHOLD = 10000;
 
-  const hasSignificantRevenueDeviation = 
+  const hasSignificantQuoteVsPlanRevenueDeviation =
     Math.abs(revenueDeviationPercent) > REVENUE_DEVIATION_THRESHOLD ||
-    (summary.revenue_deviation && Math.abs(parseFloat(summary.revenue_deviation)) > REVENUE_AMOUNT_THRESHOLD);
-  
-  const hasSignificantMarginDeviation = Math.abs(marginDeviation) > MARGIN_DEVIATION_THRESHOLD;
+    (summary.revenue_deviation &&
+      Math.abs(parseFloat(summary.revenue_deviation)) > REVENUE_AMOUNT_THRESHOLD);
+  const hasSignificantQuoteVsPlanMarginDeviation =
+    Math.abs(marginDeviation) > MARGIN_DEVIATION_THRESHOLD;
+  const hasSignificantPlanVsActualsRevenueDeviation =
+    Math.abs(planVsActualsRevenuePercent) > REVENUE_DEVIATION_THRESHOLD;
+  const hasSignificantPlanVsActualsMarginDeviation =
+    Math.abs(planVsActualsMarginDeviation) > MARGIN_DEVIATION_THRESHOLD;
 
   const getDeviationColor = (deviation: number) => {
     if (Math.abs(deviation) <= REVENUE_DEVIATION_THRESHOLD) return "text-green-600";
@@ -58,31 +68,27 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
         <CardTitle>Budget Comparison</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           {/* Quote/Estimate Section */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-700">Quote/Estimate (Contract)</h3>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Quote Amount:</span>
+                <span className="text-sm text-gray-600">Revenue:</span>
                 <span className="text-sm font-semibold">{formatCurrency(summary.quote_amount)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Estimate Cost:</span>
+                <span className="text-sm text-gray-600">Cost:</span>
                 <span className="text-sm">{formatCurrency(summary.estimate_cost)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Estimate Revenue:</span>
-                <span className="text-sm">{formatCurrency(summary.estimate_revenue)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Estimate Margin Amount:</span>
+                <span className="text-sm text-gray-600">Margin Amount:</span>
                 <span className="text-sm">{formatCurrency(summary.estimate_margin_amount)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Estimate Margin %:</span>
+                <span className="text-sm text-gray-600">Margin %:</span>
                 <span className="text-sm">
-                  {summary.estimate_margin_percentage 
+                  {summary.estimate_margin_percentage
                     ? `${parseFloat(summary.estimate_margin_percentage).toFixed(1)}%`
                     : "-"}
                 </span>
@@ -95,89 +101,204 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
             <h3 className="text-lg font-semibold text-gray-700">Resource Plan (Budget)</h3>
             <div className="space-y-2">
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Resource Plan Revenue:</span>
-                <span className={`text-sm font-semibold ${
-                  hasSignificantRevenueDeviation ? "text-red-600" : "text-gray-900"
-                }`}>
+                <span className="text-sm text-gray-600">Revenue:</span>
+                <span
+                  className={`text-sm font-semibold ${
+                    hasSignificantQuoteVsPlanRevenueDeviation ? "text-red-600" : "text-gray-900"
+                  }`}
+                >
                   {formatCurrency(summary.resource_plan_revenue)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Resource Plan Cost:</span>
+                <span className="text-sm text-gray-600">Cost:</span>
                 <span className="text-sm">{formatCurrency(summary.resource_plan_cost)}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Resource Plan Margin Amount:</span>
-                <span className="text-sm">{formatCurrency(summary.resource_plan_margin_amount)}</span>
+                <span className="text-sm text-gray-600">Margin Amount:</span>
+                <span className="text-sm">
+                  {formatCurrency(summary.resource_plan_margin_amount)}
+                </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Resource Plan Margin %:</span>
-                <span className={`text-sm ${
-                  hasSignificantMarginDeviation ? "text-red-600" : "text-gray-900"
-                }`}>
-                  {summary.resource_plan_margin_percentage 
+                <span className="text-sm text-gray-600">Margin %:</span>
+                <span
+                  className={`text-sm ${
+                    hasSignificantQuoteVsPlanMarginDeviation ? "text-red-600" : "text-gray-900"
+                  }`}
+                >
+                  {summary.resource_plan_margin_percentage
                     ? `${parseFloat(summary.resource_plan_margin_percentage).toFixed(1)}%`
                     : "-"}
                 </span>
               </div>
             </div>
           </div>
+
+          {/* Actuals Section */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-semibold text-gray-700">Actuals (Invoice)</h3>
+            <div className="space-y-2">
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Revenue:</span>
+                <span
+                  className={`text-sm font-semibold ${
+                    hasSignificantPlanVsActualsRevenueDeviation ? "text-red-600" : "text-gray-900"
+                  }`}
+                >
+                  {formatCurrency(summary.actuals_revenue)}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Cost:</span>
+                <span className="text-sm">{formatCurrency(summary.actuals_cost)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Margin Amount:</span>
+                <span className="text-sm">{formatCurrency(summary.actuals_margin_amount)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-sm text-gray-600">Margin %:</span>
+                <span
+                  className={`text-sm ${
+                    hasSignificantPlanVsActualsMarginDeviation ? "text-red-600" : "text-gray-900"
+                  }`}
+                >
+                  {summary.actuals_margin_percentage
+                    ? `${parseFloat(summary.actuals_margin_percentage).toFixed(1)}%`
+                    : "-"}
+                </span>
+              </div>
+            </div>
+            <p className="text-xs text-gray-500">
+              From approved timesheet hours × invoice rate/cost
+            </p>
+          </div>
         </div>
 
         {/* Deviations Section */}
         <div className="mt-6 pt-6 border-t">
           <h3 className="text-lg font-semibold text-gray-700 mb-4">Deviations</h3>
-          <div className="space-y-3">
-            {summary.revenue_deviation !== undefined && (
-              <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                <div className="flex items-center gap-2">
-                  {hasSignificantRevenueDeviation ? (
-                    <AlertTriangle className="w-5 h-5 text-red-600" />
-                  ) : (
-                    <CheckCircle2 className="w-5 h-5 text-green-600" />
-                  )}
-                  <span className="text-sm font-medium">Revenue Deviation:</span>
-                </div>
-                <div className="text-right">
-                  <div className={`text-sm font-semibold ${getDeviationColor(revenueDeviationPercent)}`}>
-                    {formatCurrency(summary.revenue_deviation)}
+          <div className="space-y-4">
+            {/* Quote/Estimate vs Resource Plan */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-600 mb-2">
+                Quote/Estimate vs Resource Plan
+              </h4>
+              <div className="space-y-3">
+                {summary.revenue_deviation !== undefined && summary.revenue_deviation !== null && (
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                    <div className="flex items-center gap-2">
+                      {hasSignificantQuoteVsPlanRevenueDeviation ? (
+                        <AlertTriangle className="w-5 h-5 text-red-600" />
+                      ) : (
+                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      )}
+                      <span className="text-sm font-medium">Revenue Deviation:</span>
+                    </div>
+                    <div className="text-right">
+                      <div
+                        className={`text-sm font-semibold ${getDeviationColor(revenueDeviationPercent)}`}
+                      >
+                        {formatCurrency(summary.revenue_deviation)}
+                      </div>
+                      {summary.revenue_deviation_percentage && (
+                        <div
+                          className={`text-xs ${getDeviationColor(revenueDeviationPercent)}`}
+                        >
+                          {formatPercentage(summary.revenue_deviation_percentage)}
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  {summary.revenue_deviation_percentage && (
-                    <div className={`text-xs ${getDeviationColor(revenueDeviationPercent)}`}>
-                      {formatPercentage(summary.revenue_deviation_percentage)}
+                )}
+                {summary.margin_deviation !== undefined && summary.margin_deviation !== null && (
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                    <div className="flex items-center gap-2">
+                      {hasSignificantQuoteVsPlanMarginDeviation ? (
+                        <AlertTriangle className="w-5 h-5 text-red-600" />
+                      ) : (
+                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                      )}
+                      <span className="text-sm font-medium">Margin Deviation:</span>
+                    </div>
+                    <div
+                      className={`text-sm font-semibold ${getDeviationColor(marginDeviation)}`}
+                    >
+                      {formatPercentage(summary.margin_deviation)}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Resource Plan vs Actuals */}
+            <div>
+              <h4 className="text-sm font-medium text-gray-600 mb-2">
+                Resource Plan vs Actuals
+              </h4>
+              <div className="space-y-3">
+                {summary.plan_vs_actuals_revenue_deviation !== undefined &&
+                  summary.plan_vs_actuals_revenue_deviation !== null && (
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                      <div className="flex items-center gap-2">
+                        {hasSignificantPlanVsActualsRevenueDeviation ? (
+                          <AlertTriangle className="w-5 h-5 text-red-600" />
+                        ) : (
+                          <CheckCircle2 className="w-5 h-5 text-green-600" />
+                        )}
+                        <span className="text-sm font-medium">Revenue Deviation:</span>
+                      </div>
+                      <div className="text-right">
+                        <div
+                          className={`text-sm font-semibold ${getDeviationColor(planVsActualsRevenuePercent)}`}
+                        >
+                          {formatCurrency(summary.plan_vs_actuals_revenue_deviation)}
+                        </div>
+                        {summary.plan_vs_actuals_revenue_deviation_percentage && (
+                          <div
+                            className={`text-xs ${getDeviationColor(planVsActualsRevenuePercent)}`}
+                          >
+                            {formatPercentage(summary.plan_vs_actuals_revenue_deviation_percentage)}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
-                </div>
-              </div>
-            )}
-            {summary.margin_deviation !== undefined && (
-              <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
-                <div className="flex items-center gap-2">
-                  {hasSignificantMarginDeviation ? (
-                    <AlertTriangle className="w-5 h-5 text-red-600" />
-                  ) : (
-                    <CheckCircle2 className="w-5 h-5 text-green-600" />
+                {summary.plan_vs_actuals_margin_deviation !== undefined &&
+                  summary.plan_vs_actuals_margin_deviation !== null && (
+                    <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
+                      <div className="flex items-center gap-2">
+                        {hasSignificantPlanVsActualsMarginDeviation ? (
+                          <AlertTriangle className="w-5 h-5 text-red-600" />
+                        ) : (
+                          <CheckCircle2 className="w-5 h-5 text-green-600" />
+                        )}
+                        <span className="text-sm font-medium">Margin Deviation:</span>
+                      </div>
+                      <div
+                        className={`text-sm font-semibold ${getDeviationColor(planVsActualsMarginDeviation)}`}
+                      >
+                        {formatPercentage(summary.plan_vs_actuals_margin_deviation)}
+                      </div>
+                    </div>
                   )}
-                  <span className="text-sm font-medium">Margin Deviation:</span>
-                </div>
-                <div className={`text-sm font-semibold ${getDeviationColor(marginDeviation)}`}>
-                  {formatPercentage(summary.margin_deviation)}
-                </div>
               </div>
-            )}
+            </div>
           </div>
         </div>
 
         {/* Alert Banner for Significant Deviations */}
-        {(hasSignificantRevenueDeviation || hasSignificantMarginDeviation) && (
+        {(hasSignificantQuoteVsPlanRevenueDeviation || hasSignificantQuoteVsPlanMarginDeviation) && (
           <div className="mt-4 p-4 bg-red-50 border border-red-200 rounded-lg">
             <div className="flex items-start gap-2">
               <AlertTriangle className="w-5 h-5 text-red-600 mt-0.5" />
               <div>
                 <p className="text-sm font-semibold text-red-800">Budget Deviation Alert</p>
                 <p className="text-sm text-red-700 mt-1">
-                  The Resource Plan budget deviates significantly from the Quote contract. 
-                  Please review and adjust the Resource Plan to align with the approved Quote.
+                  The Resource Plan budget deviates significantly from the Quote/Estimate
+                  contract. Please review and adjust the Resource Plan to align with the
+                  approved Quote.
                 </p>
               </div>
             </div>

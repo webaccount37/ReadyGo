@@ -51,9 +51,16 @@ export interface ComparativeSummary {
   resource_plan_cost?: string;
   resource_plan_margin_amount?: string;
   resource_plan_margin_percentage?: string;
+  actuals_revenue?: string;
+  actuals_cost?: string;
+  actuals_margin_amount?: string;
+  actuals_margin_percentage?: string;
   revenue_deviation?: string;
   revenue_deviation_percentage?: string;
   margin_deviation?: string;
+  plan_vs_actuals_revenue_deviation?: string;
+  plan_vs_actuals_revenue_deviation_percentage?: string;
+  plan_vs_actuals_margin_deviation?: string;
   currency: string;
 }
 

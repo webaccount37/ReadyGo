@@ -133,6 +133,9 @@ class OpportunityResponse(OpportunityBase):
     is_locked: Optional[bool] = None  # Computed: whether opportunity is locked by an active quote
     locked_by_quote_id: Optional[UUID] = None  # ID of quote locking this opportunity if exists
     is_permanently_locked: Optional[bool] = None  # Computed: locked due to timesheet entries (cannot be undone)
+    plan_amount: Optional[Decimal] = None  # Revenue total of associated Engagement (USD)
+    actuals_amount: Optional[Decimal] = None  # Sum of approved timesheet revenue (USD)
+    engagement_id: Optional[UUID] = None  # First engagement ID if any (for Engagement button)
     
     class Config:
         from_attributes = True

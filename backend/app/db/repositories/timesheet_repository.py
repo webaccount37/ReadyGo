@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, or_
 
 from app.db.repositories.base_repository import BaseRepository
-from app.models.timesheet import Timesheet, TimesheetStatus
+from app.models.timesheet import Timesheet, TimesheetStatus, TimesheetStatusHistory
 
 
 class TimesheetRepository(BaseRepository[Timesheet]):
@@ -27,7 +27,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             select(Timesheet)
             .options(
                 selectinload(Timesheet.employee),
-                selectinload(Timesheet.status_history),
+                selectinload(Timesheet.status_history).selectinload(TimesheetStatusHistory.changed_by_employee),
                 selectinload(Timesheet.entries).selectinload(TimesheetEntry.account),
                 selectinload(Timesheet.entries).selectinload(TimesheetEntry.engagement),
                 selectinload(Timesheet.entries).selectinload(TimesheetEntry.opportunity),
@@ -51,7 +51,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             select(Timesheet)
             .options(
                 selectinload(Timesheet.employee),
-                selectinload(Timesheet.status_history),
+                selectinload(Timesheet.status_history).selectinload(TimesheetStatusHistory.changed_by_employee),
                 selectinload(Timesheet.entries).selectinload(TimesheetEntry.account),
                 selectinload(Timesheet.entries).selectinload(TimesheetEntry.engagement),
                 selectinload(Timesheet.entries).selectinload(TimesheetEntry.opportunity),

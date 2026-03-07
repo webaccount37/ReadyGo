@@ -142,6 +142,21 @@ class TimesheetEntryResponse(TimesheetDayHours):
         from_attributes = True
 
 
+class TimesheetStatusHistoryResponse(BaseModel):
+    """Response schema for status history entry."""
+    id: UUID
+    timesheet_id: UUID
+    from_status: Optional[str] = None
+    to_status: str
+    changed_by_employee_id: Optional[UUID] = None
+    changed_by_name: Optional[str] = None
+    changed_at: str
+    note: Optional[str] = None  # Rejection reason when from_status=SUBMITTED, to_status=REOPENED
+
+    class Config:
+        from_attributes = True
+
+
 class TimesheetResponse(BaseModel):
     """Response schema for timesheet."""
     id: UUID
@@ -154,6 +169,7 @@ class TimesheetResponse(BaseModel):
     total_hours: Decimal = Field(default=0)
     entries: Optional[List[TimesheetEntryResponse]] = None
     rejection_note: Optional[str] = None  # Most recent rejection reason from status history
+    status_history: Optional[List[TimesheetStatusHistoryResponse]] = None  # Change history
 
     class Config:
         from_attributes = True

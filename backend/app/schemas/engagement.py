@@ -188,7 +188,7 @@ class EngagementResponse(EngagementBase):
 
 
 class ComparativeSummary(BaseModel):
-    """Comparative summary between Quote/Estimate and Resource Plan."""
+    """Comparative summary between Quote/Estimate, Resource Plan, and Actuals."""
     # Quote/Estimate values (from the contract)
     quote_amount: Optional[Decimal] = None
     estimate_cost: Optional[Decimal] = None
@@ -202,10 +202,21 @@ class ComparativeSummary(BaseModel):
     resource_plan_margin_amount: Optional[Decimal] = None
     resource_plan_margin_percentage: Optional[Decimal] = None
     
-    # Deviations
+    # Actuals from approved timesheets (invoice) - Revenue, Cost, Margin like other columns
+    actuals_revenue: Optional[Decimal] = None
+    actuals_cost: Optional[Decimal] = None
+    actuals_margin_amount: Optional[Decimal] = None
+    actuals_margin_percentage: Optional[Decimal] = None
+    
+    # Deviations: Quote/Estimate vs Resource Plan
     revenue_deviation: Optional[Decimal] = None  # Resource Plan Revenue - Quote Amount
     revenue_deviation_percentage: Optional[Decimal] = None  # (Revenue Deviation / Quote Amount) * 100
     margin_deviation: Optional[Decimal] = None  # Resource Plan Margin % - Estimate Margin %
+    
+    # Deviations: Resource Plan vs Actuals
+    plan_vs_actuals_revenue_deviation: Optional[Decimal] = None  # Resource Plan Revenue - Actuals Revenue
+    plan_vs_actuals_revenue_deviation_percentage: Optional[Decimal] = None
+    plan_vs_actuals_margin_deviation: Optional[Decimal] = None  # Resource Plan Margin % - Actuals Margin %
     
     # Currency
     currency: str = "USD"

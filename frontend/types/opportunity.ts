@@ -55,6 +55,10 @@ export interface Opportunity {
   locked_by_quote_id?: string;
   // Permanent lock (timesheet entries exist; no unlock)
   is_permanently_locked?: boolean;
+  // Plan $ and Actuals $ (from engagement and approved timesheets)
+  plan_amount?: string;
+  actuals_amount?: string;
+  engagement_id?: string;
 }
 
 export interface OpportunityCreate {

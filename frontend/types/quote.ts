@@ -37,6 +37,7 @@ export interface PaymentTrigger {
   num_installments?: number;
   milestone_date?: string;
   row_order: number;
+  client_approval?: boolean;
 }
 
 export interface VariableCompensation {
@@ -107,6 +108,7 @@ export interface PaymentTriggerCreate {
   num_installments?: number;
   milestone_date?: string;
   row_order?: number;
+  client_approval?: boolean;
 }
 
 export interface VariableCompensationCreate {
