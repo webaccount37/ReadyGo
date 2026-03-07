@@ -2,7 +2,7 @@
 Account Pydantic schemas for request/response validation.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from datetime import datetime
@@ -40,6 +40,14 @@ class AccountCreate(AccountBase):
     """Schema for creating an account."""
     billing_term_id: Optional[UUID] = Field(None, description="Billing term ID is optional")
 
+    @field_validator("billing_term_id", mode="before")
+    @classmethod
+    def coerce_empty_billing_term_id(cls, v: object) -> Optional[UUID]:
+        """Coerce empty string to None - frontend may send "" when no billing term selected."""
+        if v == "" or v is None:
+            return None
+        return v
+
 
 class AccountUpdate(BaseModel):
     """Schema for updating an account (all fields optional)."""
@@ -52,6 +60,14 @@ class AccountUpdate(BaseModel):
     country: Optional[str] = Field(None, min_length=1, max_length=100)
     billing_term_id: Optional[UUID] = None
     default_currency: Optional[str] = None
+
+    @field_validator("billing_term_id", mode="before")
+    @classmethod
+    def coerce_empty_billing_term_id(cls, v: object) -> Optional[UUID]:
+        """Coerce empty string to None - frontend may send "" when no billing term selected."""
+        if v == "" or v is None:
+            return None
+        return v
 
 
 class AccountResponse(AccountBase):

@@ -38,6 +38,7 @@ export function useMyTimesheet(
   return useQuery<Timesheet>({
     queryKey: QUERY_KEYS.my(week),
     queryFn: () => timesheetsApi.getMyTimesheet(week),
+    refetchOnMount: "always",
     ...options,
   });
 }

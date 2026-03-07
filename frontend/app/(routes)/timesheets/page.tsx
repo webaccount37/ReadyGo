@@ -46,6 +46,26 @@ import type { TimesheetEntry, TimesheetEntryUpsert } from "@/types/timesheet";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
+/** Sort order for Time Entries: Holiday first, then Engagement, then Sales. Applied on load and after Save. */
+const ENTRY_TYPE_ORDER: Record<string, number> = {
+  HOLIDAY: 0,
+  ENGAGEMENT: 1,
+  SALES: 2,
+};
+
+function sortEntriesByType<T extends { entry_type?: string; row_order?: number }>(
+  entries: T[]
+): T[] {
+  return [...entries].sort((a, b) => {
+    const typeA = (a.entry_type || "ENGAGEMENT") as string;
+    const typeB = (b.entry_type || "ENGAGEMENT") as string;
+    const orderA = ENTRY_TYPE_ORDER[typeA] ?? 1;
+    const orderB = ENTRY_TYPE_ORDER[typeB] ?? 1;
+    if (orderA !== orderB) return orderA - orderB;
+    return (a.row_order ?? 0) - (b.row_order ?? 0);
+  });
+}
+
 function TimesheetPageContent() {
   const searchParams = useSearchParams();
   const timesheetIdParam = searchParams.get("timesheet");
@@ -135,8 +155,9 @@ function TimesheetPageContent() {
 
   useEffect(() => {
     if (timesheet?.entries) {
+      const sorted = sortEntriesByType(timesheet.entries);
       setLocalEntries(
-        timesheet.entries.map((e) => ({
+        sorted.map((e) => ({
           ...e,
           id: e.id,
           entry_type: (e.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES" | "HOLIDAY",
@@ -183,7 +204,8 @@ function TimesheetPageContent() {
   const handleSave = async () => {
     if (!timesheet) return;
     const filtered = localEntries.filter((e) => e.id || e.account_id || e.entry_type === "HOLIDAY");
-    const toSend: TimesheetEntryUpsert[] = filtered.map((e, i) => ({
+    const sorted = sortEntriesByType(filtered);
+    const toSend: TimesheetEntryUpsert[] = sorted.map((e, i) => ({
       id: e.id,
       entry_type: e.entry_type,
       account_id: e.account_id,

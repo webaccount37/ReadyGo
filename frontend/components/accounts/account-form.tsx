@@ -39,7 +39,7 @@ export function AccountForm({
     city: initialData?.city || "",
     region: initialData?.region || "",
     country: initialData?.country || "",
-    billing_term_id: initialData?.billing_term_id || "",
+    billing_term_id: initialData?.billing_term_id || undefined,
     default_currency: initialData?.default_currency || "USD",
   });
 
@@ -70,7 +70,12 @@ export function AccountForm({
     }
 
     try {
-      await onSubmit(formData);
+      // Omit billing_term_id if empty - backend expects valid UUID or omitted
+      const payload = { ...formData };
+      if (payload.billing_term_id === "") {
+        delete payload.billing_term_id;
+      }
+      await onSubmit(payload);
     } catch (err) {
       // Handle backend validation errors
       const errorMessage = err instanceof Error ? err.message : String(err);

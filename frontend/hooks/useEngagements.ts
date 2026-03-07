@@ -106,6 +106,7 @@ export function useUpdateEngagement(
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(data.id) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -143,6 +144,7 @@ export function useCreatePhase(
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.phases(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -170,6 +172,7 @@ export function useUpdatePhase(
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.phases(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -188,6 +191,7 @@ export function useDeletePhase(
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.phases(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -213,6 +217,7 @@ export function useCreateLineItem(
     mutationFn: ({ engagementId, data }) => engagementsApi.createLineItem(engagementId, data),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -239,6 +244,7 @@ export function useUpdateLineItem(
       engagementsApi.updateLineItem(engagementId, lineItemId, data),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -257,6 +263,7 @@ export function useDeleteLineItem(
       engagementsApi.deleteLineItem(engagementId, lineItemId),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -283,6 +290,7 @@ export function useUpdateWeeklyHours(
       engagementsApi.updateWeeklyHours(engagementId, lineItemId, weeklyHours),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -320,6 +328,7 @@ export function useImportEngagementExcel(
     mutationFn: ({ engagementId, file }) => engagementsApi.importFromExcel(engagementId, file),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -346,6 +355,7 @@ export function useUpdateTimesheetApprovers(
       engagementsApi.updateTimesheetApprovers(engagementId, employeeIds),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });
@@ -372,6 +382,7 @@ export function useAutoFillHours(
       engagementsApi.autoFillHours(engagementId, lineItemId, data),
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["timesheets"] });
     },
     ...options,
   });

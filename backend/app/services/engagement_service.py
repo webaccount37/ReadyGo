@@ -181,12 +181,16 @@ class EngagementService(BaseService):
         
         await self.session.commit()
         
-        # CRITICAL: Expire all objects to force fresh load from database
+        # CRITICAL: Capture engagement_id BEFORE expire_all - accessing engagement.id after
+        # expire_all() triggers a sync refresh in async context, causing MissingGreenlet.
+        engagement_id = engagement.id
+        
+        # Expire all objects to force fresh load from database
         # This ensures weekly_hours are properly loaded after creation
         self.session.expire_all()
         
         # Reload engagement with all relationships
-        engagement = await self.engagement_repo.get_with_line_items(engagement.id)
+        engagement = await self.engagement_repo.get_with_line_items(engagement_id)
         if not engagement:
             raise ValueError("Failed to retrieve created engagement")
         
