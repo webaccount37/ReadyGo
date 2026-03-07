@@ -261,9 +261,11 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             employee_dc_based,
         ).subquery()
 
+        # Only include timesheets with Sunday week_start_date (valid period)
+        sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
         result = await self.session.execute(
             select(Timesheet)
-            .where(Timesheet.id.in_(select(union_ids.c.id)))
+            .where(and_(Timesheet.id.in_(select(union_ids.c.id)), sunday_only))
             .options(
                 selectinload(Timesheet.employee),
                 selectinload(Timesheet.entries).options(
@@ -305,11 +307,13 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             DeliveryCenterApprover.employee_id == approver_employee_id
         )
 
+        sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
         engagement_based = (
             select(Timesheet.id)
             .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
             .where(
                 Timesheet.status == TimesheetStatus.SUBMITTED,
+                sunday_only,
                 TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)),
             )
             .distinct()
@@ -318,6 +322,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             select(Timesheet.id)
             .where(
                 Timesheet.status == TimesheetStatus.SUBMITTED,
+                sunday_only,
                 Timesheet.employee_id.in_(
                     select(EngagementLineItem.employee_id)
                     .where(
@@ -332,6 +337,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             .join(Employee, Timesheet.employee_id == Employee.id)
             .where(
                 Timesheet.status == TimesheetStatus.SUBMITTED,
+                sunday_only,
                 Employee.delivery_center_id.in_(approver_dc_ids),
             )
         )
@@ -441,10 +447,12 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             ~Timesheet.status.in_([TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED]),
             Timesheet.week_start_date <= end_of_current_week,
         )
+        # Only include timesheets with Sunday week_start_date (valid period)
+        sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
 
         q = (
             select(Timesheet)
-            .where(and_(Timesheet.id.in_(select(union_ids.c.id)), exclude_future))
+            .where(and_(Timesheet.id.in_(select(union_ids.c.id)), exclude_future, sunday_only))
             .options(
                 selectinload(Timesheet.employee),
                 selectinload(Timesheet.entries).options(
@@ -487,16 +495,20 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             DeliveryCenterApprover.employee_id == approver_employee_id
         )
 
+        sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
         engagement_based = (
             select(Timesheet.employee_id)
             .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
+            .where(
+                TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)),
+                sunday_only,
+            )
             .distinct()
         )
         employee_dc_based = (
             select(Timesheet.employee_id)
             .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
+            .where(Employee.delivery_center_id.in_(approver_dc_ids), sunday_only)
         )
         union_ids = union_all(engagement_based, employee_dc_based).subquery()
 
@@ -512,18 +524,10 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         )
 
         result = await self.session.execute(
-            select(union_ids.c.employee_id)
-            .select_from(union_ids)
-            .join(Timesheet, Timesheet.id == union_ids.c.id)
-            .where(exclude_future)
-            .distinct()
-        )
-        # union returns (employee_id,) - need to handle the subquery structure
-        # Simpler: select distinct employee_id from timesheets matching the union
-        result = await self.session.execute(
             select(Timesheet.employee_id)
-            .where(Timesheet.id.in_(select(union_ids.c.id)))
+            .where(Timesheet.employee_id.in_(select(union_ids.c.employee_id)))
             .where(exclude_future)
+            .where(sunday_only)
             .distinct()
         )
         return [r[0] for r in result.fetchall() if r[0]]

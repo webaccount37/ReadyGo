@@ -11,6 +11,7 @@ import {
   useSubmitTimesheet,
   useApproveTimesheet,
   useRejectTimesheet,
+  useReopenTimesheet,
   useTimesheetIncompleteCount,
   useTimesheetIncompleteWeeks,
   useWeekStatuses,
@@ -35,7 +36,8 @@ import {
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Clock, AlertTriangle, Plus, Trash2, XCircle, CheckCircle2 } from "lucide-react";
+import { Clock, AlertTriangle, Plus, Trash2, XCircle, CheckCircle2, StickyNote, RotateCcw } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { FetchError } from "@/lib/fetchClient";
 import { WeekCarousel, getWeekStart, getWeekRange, formatWeekLabel } from "@/components/timesheets/week-carousel";
 import type { TimesheetEntry, TimesheetEntryUpsert } from "@/types/timesheet";
@@ -111,12 +113,23 @@ function TimesheetPageContent() {
   const submitTimesheet = useSubmitTimesheet();
   const approveTimesheet = useApproveTimesheet();
   const rejectTimesheet = useRejectTimesheet();
+  const reopenTimesheet = useReopenTimesheet();
 
   const [localEntries, setLocalEntries] = useState<TimesheetEntryUpsert[]>([]);
   const [planVsActualModalOpen, setPlanVsActualModalOpen] = useState(false);
   const [planVsActualMessage, setPlanVsActualMessage] = useState("");
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectNote, setRejectNote] = useState("");
+  const [noteDialogState, setNoteDialogState] = useState<{ entryIdx: number; dayIndex: number } | null>(null);
+  const [noteDialogDraft, setNoteDialogDraft] = useState("");
+
+  useEffect(() => {
+    if (noteDialogState !== null) {
+      const entry = localEntries[noteDialogState.entryIdx];
+      const note = entry?.day_notes?.find((n) => n.day_of_week === noteDialogState.dayIndex)?.note ?? "";
+      setNoteDialogDraft(note);
+    }
+  }, [noteDialogState, localEntries]);
 
   useEffect(() => {
     if (timesheet?.entries) {
@@ -370,6 +383,16 @@ function TimesheetPageContent() {
                   </Button>
                 </>
               )}
+              {isViewingOwn && timesheet.status === "SUBMITTED" && (
+                <Button
+                  variant="outline"
+                  onClick={() => reopenTimesheet.mutate(timesheet.id, { onSuccess: () => refetch() })}
+                  disabled={reopenTimesheet.isPending}
+                >
+                  <RotateCcw className="w-4 h-4 mr-1" />
+                  {reopenTimesheet.isPending ? "Reopening..." : "Re-Open"}
+                </Button>
+              )}
               {!isViewingOwn && timesheet.status === "SUBMITTED" && (
                 <>
                   <Button
@@ -509,6 +532,7 @@ function TimesheetPageContent() {
                           next[idx] = updated;
                           setLocalEntries(next);
                         }}
+                        onOpenNote={(dayIndex) => setNoteDialogState({ entryIdx: idx, dayIndex })}
                       />
                     ))}
                   </tbody>
@@ -537,6 +561,64 @@ function TimesheetPageContent() {
               </div>
             </CardContent>
           </Card>
+
+          {/* Note dialog - rendered at page level so it floats outside Time Entries overflow */}
+          <Dialog
+            open={noteDialogState !== null}
+            onOpenChange={(open) => !open && setNoteDialogState(null)}
+            contentClassName="max-w-md w-full"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {canEdit ? "Note for " : "Note on "}{noteDialogState !== null ? DAYS[noteDialogState.dayIndex] : ""}
+              </DialogTitle>
+            </DialogHeader>
+            <DialogContent>
+              <Textarea
+                value={noteDialogDraft}
+                onChange={(e) => setNoteDialogDraft(e.target.value)}
+                placeholder="Enter note for this day..."
+                className="min-h-[120px] w-full resize-none"
+                readOnly={!canEdit}
+              />
+            </DialogContent>
+            <DialogFooter>
+              {canEdit ? (
+                <>
+                  <Button variant="outline" onClick={() => setNoteDialogState(null)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (noteDialogState !== null) {
+                        const entry = localEntries[noteDialogState.entryIdx];
+                        const notes = [...(entry?.day_notes || [])];
+                        const existingIdx = notes.findIndex((n) => n.day_of_week === noteDialogState.dayIndex);
+                        const trimmed = noteDialogDraft.trim();
+                        if (trimmed) {
+                          if (existingIdx >= 0) {
+                            notes[existingIdx] = { ...notes[existingIdx], note: trimmed };
+                          } else {
+                            notes.push({ day_of_week: noteDialogState.dayIndex, note: trimmed });
+                          }
+                        } else if (existingIdx >= 0) {
+                          notes.splice(existingIdx, 1);
+                        }
+                        const next = [...localEntries];
+                        if (entry) next[noteDialogState.entryIdx] = { ...entry, day_notes: notes };
+                        setLocalEntries(next);
+                        setNoteDialogState(null);
+                      }
+                    }}
+                  >
+                    Save
+                  </Button>
+                </>
+              ) : (
+                <Button onClick={() => setNoteDialogState(null)}>Close</Button>
+              )}
+            </DialogFooter>
+          </Dialog>
         </>
       )}
     </div>
@@ -567,6 +649,7 @@ function TimesheetEntryRow({
   weekRange,
   onDelete,
   onChange,
+  onOpenNote,
 }: {
   entry: TimesheetEntryUpsert;
   employeeId?: string;
@@ -577,7 +660,10 @@ function TimesheetEntryRow({
   weekRange: { start: Date; end: Date };
   onDelete?: () => void;
   onChange: (e: TimesheetEntryUpsert) => void;
+  onOpenNote?: (dayIndex: number) => void;
+  entryIdx?: number;
 }) {
+  if (!onOpenNote) throw new Error("TimesheetEntryRow requires onOpenNote");
   const entryType = (entry.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES" | "HOLIDAY";
   const isSales = entryType === "SALES";
   const isHoliday = entryType === "HOLIDAY";
@@ -630,21 +716,6 @@ function TimesheetEntryRow({
     const key = DAY_KEYS[dayIndex];
     const v = entry[`${key}_hours`];
     return (parseFloat(String(v)) || 0) > 0;
-  };
-
-  const updateDayNote = (dayOfWeek: number, note: string) => {
-    const notes = [...(entry.day_notes || [])];
-    const existingIdx = notes.findIndex((n) => n.day_of_week === dayOfWeek);
-    if (note) {
-      if (existingIdx >= 0) {
-        notes[existingIdx] = { ...notes[existingIdx], note };
-      } else {
-        notes.push({ day_of_week: dayOfWeek, note });
-      }
-    } else if (existingIdx >= 0) {
-      notes.splice(existingIdx, 1);
-    }
-    onChange({ ...entry, day_notes: notes });
   };
 
   const getDayNote = (dayOfWeek: number) =>
@@ -910,7 +981,7 @@ function TimesheetEntryRow({
           className={`px-1 py-1 w-[56px] align-middle min-h-[28px] text-center ${isHoliday ? "bg-amber-50 dark:bg-amber-950/30" : (dayIndex === 0 || dayIndex === 6) ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
         >
           {canEdit && !isHoliday ? (
-            <div className="flex flex-col gap-0.5 items-center w-14 mx-auto">
+            <div className="relative w-14 mx-auto">
               <Input
                 type="number"
                 min={0}
@@ -933,19 +1004,37 @@ function TimesheetEntryRow({
                   })
                 }
               />
-              {requiresNotes && hasHoursOnDay(dayIndex) && (
-                <Input
-                  type="text"
-                  placeholder="Note"
-                  className="w-full text-[10px] h-5 rounded border-slate-200"
-                  value={getDayNote(dayIndex)}
-                  onChange={(e) => updateDayNote(dayIndex, e.target.value)}
-                />
-              )}
+              <button
+                type="button"
+                onClick={() => onOpenNote(dayIndex)}
+                className={cn(
+                  "absolute bottom-0 right-0 p-0.5 rounded transition-colors",
+                  getDayNote(dayIndex)
+                    ? "text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                    : requiresNotes && hasHoursOnDay(dayIndex)
+                      ? "text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/40"
+                      : "text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+                )}
+                title={getDayNote(dayIndex) ? `Note: ${getDayNote(dayIndex)}` : requiresNotes && hasHoursOnDay(dayIndex) ? "Note required" : "Add note"}
+                aria-label={getDayNote(dayIndex) ? "Edit note" : "Add note"}
+              >
+                <StickyNote className={cn("w-3.5 h-3.5", getDayNote(dayIndex) && "fill-current")} />
+              </button>
             </div>
           ) : (
-            <div className="w-14 h-7 mx-auto flex items-center justify-center">
+            <div className="relative w-14 mx-auto">
               <span className="text-xs font-medium tabular-nums">{(parseFloat(String(entry[`${k}_hours`])) || 0).toFixed(1)}</span>
+              {getDayNote(dayIndex) && (
+                <button
+                  type="button"
+                  onClick={() => onOpenNote(dayIndex)}
+                  className="absolute bottom-0 right-0 p-0.5 rounded text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                  title={getDayNote(dayIndex)}
+                  aria-label="View note"
+                >
+                  <StickyNote className="w-3.5 h-3.5 fill-current" />
+                </button>
+              )}
             </div>
           )}
         </td>

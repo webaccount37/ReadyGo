@@ -2,7 +2,7 @@
 Timesheet API endpoints.
 """
 
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,9 +24,16 @@ from app.schemas.timesheet import (
 router = APIRouter()
 
 
+def _normalize_to_sunday(d: date) -> date:
+    """Ensure date is the Sunday of its week. Python weekday(): Mon=0, Tue=1, ..., Sun=6."""
+    days_since_sunday = (d.weekday() + 1) % 7
+    return d - timedelta(days=days_since_sunday)
+
+
 def _week_start_from_str(s: str) -> date:
-    """Parse YYYY-MM-DD to date."""
-    return date.fromisoformat(s)
+    """Parse YYYY-MM-DD and normalize to Sunday of that week."""
+    d = date.fromisoformat(s)
+    return _normalize_to_sunday(d)
 
 
 @router.get("/me", response_model=TimesheetResponse)

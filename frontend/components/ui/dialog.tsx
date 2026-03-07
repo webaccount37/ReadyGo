@@ -1,31 +1,39 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 interface DialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   children: React.ReactNode;
+  /** Optional class for the content wrapper. Use for smaller dialogs, e.g. "max-w-md w-full" */
+  contentClassName?: string;
 }
 
-export function Dialog({ open, onOpenChange, children }: DialogProps) {
+export function Dialog({ open, onOpenChange, children, contentClassName }: DialogProps) {
   if (!open) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4">
+  const dialog = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
       <div
         className="fixed inset-0 bg-black/50 backdrop-blur-sm"
         onClick={() => onOpenChange(false)}
       />
-      <div 
-        className="relative z-50 w-full max-w-2xl max-h-[95vh] sm:max-h-[90vh] overflow-auto bg-white rounded-lg shadow-xl"
+      <div
+        className={cn(
+          "relative z-[9999] w-full max-h-[90vh] overflow-auto bg-white dark:bg-slate-900 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700",
+          contentClassName ?? "max-w-2xl"
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         {children}
       </div>
     </div>
   );
+
+  return createPortal(dialog, document.body);
 }
 
 export function DialogHeader({ children, className }: { children: React.ReactNode; className?: string }) {
