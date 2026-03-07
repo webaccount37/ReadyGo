@@ -171,6 +171,17 @@ export interface AutoFillRequest {
   custom_hours?: Record<string, string>;
 }
 
+export interface ApprovedWeekData {
+  hours: string;
+  revenue?: string;
+  cost?: string;
+}
+
+export interface ApprovedHoursByWeekResponse {
+  by_line_item: Record<string, Record<string, ApprovedWeekData>>;
+  by_week: Record<string, ApprovedWeekData>;
+}
+
 export interface EngagementExcelImportResponse {
   created: number;
   updated: number;

@@ -27,6 +27,7 @@ import type {
   EngagementTimesheetApprover,
   EngagementExcelImportResponse,
   AutoFillRequest,
+  ApprovedHoursByWeekResponse,
 } from "@/types/engagement";
 
 const QUERY_KEYS = {
@@ -37,6 +38,8 @@ const QUERY_KEYS = {
   details: () => [...QUERY_KEYS.all, "detail"] as const,
   detail: (id: string) => [...QUERY_KEYS.details(), id] as const,
   phases: (engagementId: string) => [...QUERY_KEYS.all, "phases", engagementId] as const,
+  approvedHoursByWeek: (engagementId: string) =>
+    [...QUERY_KEYS.all, "approved-hours-by-week", engagementId] as const,
 };
 
 /**
@@ -69,6 +72,21 @@ export function useEngagement(
   return useQuery<EngagementResponse>({
     queryKey: QUERY_KEYS.detail(engagementId),
     queryFn: () => engagementsApi.getEngagement(engagementId),
+    enabled: !!engagementId,
+    ...options,
+  });
+}
+
+/**
+ * Get approved timesheet hours/revenue/cost per week for an engagement.
+ */
+export function useApprovedHoursByWeek(
+  engagementId: string,
+  options?: Omit<UseQueryOptions<ApprovedHoursByWeekResponse>, "queryKey" | "queryFn">
+) {
+  return useQuery<ApprovedHoursByWeekResponse>({
+    queryKey: QUERY_KEYS.approvedHoursByWeek(engagementId),
+    queryFn: () => engagementsApi.getApprovedHoursByWeek(engagementId),
     enabled: !!engagementId,
     ...options,
   });

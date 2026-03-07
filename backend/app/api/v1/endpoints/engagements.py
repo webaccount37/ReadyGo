@@ -30,6 +30,7 @@ from app.schemas.engagement import (
     EngagementTimesheetApproverResponse,
     EngagementExcelImportResponse,
     AutoFillRequest,
+    ApprovedHoursByWeekResponse,
 )
 
 router = APIRouter()
@@ -85,6 +86,22 @@ async def get_engagement_detail(
             detail="Engagement not found",
         )
     return engagement
+
+
+@router.get("/{engagement_id}/approved-hours-by-week", response_model=ApprovedHoursByWeekResponse)
+async def get_approved_hours_by_week(
+    engagement_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> ApprovedHoursByWeekResponse:
+    """Get approved timesheet hours/revenue/cost per week for an engagement."""
+    controller = EngagementController(db)
+    try:
+        return await controller.get_approved_hours_by_week(engagement_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(e),
+        )
 
 
 @router.patch("/{engagement_id}", response_model=EngagementResponse)

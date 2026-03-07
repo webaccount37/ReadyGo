@@ -352,7 +352,82 @@ class EngagementService(BaseService):
             "margin_amount": margin_amount,
             "margin_percentage": margin_percentage,
         }
-    
+
+    async def get_approved_hours_by_week(
+        self, engagement_id: UUID
+    ) -> dict:
+        """Get approved timesheet hours/revenue/cost per week per line item and totals.
+        Uses TimesheetApprovedSnapshot for invoiced amounts.
+        """
+        from app.models.timesheet import TimesheetApprovedSnapshot, TimesheetEntry, Timesheet, TimesheetStatus
+        from sqlalchemy import select, func, case
+
+        # Verify engagement exists
+        engagement = await self.engagement_repo.get(engagement_id)
+        if not engagement:
+            raise ValueError("Engagement not found")
+
+        # Query: group by week_start_date and engagement_line_item_id
+        # Sum hours, revenue (hours * invoice_rate for billable), cost (hours * invoice_cost)
+        subq = (
+            select(
+                Timesheet.week_start_date,
+                TimesheetEntry.engagement_line_item_id,
+                func.sum(TimesheetApprovedSnapshot.hours).label("hours"),
+                func.sum(
+                    case(
+                        (TimesheetApprovedSnapshot.billable == True,
+                         TimesheetApprovedSnapshot.hours * TimesheetApprovedSnapshot.invoice_rate),
+                        else_=0,
+                    )
+                ).label("revenue"),
+                func.sum(TimesheetApprovedSnapshot.hours * TimesheetApprovedSnapshot.invoice_cost).label("cost"),
+            )
+            .select_from(TimesheetApprovedSnapshot)
+            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetEntry.engagement_id == engagement_id,
+                TimesheetEntry.engagement_line_item_id.isnot(None),
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+            )
+            .group_by(Timesheet.week_start_date, TimesheetEntry.engagement_line_item_id)
+        )
+        result = await self.session.execute(subq)
+        rows = result.all()
+
+        by_line_item: dict = {}
+        by_week: dict = {}
+
+        for row in rows:
+            week_start = row.week_start_date
+            line_item_id = row.engagement_line_item_id
+            if not week_start or not line_item_id:
+                continue
+            week_key = week_start.isoformat() if hasattr(week_start, "isoformat") else str(week_start)
+            hours_val = str(row.hours or 0)
+            revenue_val = str(row.revenue or 0)
+            cost_val = str(row.cost or 0)
+            data = {"hours": hours_val, "revenue": revenue_val, "cost": cost_val}
+
+            # by_line_item
+            li_key = str(line_item_id)
+            if li_key not in by_line_item:
+                by_line_item[li_key] = {}
+            by_line_item[li_key][week_key] = data
+
+            # by_week aggregates
+            if week_key not in by_week:
+                by_week[week_key] = {"hours": "0", "revenue": "0", "cost": "0"}
+            prev = by_week[week_key]
+            by_week[week_key] = {
+                "hours": str(Decimal(prev["hours"]) + Decimal(hours_val)),
+                "revenue": str(Decimal(prev["revenue"]) + Decimal(revenue_val)),
+                "cost": str(Decimal(prev["cost"]) + Decimal(cost_val)),
+            }
+
+        return {"by_line_item": by_line_item, "by_week": by_week}
+
     async def _calculate_partial_comparative_summary(
         self,
         engagement: Engagement,

@@ -268,6 +268,25 @@ class AutoFillRequest(BaseModel):
     custom_hours: Optional[Dict[str, Decimal]] = Field(None, description="For custom pattern: {week_start_date: hours}")
 
 
+class ApprovedWeekData(BaseModel):
+    """Approved hours/revenue/cost for a single week (line item or total)."""
+    hours: str
+    revenue: Optional[str] = None
+    cost: Optional[str] = None
+
+
+class ApprovedHoursByWeekResponse(BaseModel):
+    """Response schema for approved hours by week (from TimesheetApprovedSnapshot)."""
+    by_line_item: Dict[str, Dict[str, ApprovedWeekData]] = Field(
+        default_factory=dict,
+        description="line_item_id -> { week_start_date: { hours, revenue, cost } }"
+    )
+    by_week: Dict[str, ApprovedWeekData] = Field(
+        default_factory=dict,
+        description="week_start_date -> { total_hours, total_revenue, total_cost }"
+    )
+
+
 class EngagementExcelImportResponse(BaseModel):
     """Response schema for Excel import."""
     created: int

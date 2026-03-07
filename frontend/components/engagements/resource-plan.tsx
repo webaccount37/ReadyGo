@@ -7,7 +7,7 @@ import { EngagementTotalsRow } from "./engagement-totals-row";
 import { EngagementEmptyRow } from "./engagement-empty-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useExportEngagementExcel, useImportEngagementExcel } from "@/hooks/useEngagements";
+import { useExportEngagementExcel, useImportEngagementExcel, useApprovedHoursByWeek } from "@/hooks/useEngagements";
 
 interface ResourcePlanProps {
   engagement: EngagementDetailResponse;
@@ -63,6 +63,7 @@ export function ResourcePlan({
     },
   });
   const [emptyRowIds] = useState<Set<string>>(new Set());
+  const { data: approvedHoursData } = useApprovedHoursByWeek(engagement.id);
 
   // Helper functions (must be defined before useMemo that uses them)
   const parseLocalDate = (dateStr: string): Date => {
@@ -474,6 +475,7 @@ export function ResourcePlan({
                     opportunityDeliveryCenterId={opportunityDeliveryCenterId}
                     invoiceCustomer={invoiceCustomer}
                     billableExpenses={billableExpenses}
+                    approvedHoursByWeek={approvedHoursData?.by_line_item?.[lineItem.id]}
                   />
                 ))}
                 {Array.from({ length: emptyRowsCount }).map((_, index) => (
@@ -493,6 +495,7 @@ export function ResourcePlan({
                   lineItems={existingLineItems}
                   weeks={weeks}
                   currency={currency}
+                  approvedHoursByWeek={approvedHoursData?.by_week}
                 />
               </tbody>
             </table>

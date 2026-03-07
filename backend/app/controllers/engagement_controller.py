@@ -15,6 +15,7 @@ from app.schemas.engagement import (
     EngagementPhaseCreate, EngagementPhaseUpdate, EngagementPhaseResponse,
     EngagementTimesheetApproversUpdate, EngagementTimesheetApproverResponse,
     AutoFillRequest,
+    ApprovedHoursByWeekResponse,
 )
 
 
@@ -34,6 +35,13 @@ class EngagementController(BaseController):
     async def get_engagement_detail(self, engagement_id: UUID) -> Optional[EngagementDetailResponse]:
         """Get engagement with all line items and comparative summary."""
         return await self.engagement_service.get_engagement_detail(engagement_id)
+
+    async def get_approved_hours_by_week(
+        self, engagement_id: UUID
+    ) -> ApprovedHoursByWeekResponse:
+        """Get approved timesheet hours/revenue/cost per week for an engagement."""
+        data = await self.engagement_service.get_approved_hours_by_week(engagement_id)
+        return ApprovedHoursByWeekResponse(**data)
     
     async def list_engagements(
         self,

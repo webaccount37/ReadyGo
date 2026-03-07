@@ -1,17 +1,19 @@
 "use client";
 
-import type { EngagementLineItem } from "@/types/engagement";
+import type { EngagementLineItem, ApprovedWeekData } from "@/types/engagement";
 
 interface EngagementTotalsRowProps {
   lineItems: EngagementLineItem[];
   weeks: Date[];
   currency: string;
+  approvedHoursByWeek?: Record<string, ApprovedWeekData>;
 }
 
 export function EngagementTotalsRow({
   lineItems,
   weeks,
   currency,
+  approvedHoursByWeek,
 }: EngagementTotalsRowProps) {
   const formatDateKey = (date: Date): string => {
     const year = date.getFullYear();
@@ -99,15 +101,26 @@ export function EngagementTotalsRow({
       <td colSpan={12} className="bg-gray-100 border border-gray-300 px-2 py-2 text-xs">
         TOTALS
       </td>
-      {weeklyTotals.map((week, index) => (
-        <td
-          key={index}
-          className="border border-gray-300 px-1 py-2 text-xs text-center"
-          style={{ width: '120px', minWidth: '120px' }}
-        >
-          {week.totalHours > 0 ? week.totalHours.toFixed(1) : "-"}
-        </td>
-      ))}
+      {weeklyTotals.map((week, index) => {
+        const weekKey = formatDateKey(weeks[index]);
+        const actualsHours = approvedHoursByWeek?.[weekKey]?.hours;
+        return (
+          <td
+            key={index}
+            className="border border-gray-300 px-1 py-2 text-xs text-center"
+            style={{ width: '120px', minWidth: '120px' }}
+          >
+            <div className="flex flex-col gap-0.5">
+              <div>{week.totalHours > 0 ? week.totalHours.toFixed(1) : "-"}</div>
+              {actualsHours !== undefined && (
+                <div className="text-[10px] text-gray-500">
+                  ACTUALS: {parseFloat(actualsHours || "0") > 0 ? actualsHours : "-"}
+                </div>
+              )}
+            </div>
+          </td>
+        );
+      })}
       <td className="sticky right-0 z-10 bg-gray-100 border border-gray-300 px-2 py-2 text-xs">
         {overallTotalHours.toFixed(1)}
       </td>

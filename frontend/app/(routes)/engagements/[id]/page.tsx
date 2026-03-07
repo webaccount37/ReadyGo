@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { useEngagementDetail } from "@/hooks/useEngagements";
+import { useEngagementDetail, useApprovedHoursByWeek } from "@/hooks/useEngagements";
 import { useOpportunity } from "@/hooks/useOpportunities";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { ResourcePlan } from "@/components/engagements/resource-plan";
@@ -9,11 +9,10 @@ import { PhaseManagement } from "@/components/engagements/phase-management";
 import { ComparativeSummary } from "@/components/engagements/comparative-summary";
 import { EngagementTimesheetApprovers } from "@/components/engagements/engagement-timesheet-approvers";
 import { EngagementGanttView } from "@/components/engagements/engagement-gantt-view";
+import { BudgetBurndownChart } from "@/components/engagements/budget-burndown-chart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import Link from "next/link";
-import { useState, useEffect } from "react";
-import { Lock } from "lucide-react";
 
 export default function EngagementDetailPage() {
   const params = useParams();
@@ -23,7 +22,9 @@ export default function EngagementDetailPage() {
     refetchOnMount: "always",
     staleTime: 0,
   });
-  
+  const { data: approvedHoursByWeek } = useApprovedHoursByWeek(engagementId, {
+    enabled: !!engagementId,
+  });
   const { data: opportunity } = useOpportunity(engagement?.opportunity_id || "", false);
   const { data: deliveryCentersData } = useDeliveryCenters();
 
@@ -170,6 +171,20 @@ export default function EngagementDetailPage() {
             engagement={engagement}
             opportunityStartDate={opportunity?.start_date}
             opportunityEndDate={opportunity?.end_date}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Budget Burndown Chart */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle className="text-xl font-bold">Budget Burndown</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <BudgetBurndownChart
+            engagement={engagement}
+            currency={opportunity?.default_currency || "USD"}
+            approvedHoursByWeek={approvedHoursByWeek}
           />
         </CardContent>
       </Card>

@@ -22,6 +22,7 @@ interface EngagementLineItemRowProps {
   opportunityDeliveryCenterId?: string; // Opportunity Invoice Center (delivery_center_id)
   invoiceCustomer?: boolean;
   billableExpenses?: boolean;
+  approvedHoursByWeek?: Record<string, { hours: string; revenue?: string; cost?: string }>;
 }
 
 export function EngagementLineItemRow({
@@ -32,6 +33,7 @@ export function EngagementLineItemRow({
   opportunityDeliveryCenterId,
   invoiceCustomer = true,
   billableExpenses = true,
+  approvedHoursByWeek,
 }: EngagementLineItemRowProps) {
   const queryClient = useQueryClient();
   const updateLineItem = useUpdateLineItem();
@@ -1329,36 +1331,43 @@ export function EngagementLineItemRow({
               }`}
               style={{ width: '120px', minWidth: '120px' }}
             >
-              <Input
-                type="number"
-                step="0.1"
-                value={hours}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
-                  const newHours = e.target.value || "0";
-                  console.log(`Input onChange: weekKey=${weekKey}, oldValue=${hours}, newValue=${newHours}`);
-                  
-                  // Mark this week as actively being edited
-                  activelyEditingWeeksRef.current.add(weekKey);
-                  
-                  setWeeklyHoursValues((prev: Map<string, string>) => {
-                    const next = new Map(prev);
-                    next.set(weekKey, newHours);
-                    console.log(`Updated weeklyHoursValues map, weekKey=${weekKey} now has value=${next.get(weekKey)}`);
-                    return next;
-                  });
-                  handleWeeklyHoursUpdate(weekKey, newHours);
-                }}
-                onBlur={() => {
-                  // Remove from actively editing set when user leaves the input
-                  // Use a small delay to allow the save to complete first
-                  setTimeout(() => {
-                    activelyEditingWeeksRef.current.delete(weekKey);
-                  }, 500);
-                }}
-                placeholder="0"
-                disabled={!isInRange}
-                className="text-xs h-7 w-full text-center"
-              />
+              <div className="flex flex-col gap-0.5">
+                <Input
+                  type="number"
+                  step="0.1"
+                  value={hours}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
+                    const newHours = e.target.value || "0";
+                    console.log(`Input onChange: weekKey=${weekKey}, oldValue=${hours}, newValue=${newHours}`);
+
+                    // Mark this week as actively being edited
+                    activelyEditingWeeksRef.current.add(weekKey);
+
+                    setWeeklyHoursValues((prev: Map<string, string>) => {
+                      const next = new Map(prev);
+                      next.set(weekKey, newHours);
+                      console.log(`Updated weeklyHoursValues map, weekKey=${weekKey} now has value=${next.get(weekKey)}`);
+                      return next;
+                    });
+                    handleWeeklyHoursUpdate(weekKey, newHours);
+                  }}
+                  onBlur={() => {
+                    // Remove from actively editing set when user leaves the input
+                    // Use a small delay to allow the save to complete first
+                    setTimeout(() => {
+                      activelyEditingWeeksRef.current.delete(weekKey);
+                    }, 500);
+                  }}
+                  placeholder="0"
+                  disabled={!isInRange}
+                  className="text-xs h-7 w-full text-center"
+                />
+                {lineItem.employee_id && approvedHoursByWeek?.[weekKey]?.hours !== undefined && (
+                  <div className="text-[10px] text-gray-500 text-center">
+                    ACTUALS: {parseFloat(approvedHoursByWeek[weekKey].hours || "0") > 0 ? approvedHoursByWeek[weekKey].hours : "-"}
+                  </div>
+                )}
+              </div>
             </td>
           );
         })}
