@@ -12,6 +12,7 @@ import {
   useApproveTimesheet,
   useRejectTimesheet,
   useReopenTimesheet,
+  useLoadDefaults,
   useTimesheetIncompleteCount,
   useTimesheetIncompleteWeeks,
   useWeekStatuses,
@@ -36,7 +37,7 @@ import {
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Clock, AlertTriangle, Plus, Trash2, XCircle, CheckCircle2, StickyNote, RotateCcw } from "lucide-react";
+import { Clock, AlertTriangle, Plus, Trash2, XCircle, CheckCircle2, StickyNote, RotateCcw, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { FetchError } from "@/lib/fetchClient";
 import { WeekCarousel, getWeekStart, getWeekRange, formatWeekLabel } from "@/components/timesheets/week-carousel";
@@ -114,6 +115,7 @@ function TimesheetPageContent() {
   const approveTimesheet = useApproveTimesheet();
   const rejectTimesheet = useRejectTimesheet();
   const reopenTimesheet = useReopenTimesheet();
+  const loadDefaults = useLoadDefaults();
 
   const [localEntries, setLocalEntries] = useState<TimesheetEntryUpsert[]>([]);
   const [planVsActualModalOpen, setPlanVsActualModalOpen] = useState(false);
@@ -374,6 +376,14 @@ function TimesheetPageContent() {
                 <>
                   <Button onClick={handleSave} disabled={saveEntries.isPending}>
                     {saveEntries.isPending ? "Saving..." : "Save"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => loadDefaults.mutate(timesheet.id, { onSuccess: () => refetch() })}
+                    disabled={loadDefaults.isPending}
+                  >
+                    <RefreshCw className="w-4 h-4 mr-1" />
+                    {loadDefaults.isPending ? "Loading..." : "Load Defaults"}
                   </Button>
                   <Button
                     onClick={() => handleSubmit(false)}
@@ -1049,16 +1059,14 @@ function TimesheetEntryRow({
       </td>
       {onDelete && (
         <td className={`px-1 py-1 align-middle min-h-[28px] ${rowBg}`}>
-          {(!isHoliday || !(entry as TimesheetEntry & { is_holiday_row?: boolean }).is_holiday_row) && (
-            <button
-              type="button"
-              onClick={onDelete}
-              className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-              aria-label="Delete row"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onDelete}
+            className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+            aria-label="Delete row"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </td>
       )}
     </tr>

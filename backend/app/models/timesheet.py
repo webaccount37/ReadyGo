@@ -46,6 +46,7 @@ class Timesheet(Base):
     employee = relationship("Employee", back_populates="timesheets")
     entries = relationship("TimesheetEntry", back_populates="timesheet", cascade="all, delete-orphan", order_by="TimesheetEntry.row_order")
     status_history = relationship("TimesheetStatusHistory", back_populates="timesheet", cascade="all, delete-orphan", order_by="TimesheetStatusHistory.changed_at")
+    dismissed_rows = relationship("TimesheetDismissedRow", back_populates="timesheet", cascade="all, delete-orphan")
 
 
 class TimesheetEntry(Base):
@@ -133,6 +134,29 @@ class TimesheetApprovedSnapshot(Base):
     currency_rate = relationship("CurrencyRate", foreign_keys=[currency_rate_id])
 
 
+class TimesheetDismissedRow(Base):
+    """Tracks rows the user has explicitly removed from a timesheet.
+    Prevents _add_missing_engagement_entries and _add_holiday_entries from re-adding them.
+    engagement_line_item_id: the line item for engagement rows, or HOLIDAY_DISMISSED_SENTINEL for holiday."""
+    
+    __tablename__ = "timesheet_dismissed_rows"
+    __table_args__ = (
+        UniqueConstraint("timesheet_id", "engagement_line_item_id", name="uq_ts_dismissed_ts_key"),
+    )
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, index=True)
+    timesheet_id = Column(UUID(as_uuid=True), ForeignKey("timesheets.id", ondelete="CASCADE"), nullable=False, index=True)
+    # UUID: engagement_line_item_id for engagement rows, or HOLIDAY_DISMISSED_SENTINEL for holiday (no FK - sentinel is not a real line item)
+    engagement_line_item_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+    
+    # Relationships
+    timesheet = relationship("Timesheet", back_populates="dismissed_rows")
+
+
+# Sentinel UUID for "holiday row dismissed" - real engagement_line_item IDs will never be this
+HOLIDAY_DISMISSED_SENTINEL = uuid.UUID("00000000-0000-0000-0000-000000000001")
+
+
 class TimesheetStatusHistory(Base):
     """Audit trail for timesheet status changes."""
     
@@ -149,3 +173,5 @@ class TimesheetStatusHistory(Base):
     # Relationships
     timesheet = relationship("Timesheet", back_populates="status_history")
     changed_by_employee = relationship("Employee", foreign_keys=[changed_by_employee_id])
+
+

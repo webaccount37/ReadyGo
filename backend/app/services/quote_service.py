@@ -375,9 +375,12 @@ class QuoteService(BaseService):
                 )
                 logger.info(f"Created engagement for approved quote {quote_id}")
             except Exception as e:
-                logger.error(f"Failed to create engagement for quote {quote_id}: {e}")
-                # Don't fail the quote status update if engagement creation fails
-                # The engagement can be created manually later if needed
+                logger.error(f"Failed to create engagement for quote {quote_id}: {e}", exc_info=True)
+                # Re-raise so the user sees the error instead of a silent failure
+                raise ValueError(
+                    f"Quote approved, but failed to create Engagement: {e}. "
+                    "You can try creating the Engagement manually from the Engagements page."
+                ) from e
         
         updated = await self.quote_repo.update(quote_id, **update_dict)
         await self.session.commit()

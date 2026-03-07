@@ -255,6 +255,25 @@ export function useMassRejectTimesheets(
 }
 
 /**
+ * Load defaults: reset timesheet to default state.
+ */
+export function useLoadDefaults(
+  options?: UseMutationOptions<Timesheet, Error, string>
+) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (timesheetId) => timesheetsApi.loadDefaults(timesheetId),
+    onSuccess: (_, timesheetId) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(timesheetId) });
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+      queryClient.invalidateQueries({ queryKey: ["quotes"] });
+    },
+    ...options,
+  });
+}
+
+/**
  * Reopen timesheet.
  */
 export function useReopenTimesheet(

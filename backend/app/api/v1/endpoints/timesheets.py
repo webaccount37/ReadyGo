@@ -163,6 +163,20 @@ async def get_timesheet(
     return result
 
 
+@router.post("/{timesheet_id}/load-defaults", response_model=TimesheetResponse)
+async def load_defaults_to_timesheet(
+    timesheet_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """Reset timesheet to default state (resource plan + holidays). Clears dismissed rows and repopulates."""
+    controller = TimesheetController(db)
+    try:
+        return await controller.load_defaults_to_timesheet(timesheet_id, current_employee.id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.put("/{timesheet_id}/entries", response_model=TimesheetResponse)
 async def save_timesheet_entries(
     timesheet_id: UUID,

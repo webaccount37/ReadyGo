@@ -60,6 +60,15 @@ class TimesheetController(BaseController):
             timesheet_id, entries, current_employee_id
         )
 
+    async def load_defaults_to_timesheet(
+        self,
+        timesheet_id: UUID,
+        current_employee_id: UUID,
+    ) -> TimesheetResponse:
+        return await self.timesheet_service.load_defaults_to_timesheet(
+            timesheet_id, current_employee_id
+        )
+
     async def submit_timesheet(
         self,
         timesheet_id: UUID,
@@ -101,6 +110,13 @@ class TimesheetController(BaseController):
 
     async def mark_invoiced(self, timesheet_id: UUID) -> TimesheetResponse:
         return await self.approval_service.mark_invoiced(timesheet_id)
+
+    async def load_defaults_to_timesheet(
+        self, timesheet_id: UUID, current_employee_id: UUID
+    ) -> TimesheetResponse:
+        return await self.timesheet_service.load_defaults_to_timesheet(
+            timesheet_id, current_employee_id
+        )
 
     async def list_pending_approvals(
         self,

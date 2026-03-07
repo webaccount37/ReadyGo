@@ -94,6 +94,22 @@ class EngagementService(BaseService):
         
         engagement_name = f"Engagement - {opportunity.name}"
 
+        # Compute quote display name for description
+        snapshot = quote.snapshot_data or {}
+        if not snapshot.get("account_name") and not snapshot.get("name"):
+            from app.utils.quote_display import _format_date_mmddyyyy
+            unique_suffix = str(quote.id).replace("-", "")[:4]
+            date_part = _format_date_mmddyyyy(quote.created_at)
+            quote_display_name = f"QT-Quote-{date_part}-{unique_suffix}-v{quote.version}"
+        else:
+            quote_display_name = compute_quote_display_name(
+                account_name=snapshot.get("account_name"),
+                opportunity_name=snapshot.get("name") or opportunity.name,
+                version=quote.version,
+                quote_id=quote.id,
+                quote_created_at=quote.created_at,
+            )
+
         # Create engagement
         engagement_dict = {
             "quote_id": quote_id,
@@ -167,7 +183,7 @@ class EngagementService(BaseService):
         
         # CRITICAL: Expire all objects to force fresh load from database
         # This ensures weekly_hours are properly loaded after creation
-        await self.session.expire_all()
+        self.session.expire_all()
         
         # Reload engagement with all relationships
         engagement = await self.engagement_repo.get_with_line_items(engagement.id)
@@ -183,6 +199,11 @@ class EngagementService(BaseService):
                 logger.info(f"Line item {line_item.id} has {weekly_hours_count} weekly hours")
         
         logger.info(f"Engagement {engagement.id} has {total_weekly_hours} total weekly hours across {len(engagement.line_items)} line items")
+        
+        # Sync engagement to timesheets so employees see it on their timesheets
+        from app.services.timesheet_service import TimesheetService
+        timesheet_svc = TimesheetService(self.session)
+        await timesheet_svc.sync_engagement_to_timesheets(engagement.id)
         
         return await self._to_detail_response(engagement)
     
@@ -642,6 +663,11 @@ class EngagementService(BaseService):
         line_item = await self.line_item_repo.create(**line_item_dict)
         await self.session.commit()
         
+        # Sync engagement to timesheets so the new line item appears
+        from app.services.timesheet_service import TimesheetService
+        timesheet_svc = TimesheetService(self.session)
+        await timesheet_svc.sync_engagement_to_timesheets(engagement_id)
+        
         # Reload with relationships
         line_item = await self.line_item_repo.get(line_item.id)
         if not line_item:
@@ -803,6 +829,11 @@ class EngagementService(BaseService):
         
         await self.session.commit()
         
+        # Sync engagement to timesheets (employee/dates may have changed)
+        from app.services.timesheet_service import TimesheetService
+        timesheet_svc = TimesheetService(self.session)
+        await timesheet_svc.sync_engagement_to_timesheets(engagement_id)
+        
         updated = await self.line_item_repo.get(line_item_id)
         if not updated:
             return None
@@ -845,6 +876,12 @@ class EngagementService(BaseService):
             results.append(EngagementWeeklyHoursResponse.model_validate(wh))
         
         await self.session.commit()
+
+        # Sync engagement to timesheets (weekly hours changed - add/update entries)
+        from app.services.timesheet_service import TimesheetService
+        timesheet_svc = TimesheetService(self.session)
+        await timesheet_svc.sync_engagement_to_timesheets(engagement_id)
+
         return results
     
     async def auto_fill_hours(
