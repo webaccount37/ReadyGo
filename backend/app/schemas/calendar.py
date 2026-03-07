@@ -2,6 +2,7 @@
 Calendar Pydantic schemas for request/response validation.
 """
 
+from datetime import date
 from pydantic import BaseModel, Field
 from typing import Optional, List
 from uuid import UUID
@@ -9,14 +10,12 @@ from uuid import UUID
 
 class CalendarBase(BaseModel):
     """Base calendar schema with common fields."""
+    date: date
+    name: str = Field(..., max_length=255)
+    country_code: str = Field(..., min_length=2, max_length=2)
+    hours: float = Field(8.0, ge=0, le=24)
     year: int = Field(..., ge=2000, le=2100)
-    month: int = Field(..., ge=1, le=12)
-    day: int = Field(..., ge=1, le=31)
-    is_holiday: bool = False
-    holiday_name: Optional[str] = Field(None, max_length=255)
-    financial_period: Optional[str] = Field(None, max_length=50)
-    working_hours: float = Field(8.0, ge=0, le=24)
-    notes: Optional[str] = Field(None, max_length=1000)
+    delivery_center_id: UUID
 
 
 class CalendarCreate(CalendarBase):
@@ -26,20 +25,18 @@ class CalendarCreate(CalendarBase):
 
 class CalendarUpdate(BaseModel):
     """Schema for updating a calendar entry (all fields optional)."""
+    date: Optional[date] = None
+    name: Optional[str] = Field(None, max_length=255)
+    country_code: Optional[str] = Field(None, min_length=2, max_length=2)
+    hours: Optional[float] = Field(None, ge=0, le=24)
     year: Optional[int] = Field(None, ge=2000, le=2100)
-    month: Optional[int] = Field(None, ge=1, le=12)
-    day: Optional[int] = Field(None, ge=1, le=31)
-    is_holiday: Optional[bool] = None
-    holiday_name: Optional[str] = Field(None, max_length=255)
-    financial_period: Optional[str] = Field(None, max_length=50)
-    working_hours: Optional[float] = Field(None, ge=0, le=24)
-    notes: Optional[str] = Field(None, max_length=1000)
+    delivery_center_id: Optional[UUID] = None
 
 
 class CalendarResponse(CalendarBase):
     """Schema for calendar response."""
     id: UUID
-    
+
     class Config:
         from_attributes = True
 
@@ -50,12 +47,7 @@ class CalendarListResponse(BaseModel):
     total: int
 
 
-
-
-
-
-
-
-
-
-
+class ImportPublicHolidaysRequest(BaseModel):
+    """Schema for import public holidays request."""
+    year: int = Field(..., ge=2000, le=2100)
+    delivery_center_id: UUID

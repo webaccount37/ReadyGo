@@ -16,6 +16,15 @@ class EngagementTimesheetApproverRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def list_engagement_ids_by_approver(self, employee_id: UUID) -> List[UUID]:
+        """List engagement IDs where the employee is a timesheet approver."""
+        result = await self.session.execute(
+            select(EngagementTimesheetApprover.engagement_id).where(
+                EngagementTimesheetApprover.employee_id == employee_id
+            )
+        )
+        return [r[0] for r in result.fetchall()]
+
     async def list_by_engagement(self, engagement_id: UUID) -> List[EngagementTimesheetApprover]:
         """List approvers for an engagement."""
         from sqlalchemy.orm import selectinload

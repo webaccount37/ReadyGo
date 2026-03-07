@@ -20,7 +20,6 @@ export interface Employee {
   external_bill_rate?: number;
   start_date?: string;
   end_date?: string;
-  availability_calendar_id?: string;
   billable: boolean;
   default_currency?: string;
   timezone: string;
@@ -51,7 +50,6 @@ export interface EmployeeCreate {
   external_bill_rate: number;
   start_date: string;
   end_date?: string;
-  availability_calendar_id?: string;
   billable?: boolean;
   default_currency?: string;
   timezone?: string;
@@ -72,7 +70,6 @@ export interface EmployeeUpdate {
   external_bill_rate?: number;
   start_date?: string;
   end_date?: string;
-  availability_calendar_id?: string;
   billable?: boolean;
   default_currency?: string;
   timezone?: string;

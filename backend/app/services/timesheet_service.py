@@ -20,6 +20,7 @@ from app.db.repositories.engagement_line_item_repository import EngagementLineIt
 from app.db.repositories.engagement_weekly_hours_repository import EngagementWeeklyHoursRepository
 from app.db.repositories.engagement_repository import EngagementRepository
 from app.db.repositories.quote_repository import QuoteRepository
+from app.db.repositories.calendar_repository import CalendarRepository
 from app.models.timesheet import (
     Timesheet,
     TimesheetEntry,
@@ -28,6 +29,7 @@ from app.models.timesheet import (
     TimesheetEntryType,
 )
 from app.models.engagement import EngagementLineItem, EngagementPhase, EngagementWeeklyHours
+from app.models.employee import Employee
 from app.models.quote import InvoiceDetail
 from app.utils.currency_converter import convert_currency
 from app.schemas.timesheet import (
@@ -72,6 +74,7 @@ class TimesheetService(BaseService):
         self.weekly_hours_repo = EngagementWeeklyHoursRepository(session)
         self.engagement_repo = EngagementRepository(session)
         self.quote_repo = QuoteRepository(session)
+        self.calendar_repo = CalendarRepository(session)
 
     async def get_or_create_timesheet(
         self,
@@ -87,11 +90,76 @@ class TimesheetService(BaseService):
                 status=TimesheetStatus.NOT_SUBMITTED,
             )
             await self._default_entries_from_resource_plan(timesheet)
-        elif not timesheet.entries:
-            await self._default_entries_from_resource_plan(timesheet)
+            await self._add_holiday_entries(timesheet)
+        else:
+            # Only add engagements/holidays to NOT_SUBMITTED or REOPENED timesheets
+            if timesheet.status in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
+                existing_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+                if not existing_entries:
+                    await self._default_entries_from_resource_plan(timesheet)
+                await self._add_holiday_entries(timesheet)
         await self.session.commit()
         timesheet = await self.timesheet_repo.get_by_employee_and_week(employee_id, week_start_date)
+        if timesheet:
+            fresh_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+            return await self._to_response(timesheet, entries_override=fresh_entries)
         return await self._to_response(timesheet)
+
+    async def ensure_timesheets_for_engagement_employees(
+        self, engagement_ids: List[UUID], max_weeks_back: int = 12
+    ) -> None:
+        """Create missing timesheets for employees on these engagements so approvers can see them."""
+        if not engagement_ids:
+            return
+        result = await self.session.execute(
+            select(
+                EngagementLineItem.employee_id,
+                EngagementLineItem.start_date,
+                EngagementLineItem.end_date,
+            )
+            .where(
+                EngagementLineItem.engagement_id.in_(engagement_ids),
+                EngagementLineItem.employee_id.isnot(None),
+            )
+            .distinct()
+        )
+        rows = result.fetchall()
+        today = date.today()
+        end_of_current_week = _get_week_start(today) + timedelta(days=6)
+        oldest_week = today - timedelta(days=7 * max_weeks_back)
+        oldest_week_start = _get_week_start(oldest_week)
+
+        seen: set[tuple[UUID, date]] = set()
+        for employee_id, start_date, end_date in rows:
+            if not employee_id:
+                continue
+            week_start = _get_week_start(start_date)
+            if week_start < oldest_week_start:
+                week_start = oldest_week_start
+            week_end = week_start + timedelta(days=6)
+            range_end = end_date if end_date else end_of_current_week
+            if range_end > end_of_current_week:
+                range_end = end_of_current_week
+            while week_start <= range_end:
+                if week_end >= start_date and (not end_date or week_start <= end_date):
+                    key = (employee_id, week_start)
+                    if key not in seen:
+                        seen.add(key)
+                        existing = await self.timesheet_repo.get_by_employee_and_week(
+                            employee_id, week_start
+                        )
+                        if not existing:
+                            ts = await self.timesheet_repo.create(
+                                employee_id=employee_id,
+                                week_start_date=week_start,
+                                status=TimesheetStatus.NOT_SUBMITTED,
+                            )
+                            await self._default_entries_from_resource_plan(ts)
+                            await self._add_holiday_entries(ts)
+                week_start += timedelta(days=7)
+                week_end = week_start + timedelta(days=6)
+        if seen:
+            await self.session.commit()
 
     async def _default_entries_from_resource_plan(self, timesheet: Timesheet) -> None:
         """Populate timesheet entries from engagement resource plan."""
@@ -158,6 +226,86 @@ class TimesheetService(BaseService):
             )
         await self.session.flush()
 
+    async def _add_holiday_entries(self, timesheet: Timesheet) -> None:
+        """Add holiday row from Calendar for employee's delivery center if events exist and no holiday row yet.
+        Uses display-only fields (account_display_name, engagement_display_name) to show Ready/PTO on the
+        timesheet without creating actual Account/Project records."""
+        emp_result = await self.session.execute(
+            select(Employee.delivery_center_id).where(Employee.id == timesheet.employee_id)
+        )
+        row = emp_result.fetchone()
+        dc_id = row[0] if row else None
+        if not dc_id:
+            logger.info(
+                "Timesheet holiday skip: employee %s has no delivery_center_id",
+                timesheet.employee_id,
+            )
+            return
+        # Use explicit query to avoid lazy-loading timesheet.entries (causes MissingGreenlet in async)
+        existing_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+        has_holiday = any(getattr(e, "is_holiday_row", False) for e in existing_entries)
+        if has_holiday:
+            logger.info(
+                "Timesheet holiday skip: timesheet %s already has holiday row",
+                timesheet.id,
+            )
+            return
+        week_start = timesheet.week_start_date
+        week_end = week_start + timedelta(days=6)
+        events = await self.calendar_repo.list_by_delivery_center_and_date_range(
+            dc_id, week_start, week_end
+        )
+        if not events:
+            logger.info(
+                "Timesheet holiday skip: no calendar events for employee_dc=%s week %s–%s (ensure employee's delivery center matches calendar)",
+                dc_id,
+                week_start,
+                week_end,
+            )
+            return
+        logger.info(
+            "Timesheet holiday: adding row for timesheet %s (dc=%s, week %s–%s, %d events)",
+            timesheet.id,
+            dc_id,
+            week_start,
+            week_end,
+            len(events),
+        )
+        hours_by_dow = [Decimal("0")] * 7
+        for ev in events:
+            dow = (ev.date.weekday() + 1) % 7
+            hours_by_dow[dow] += Decimal(str(ev.hours or 8))
+        max_row = max((e.row_order for e in existing_entries), default=-1)
+        await self.entry_repo.create(
+            timesheet_id=timesheet.id,
+            row_order=max_row + 1,
+            entry_type=TimesheetEntryType.HOLIDAY,
+            account_id=None,
+            account_display_name="Ready",
+            engagement_display_name="PTO",
+            engagement_id=None,
+            opportunity_id=None,
+            engagement_phase_id=None,
+            billable=False,
+            is_holiday_row=True,
+            sun_hours=hours_by_dow[0],
+            mon_hours=hours_by_dow[1],
+            tue_hours=hours_by_dow[2],
+            wed_hours=hours_by_dow[3],
+            thu_hours=hours_by_dow[4],
+            fri_hours=hours_by_dow[5],
+            sat_hours=hours_by_dow[6],
+        )
+        await self.session.flush()
+        logger.info(
+            "Timesheet holiday added: timesheet=%s dc=%s week=%s–%s events=%d",
+            timesheet.id,
+            dc_id,
+            week_start,
+            week_end,
+            len(events),
+        )
+
     async def _ensure_resource_plan_zero_entries(self, timesheet: Timesheet) -> None:
         """Ensure billable engagements the employee is assigned to (via Resource Plan) have a timesheet entry, even if 0 hours.
         Non-billable rows (Sales, non-billable Engagement) stay deleted when user removes them."""
@@ -165,12 +313,14 @@ class TimesheetService(BaseService):
         line_items = await self.line_item_repo.list_by_employee_and_week(
             timesheet.employee_id, week_start
         )
+        # Use explicit query to avoid lazy-loading timesheet.entries (causes MissingGreenlet in async)
+        existing_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
         existing_line_item_ids = {
             e.engagement_line_item_id
-            for e in (timesheet.entries or [])
+            for e in existing_entries
             if e.engagement_line_item_id
         }
-        max_row = max((e.row_order for e in (timesheet.entries or [])), default=-1)
+        max_row = max((e.row_order for e in existing_entries), default=-1)
         for line_item in line_items:
             if not line_item.billable:
                 continue  # only add back billable Resource Plan engagements; non-billable stay deleted
@@ -219,7 +369,11 @@ class TimesheetService(BaseService):
         if timesheet.employee_id != current_employee_id:
             # Check if current user is approver - simplified: allow for now
             pass
-        return await self._to_response(timesheet)
+        if timesheet.status in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
+            await self._add_holiday_entries(timesheet)
+        await self.session.commit()
+        fresh_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+        return await self._to_response(timesheet, entries_override=fresh_entries)
 
     async def get_timesheet_for_week(
         self,
@@ -227,16 +381,32 @@ class TimesheetService(BaseService):
         week_start_date: date,
         current_employee_id: UUID,
     ) -> Optional[TimesheetResponse]:
-        """Get timesheet for employee and week."""
+        """Get timesheet for employee and week. Owner or approver can access."""
         if employee_id != current_employee_id:
-            # Approver check - allow for now
-            pass
+            timesheet = await self.timesheet_repo.get_by_employee_and_week(employee_id, week_start_date)
+            if not timesheet:
+                timesheet = await self.timesheet_repo.get_or_create(employee_id, week_start_date)
+                await self._default_entries_from_resource_plan(timesheet)
+            if timesheet and timesheet.status in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
+                await self._add_holiday_entries(timesheet)
+            await self.session.commit()
+            from app.services.timesheet_approval_service import TimesheetApprovalService
+            approval_svc = TimesheetApprovalService(self.session)
+            if not await approval_svc._can_approve_async(current_employee_id, timesheet):
+                return None
+        else:
+            timesheet = await self.timesheet_repo.get_by_employee_and_week(employee_id, week_start_date)
+            if not timesheet:
+                timesheet = await self.timesheet_repo.get_or_create(employee_id, week_start_date)
+                await self._default_entries_from_resource_plan(timesheet)
+            if timesheet and timesheet.status in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
+                await self._add_holiday_entries(timesheet)
+            await self.session.commit()
         timesheet = await self.timesheet_repo.get_by_employee_and_week(employee_id, week_start_date)
         if not timesheet:
-            timesheet = await self.timesheet_repo.get_or_create(employee_id, week_start_date)
-            await self._default_entries_from_resource_plan(timesheet)
-            await self.session.commit()
-        return await self._to_response(timesheet)
+            return None
+        fresh_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+        return await self._to_response(timesheet, entries_override=fresh_entries)
 
     async def save_entries(
         self,
@@ -244,15 +414,26 @@ class TimesheetService(BaseService):
         entries: List[TimesheetEntryUpsert],
         current_employee_id: UUID,
     ) -> TimesheetResponse:
-        """Save timesheet entries (draft/REOPENED). Does NOT create permanent lock - that only happens on SUBMIT/APPROVE/INVOICE."""
+        """Save timesheet entries (draft/REOPENED). Owner or approver can edit (approver = proxy edit)."""
         timesheet = await self.timesheet_repo.get(timesheet_id)
         if not timesheet:
             raise ValueError("Timesheet not found")
         if timesheet.status not in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
             raise ValueError("Cannot edit timesheet in current status")
+        if timesheet.employee_id != current_employee_id:
+            from app.services.timesheet_approval_service import TimesheetApprovalService
+            approval_svc = TimesheetApprovalService(self.session)
+            if not await approval_svc._can_approve_async(current_employee_id, timesheet):
+                raise ValueError("Only the timesheet owner or an approver can edit this timesheet")
 
+        # Use explicit query to avoid lazy-loading timesheet.entries (MissingGreenlet in async)
+        existing_entries = await self.entry_repo.list_by_timesheet(timesheet_id)
         ids_in_payload = {e.id for e in entries if e.id}
-        for existing in timesheet.entries or []:
+        for existing in existing_entries:
+            # Only protect system-generated holiday rows from deletion.
+            # User-added Holiday rows (is_holiday_row=False) can be deleted.
+            if getattr(existing, "is_holiday_row", False):
+                continue
             if existing.id not in ids_in_payload:
                 await self.entry_repo.delete(existing.id)
         await self.session.flush()
@@ -265,18 +446,51 @@ class TimesheetService(BaseService):
             if entry_id:
                 entry = await self.entry_repo.get(entry_id)
                 if entry:
-                    update_data = {k: v for k, v in data.items() if k in (
-                        "entry_type", "account_id", "engagement_id", "opportunity_id",
-                        "engagement_line_item_id", "engagement_phase_id", "billable",
-                        "sun_hours", "mon_hours", "tue_hours", "wed_hours",
-                        "thu_hours", "fri_hours", "sat_hours",
-                    )}
-                    update_data["row_order"] = i
-                    await self.entry_repo.update(entry_id, **update_data)
-                    if day_notes is not None:
-                        await self._save_day_notes(entry_id, day_notes)
+                    if getattr(entry, "is_holiday_row", False):
+                        update_data = {"row_order": i}
+                        await self.entry_repo.update(entry_id, **update_data)
+                    else:
+                        update_data = {k: v for k, v in data.items() if k in (
+                            "entry_type", "account_id", "engagement_id", "opportunity_id",
+                            "engagement_line_item_id", "engagement_phase_id", "billable",
+                            "sun_hours", "mon_hours", "tue_hours", "wed_hours",
+                            "thu_hours", "fri_hours", "sat_hours",
+                        )}
+                        update_data["row_order"] = i
+                        await self.entry_repo.update(entry_id, **update_data)
+                        if day_notes is not None:
+                            await self._save_day_notes(entry_id, day_notes)
                     continue
 
+            is_holiday_create = (
+                data.get("entry_type") == TimesheetEntryType.HOLIDAY
+                or (isinstance(data.get("entry_type"), str) and data.get("entry_type") == "HOLIDAY")
+            )
+            if is_holiday_create:
+                # User-added Holiday row: create with 0 hours (no calendar events).
+                # Do NOT call _add_holiday_entries - that is for auto-populating from Calendar on load.
+                create_data = {
+                    "timesheet_id": timesheet_id,
+                    "row_order": i,
+                    "entry_type": TimesheetEntryType.HOLIDAY,
+                    "account_id": None,
+                    "account_display_name": "Ready",
+                    "engagement_display_name": "PTO",
+                    "engagement_id": None,
+                    "opportunity_id": None,
+                    "engagement_phase_id": None,
+                    "billable": False,
+                    "is_holiday_row": False,
+                    "sun_hours": data.get("sun_hours", 0) or 0,
+                    "mon_hours": data.get("mon_hours", 0) or 0,
+                    "tue_hours": data.get("tue_hours", 0) or 0,
+                    "wed_hours": data.get("wed_hours", 0) or 0,
+                    "thu_hours": data.get("thu_hours", 0) or 0,
+                    "fri_hours": data.get("fri_hours", 0) or 0,
+                    "sat_hours": data.get("sat_hours", 0) or 0,
+                }
+                await self.entry_repo.create(**create_data)
+                continue
             create_data = {
                 k: v for k, v in data.items()
                 if k in (
@@ -305,7 +519,10 @@ class TimesheetService(BaseService):
 
         await self.session.commit()
         timesheet = await self.timesheet_repo.get(timesheet_id)
-        return await self._to_response(timesheet)
+        if timesheet:
+            fresh_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+            return await self._to_response(timesheet, entries_override=fresh_entries)
+        raise ValueError("Timesheet not found")
 
     async def _save_day_notes(self, entry_id: UUID, day_notes: list) -> None:
         """Save day notes for an entry."""
@@ -354,7 +571,10 @@ class TimesheetService(BaseService):
         if not timesheet:
             raise ValueError("Timesheet not found")
         if timesheet.employee_id != current_employee_id:
-            raise ValueError("Only the timesheet owner can submit")
+            from app.services.timesheet_approval_service import TimesheetApprovalService
+            approval_svc = TimesheetApprovalService(self.session)
+            if not await approval_svc._can_approve_async(current_employee_id, timesheet):
+                raise ValueError("Only the timesheet owner or an approver can submit this timesheet")
         if timesheet.status not in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
             raise ValueError("Timesheet cannot be submitted in current status")
 
@@ -408,13 +628,19 @@ class TimesheetService(BaseService):
                 await self._ensure_permanent_lock(entry.engagement_id, timesheet_id)
         await self.session.commit()
         timesheet = await self.timesheet_repo.get(timesheet_id)
-        return await self._to_response(timesheet), None
+        if timesheet:
+            fresh_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+            return await self._to_response(timesheet, entries_override=fresh_entries), None
+        raise ValueError("Timesheet not found")
 
-    async def _to_response(self, timesheet: Timesheet) -> TimesheetResponse:
-        """Convert timesheet to response schema."""
+    async def _to_response(
+        self, timesheet: Timesheet, entries_override: Optional[List[TimesheetEntry]] = None
+    ) -> TimesheetResponse:
+        """Convert timesheet to response schema. Use entries_override when provided to avoid stale session cache."""
+        entries = entries_override if entries_override is not None else (timesheet.entries or [])
         total = Decimal("0")
         entries_resp = []
-        for entry in sorted(timesheet.entries or [], key=lambda e: e.row_order):
+        for entry in sorted(entries, key=lambda e: e.row_order):
             entry_total = sum(
                 Decimal(str(getattr(entry, f"{d}_hours") or 0))
                 for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
@@ -440,6 +666,19 @@ class TimesheetService(BaseService):
                 )
                 for n in (entry.day_notes or [])
             ]
+            is_holiday = getattr(entry, "is_holiday_row", False)
+            account_name = (
+                getattr(entry, "account_display_name", None) if is_holiday or not entry.account
+                else (entry.account.company_name if entry.account else None)
+            ) or (entry.account.company_name if entry.account else None)
+            engagement_name = (
+                getattr(entry, "engagement_display_name", None) if is_holiday or not entry.engagement
+                else (entry.engagement.name if entry.engagement else None)
+            ) or (entry.engagement.name if entry.engagement else None)
+            phase_name_val = (
+                entry.engagement_phase.name if entry.engagement_phase
+                else (getattr(entry, "engagement_display_name", None) if is_holiday else None)
+            )
             entries_resp.append(
                 TimesheetEntryResponse(
                     id=entry.id,
@@ -447,6 +686,9 @@ class TimesheetService(BaseService):
                     row_order=entry.row_order,
                     entry_type=entry.entry_type.value,
                     account_id=entry.account_id,
+                    account_display_name=getattr(entry, "account_display_name", None),
+                    engagement_display_name=getattr(entry, "engagement_display_name", None),
+                    is_holiday_row=getattr(entry, "is_holiday_row", False),
                     engagement_id=entry.engagement_id,
                     opportunity_id=entry.opportunity_id,
                     engagement_line_item_id=entry.engagement_line_item_id,
@@ -460,15 +702,26 @@ class TimesheetService(BaseService):
                     fri_hours=entry.fri_hours,
                     sat_hours=entry.sat_hours,
                     total_hours=entry_total,
-                    account_name=entry.account.company_name if entry.account else None,
-                    engagement_name=entry.engagement.name if entry.engagement else None,
+                    account_name=account_name,
+                    engagement_name=engagement_name,
                     opportunity_name=entry.opportunity.name if entry.opportunity else None,
-                    phase_name=entry.engagement_phase.name if entry.engagement_phase else None,
+                    phase_name=(
+                        entry.engagement_phase.name
+                        if entry.engagement_phase
+                        else ("PTO" if getattr(entry, "is_holiday_row", False) else None)
+                    ),
                     plan_hours=plan_hours,
                     day_notes=day_notes_resp,
                     requires_notes=requires_notes,
                 )
             )
+        rejection_note = None
+        if timesheet.status_history:
+            for h in reversed(sorted(timesheet.status_history, key=lambda x: x.changed_at or "")):
+                if h.from_status == TimesheetStatus.SUBMITTED and h.to_status == TimesheetStatus.REOPENED and h.note:
+                    rejection_note = h.note
+                    break
+
         return TimesheetResponse(
             id=timesheet.id,
             employee_id=timesheet.employee_id,
@@ -479,6 +732,7 @@ class TimesheetService(BaseService):
             employee_name=f"{timesheet.employee.first_name} {timesheet.employee.last_name}" if timesheet.employee else None,
             total_hours=total,
             entries=entries_resp,
+            rejection_note=rejection_note,
         )
 
     async def count_incomplete_past_weeks(self, employee_id: UUID) -> int:

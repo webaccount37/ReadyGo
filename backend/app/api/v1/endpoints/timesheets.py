@@ -17,6 +17,8 @@ from app.schemas.timesheet import (
     TimesheetEntryUpsert,
     TimesheetSubmitRequest,
     TimesheetApprovalListResponse,
+    RejectTimesheetRequest,
+    ManageableEmployeesResponse,
 )
 
 router = APIRouter()
@@ -68,6 +70,24 @@ async def get_my_incomplete_weeks(
     return {"count": len(weeks), "weeks": [w.isoformat() for w in weeks]}
 
 
+@router.get("/by-employee", response_model=TimesheetResponse)
+async def get_timesheet_by_employee(
+    employee_id: UUID = Query(..., description="Employee ID"),
+    week: str = Query(..., description="Week start date YYYY-MM-DD (Sunday)"),
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """Get or create timesheet for an employee and week. Requires approver access."""
+    week_start = _week_start_from_str(week)
+    controller = TimesheetController(db)
+    result = await controller.get_timesheet_for_week(
+        employee_id, week_start, current_employee.id
+    )
+    if not result:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Timesheet not found or access denied")
+    return result
+
+
 @router.get("/me/week-statuses")
 async def get_my_week_statuses(
     past_weeks: int = Query(52, ge=1, le=104),
@@ -80,6 +100,46 @@ async def get_my_week_statuses(
     return await controller.get_week_statuses(
         current_employee.id, past_weeks, future_weeks
     )
+
+
+@router.get("/approvals/pending", response_model=TimesheetApprovalListResponse)
+async def list_pending_approvals(
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """List timesheets pending approval for current user."""
+    controller = TimesheetController(db)
+    return await controller.list_pending_approvals(
+        current_employee.id, skip=skip, limit=limit
+    )
+
+
+@router.get("/approvals/list", response_model=TimesheetApprovalListResponse)
+async def list_approvable_timesheets(
+    status: Optional[str] = Query(None, description="Filter by status: SUBMITTED, NOT_SUBMITTED, REOPENED, APPROVED"),
+    employee_id: Optional[UUID] = Query(None, description="Filter by employee ID"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=500),
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """List timesheets the approver can manage, with optional status and employee filters."""
+    controller = TimesheetController(db)
+    return await controller.list_approvable_timesheets(
+        current_employee.id, status=status, employee_id=employee_id, skip=skip, limit=limit
+    )
+
+
+@router.get("/approvals/employees", response_model=ManageableEmployeesResponse)
+async def list_manageable_employees(
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """List employees the approver can manage."""
+    controller = TimesheetController(db)
+    return await controller.list_manageable_employees(current_employee.id)
 
 
 @router.get("/{timesheet_id}", response_model=TimesheetResponse)
@@ -152,13 +212,16 @@ async def approve_timesheet(
 @router.post("/{timesheet_id}/reject", response_model=TimesheetResponse)
 async def reject_timesheet(
     timesheet_id: UUID,
+    body: RejectTimesheetRequest,
     db: AsyncSession = Depends(get_db),
     current_employee: Employee = Depends(require_authentication),
 ):
-    """Reject timesheet (status becomes REOPENED)."""
+    """Reject timesheet (status becomes REOPENED). Requires a note explaining the rejection."""
     controller = TimesheetController(db)
     try:
-        return await controller.reject_timesheet(timesheet_id, current_employee.id)
+        return await controller.reject_timesheet(
+            timesheet_id, current_employee.id, body.note
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -192,17 +255,3 @@ async def mark_invoiced(
         return await controller.mark_invoiced(timesheet_id)
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
-
-
-@router.get("/approvals/pending", response_model=TimesheetApprovalListResponse)
-async def list_pending_approvals(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=500),
-    db: AsyncSession = Depends(get_db),
-    current_employee: Employee = Depends(require_authentication),
-):
-    """List timesheets pending approval for current user."""
-    controller = TimesheetController(db)
-    return await controller.list_pending_approvals(
-        current_employee.id, skip=skip, limit=limit
-    )

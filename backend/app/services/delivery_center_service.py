@@ -37,7 +37,16 @@ class DeliveryCenterService(BaseService):
         delivery_center = await self.delivery_center_repo.create(**delivery_center_dict)
         await self.session.commit()
         await self.session.refresh(delivery_center)
-        return DeliveryCenterResponse.model_validate(delivery_center)
+        return DeliveryCenterResponse(
+            id=delivery_center.id,
+            name=delivery_center.name,
+            code=delivery_center.code,
+            country_code=delivery_center.country_code,
+            default_currency=delivery_center.default_currency,
+            approvers=None,
+            opportunities_count=0,
+            employees_count=0,
+        )
     
     async def get_delivery_center(self, delivery_center_id: UUID, include_approvers: bool = False) -> Optional[DeliveryCenterResponse]:
         """Get delivery center by ID."""
@@ -67,6 +76,7 @@ class DeliveryCenterService(BaseService):
             id=delivery_center.id,
             name=delivery_center.name,
             code=delivery_center.code,
+            country_code=delivery_center.country_code,
             default_currency=delivery_center.default_currency,
             approvers=None,
             opportunities_count=opportunities_count,
@@ -138,6 +148,7 @@ class DeliveryCenterService(BaseService):
                 id=dc.id,
                 name=dc.name,
                 code=dc.code,
+                country_code=dc.country_code,
                 default_currency=dc.default_currency,
                 approvers=None,
                 opportunities_count=opportunity_counts_dict.get(dc.id, 0),
@@ -165,15 +176,39 @@ class DeliveryCenterService(BaseService):
         delivery_center_data: DeliveryCenterUpdate,
     ) -> Optional[DeliveryCenterResponse]:
         """Update a delivery center."""
+        from app.models.delivery_center import DeliveryCenter
+        from app.models.opportunity import Opportunity
+        from app.models.employee import Employee
+        from sqlalchemy import select, func
+
         delivery_center = await self.delivery_center_repo.get(delivery_center_id)
         if not delivery_center:
             return None
-        
+
         update_dict = delivery_center_data.model_dump(exclude_unset=True)
         updated = await self.delivery_center_repo.update(delivery_center_id, **update_dict)
         await self.session.commit()
         await self.session.refresh(updated)
-        return DeliveryCenterResponse.model_validate(updated)
+
+        opportunity_count_result = await self.session.execute(
+            select(func.count(Opportunity.id)).where(Opportunity.delivery_center_id == delivery_center_id)
+        )
+        opportunities_count = opportunity_count_result.scalar() or 0
+        employee_count_result = await self.session.execute(
+            select(func.count(Employee.id)).where(Employee.delivery_center_id == delivery_center_id)
+        )
+        employees_count = employee_count_result.scalar() or 0
+
+        return DeliveryCenterResponse(
+            id=updated.id,
+            name=updated.name,
+            code=updated.code,
+            country_code=updated.country_code,
+            default_currency=updated.default_currency,
+            approvers=None,
+            opportunities_count=opportunities_count,
+            employees_count=employees_count,
+        )
     
     async def delete_delivery_center(self, delivery_center_id: UUID) -> bool:
         """Delete a delivery center."""

@@ -83,10 +83,12 @@ function DeliveryCentersPageContent() {
       const name = (dc.name || "").toLowerCase();
       const code = (dc.code || "").toLowerCase();
       const currency = (dc.default_currency || "").toLowerCase();
+      const country = (dc.country_code || "").toLowerCase();
       return (
         name.includes(query) ||
         code.includes(query) ||
-        currency.includes(query)
+        currency.includes(query) ||
+        country.includes(query)
       );
     });
   }, [data, searchQuery]);
@@ -183,6 +185,7 @@ function DeliveryCentersPageContent() {
                           <tr className="border-b">
                             <th className="text-left p-3 font-semibold">Name</th>
                             <th className="text-left p-3 font-semibold">Code</th>
+                            <th className="text-left p-3 font-semibold">Country</th>
                             <th className="text-left p-3 font-semibold">Default Currency</th>
                             <th className="text-left p-3 font-semibold">Opportunities</th>
                             <th className="text-left p-3 font-semibold">Employees</th>
@@ -201,6 +204,15 @@ function DeliveryCentersPageContent() {
                               <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 font-mono">
                                 {highlightText(dc.code, searchQuery)}
                               </span>
+                            </td>
+                            <td className="p-3">
+                              {dc.country_code ? (
+                                <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 font-mono uppercase">
+                                  {highlightText(dc.country_code, searchQuery)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
                             </td>
                             <td className="p-3">
                               <span className="px-2 py-1 text-xs rounded border border-gray-200 text-gray-700 bg-white">
@@ -278,6 +290,18 @@ function DeliveryCentersPageContent() {
                               <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 font-mono">
                                 {highlightText(dc.code, searchQuery)}
                               </span>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                Country Code
+                              </div>
+                              {dc.country_code ? (
+                                <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 font-mono uppercase">
+                                  {highlightText(dc.country_code, searchQuery)}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
                             </div>
                             <div>
                               <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
@@ -399,6 +423,12 @@ function DeliveryCentersPageContent() {
               <p className="text-sm font-semibold text-gray-800">Code</p>
               <p className="text-sm text-gray-700 font-mono">
                 {deliveryCenterToView.code}
+              </p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Country Code</p>
+              <p className="text-sm text-gray-700 font-mono uppercase">
+                {deliveryCenterToView.country_code ?? "—"}
               </p>
             </div>
             <div>

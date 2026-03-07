@@ -60,6 +60,8 @@ interface WeekCarouselProps {
   weekStatuses?: Record<string, string>;
   visibleCount?: number;
   className?: string;
+  /** When true, shows a static week label instead of interactive carousel (e.g. when approver views others' timesheets) */
+  readOnly?: boolean;
 }
 
 const WEEKS = generateWeekOptions();
@@ -69,8 +71,9 @@ export function WeekCarousel({
   onSelectWeek,
   incompleteWeeks = [],
   weekStatuses = {},
-  visibleCount = 5,
+  visibleCount: _visibleCount = 5,
   className,
+  readOnly = false,
 }: WeekCarouselProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const weeks = WEEKS;
@@ -85,8 +88,20 @@ export function WeekCarousel({
   }, [selectedWeek]);
 
   useEffect(() => {
+    if (readOnly) return;
     scrollToSelected();
-  }, [scrollToSelected, selectedWeek]);
+  }, [scrollToSelected, selectedWeek, readOnly]);
+
+  if (readOnly) {
+    return (
+      <div className={cn("flex items-center gap-2 py-2", className)}>
+        <div className="px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700">
+          {formatWeekLabel(selectedWeek)}
+        </div>
+        <span className="text-xs text-muted-foreground">Use Timesheet Approvals to switch weeks</span>
+      </div>
+    );
+  }
 
   const scroll = (dir: "left" | "right") => {
     const idx = weeks.indexOf(selectedWeek);

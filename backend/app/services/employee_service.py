@@ -236,7 +236,6 @@ class EmployeeService(BaseService):
             "external_bill_rate": employee.external_bill_rate,
             "start_date": employee.start_date,
             "end_date": employee.end_date,
-            "availability_calendar_id": employee.availability_calendar_id,
             "billable": employee.billable,
             "default_currency": employee.default_currency,
             "timezone": employee.timezone,

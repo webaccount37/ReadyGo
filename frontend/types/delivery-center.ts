@@ -14,6 +14,7 @@ export interface DeliveryCenter {
   name: string;
   code: string;
   default_currency: string;
+  country_code?: string | null;
   approvers?: EmployeeApproverSummary[];
   opportunities_count?: number;
   employees_count?: number;
@@ -23,12 +24,14 @@ export interface DeliveryCenterCreate {
   name: string;
   code: string;
   default_currency: string;
+  country_code?: string | null;
 }
 
 export interface DeliveryCenterUpdate {
   name?: string;
   code?: string;
   default_currency?: string;
+  country_code?: string | null;
 }
 
 export interface DeliveryCenterApproverCreate {

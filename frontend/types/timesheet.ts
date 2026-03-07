@@ -9,7 +9,7 @@ export type TimesheetStatus =
   | "REOPENED"
   | "INVOICED";
 
-export type TimesheetEntryType = "ENGAGEMENT" | "SALES";
+export type TimesheetEntryType = "ENGAGEMENT" | "SALES" | "HOLIDAY";
 
 export interface TimesheetDayNote {
   id?: string;
@@ -21,6 +21,7 @@ export interface TimesheetDayNote {
 export interface TimesheetEntryUpsert {
   id?: string;
   entry_type?: TimesheetEntryType;
+  is_holiday_row?: boolean;
   account_id?: string;
   engagement_id?: string;
   opportunity_id?: string;
@@ -47,6 +48,7 @@ export interface TimesheetEntry {
   timesheet_id: string;
   row_order: number;
   entry_type: string;
+  is_holiday_row?: boolean;
   account_id: string;
   engagement_id?: string;
   opportunity_id?: string;
@@ -80,6 +82,11 @@ export interface Timesheet {
   employee_name?: string;
   total_hours: string;
   entries?: TimesheetEntry[];
+  rejection_note?: string;
+}
+
+export interface RejectTimesheetRequest {
+  note: string;
 }
 
 export interface TimesheetSubmitRequest {
@@ -98,5 +105,17 @@ export interface TimesheetApprovalSummary {
 
 export interface TimesheetApprovalListResponse {
   items: TimesheetApprovalSummary[];
+  total: number;
+}
+
+export interface ManageableEmployeeSummary {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+}
+
+export interface ManageableEmployeesResponse {
+  items: ManageableEmployeeSummary[];
   total: number;
 }

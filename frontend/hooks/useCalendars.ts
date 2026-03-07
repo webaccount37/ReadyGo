@@ -9,6 +9,7 @@ import type {
   CalendarCreate,
   CalendarUpdate,
   CalendarListResponse,
+  ImportPublicHolidaysRequest,
 } from "@/types/calendar";
 
 const QUERY_KEYS = {
@@ -17,26 +18,24 @@ const QUERY_KEYS = {
   list: (filters?: Record<string, unknown>) => [...QUERY_KEYS.lists(), filters] as const,
   details: () => [...QUERY_KEYS.all, "detail"] as const,
   detail: (id: string) => [...QUERY_KEYS.details(), id] as const,
-  date: (year: number, month: number, day: number) => [...QUERY_KEYS.all, "date", year, month, day] as const,
 };
 
 /**
- * Get all calendar entries with optional filters.
+ * Get calendar entries for a year and delivery center.
  */
 export function useCalendars(
-  params?: {
+  params: {
+    year: number;
+    delivery_center_id: string;
     skip?: number;
     limit?: number;
-    year?: number;
-    month?: number;
-    is_holiday?: boolean;
-    financial_period?: string;
   },
   options?: Omit<UseQueryOptions<CalendarListResponse>, "queryKey" | "queryFn">
 ) {
   return useQuery<CalendarListResponse>({
     queryKey: QUERY_KEYS.list(params),
     queryFn: () => calendarsApi.getCalendars(params),
+    enabled: !!params.year && !!params.delivery_center_id,
     ...options,
   });
 }
@@ -52,22 +51,6 @@ export function useCalendar(
     queryKey: QUERY_KEYS.detail(calendarId),
     queryFn: () => calendarsApi.getCalendar(calendarId),
     enabled: !!calendarId,
-    ...options,
-  });
-}
-
-/**
- * Get calendar entry by date.
- */
-export function useCalendarByDate(
-  year: number,
-  month: number,
-  day: number,
-  options?: Omit<UseQueryOptions<CalendarResponse>, "queryKey" | "queryFn">
-) {
-  return useQuery<CalendarResponse>({
-    queryKey: QUERY_KEYS.date(year, month, day),
-    queryFn: () => calendarsApi.getCalendarByDate(year, month, day),
     ...options,
   });
 }
@@ -120,6 +103,23 @@ export function useDeleteCalendar(
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
       queryClient.removeQueries({ queryKey: QUERY_KEYS.detail(id) });
+    },
+    ...options,
+  });
+}
+
+/**
+ * Import public holidays from date.nager.at API.
+ */
+export function useImportPublicHolidays(
+  options?: UseMutationOptions<{ imported: number }, Error, ImportPublicHolidaysRequest>
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation<{ imported: number }, Error, ImportPublicHolidaysRequest>({
+    mutationFn: (data) => calendarsApi.importPublicHolidays(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
     },
     ...options,
   });

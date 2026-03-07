@@ -24,6 +24,7 @@ class TimesheetEntryType(str, enum.Enum):
     """Timesheet entry type enumeration."""
     ENGAGEMENT = "ENGAGEMENT"
     SALES = "SALES"
+    HOLIDAY = "HOLIDAY"
 
 
 class Timesheet(Base):
@@ -57,13 +58,16 @@ class TimesheetEntry(Base):
     row_order = Column(Integer, nullable=False, default=0)
     
     entry_type = Column(SQLEnum(TimesheetEntryType), nullable=False, default=TimesheetEntryType.ENGAGEMENT)
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=False, index=True)
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True)  # Null for Holiday rows (use account_display_name)
+    account_display_name = Column(String(255), nullable=True)  # Display-only for Holiday: "Ready"
+    engagement_display_name = Column(String(255), nullable=True)  # Display-only for Holiday: "PTO"
     engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id"), nullable=True, index=True)
     opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id"), nullable=True, index=True)
     engagement_line_item_id = Column(UUID(as_uuid=True), ForeignKey("engagement_line_items.id"), nullable=True, index=True)
     engagement_phase_id = Column(UUID(as_uuid=True), ForeignKey("engagement_phases.id"), nullable=True, index=True)
     billable = Column(Boolean, nullable=False, default=True)
-    
+    is_holiday_row = Column(Boolean, nullable=False, default=False)  # System-generated from Calendar, read-only
+
     # Per-day hours (Sun=0 through Sat=6)
     sun_hours = Column(Numeric(10, 2), nullable=False, default=0)
     mon_hours = Column(Numeric(10, 2), nullable=False, default=0)
@@ -140,6 +144,7 @@ class TimesheetStatusHistory(Base):
     to_status = Column(SQLEnum(TimesheetStatus), nullable=False)
     changed_by_employee_id = Column(UUID(as_uuid=True), ForeignKey("employees.id"), nullable=True, index=True)
     changed_at = Column(DateTime, nullable=False, server_default="now()")
+    note = Column(String(2000), nullable=True)  # Rejection reason when from_status=SUBMITTED, to_status=REOPENED
     
     # Relationships
     timesheet = relationship("Timesheet", back_populates="status_history")

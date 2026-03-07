@@ -25,7 +25,6 @@ class EmployeeBase(BaseModel):
     external_bill_rate: float = Field(..., ge=0)
     start_date: date = Field(...)
     end_date: Optional[date] = None
-    availability_calendar_id: Optional[UUID] = None
     billable: bool = True
     default_currency: Optional[str] = Field(None, max_length=3)
     timezone: str = "UTC"
@@ -59,7 +58,6 @@ class EmployeeUpdate(BaseModel):
     external_bill_rate: Optional[float] = Field(None, ge=0)
     start_date: Optional[date] = None
     end_date: Optional[date] = None
-    availability_calendar_id: Optional[UUID] = None
     billable: Optional[bool] = None
     default_currency: Optional[str] = Field(None, max_length=3)
     timezone: Optional[str] = None

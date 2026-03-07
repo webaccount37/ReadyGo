@@ -12,6 +12,7 @@ type DeliveryCenterFormValues = {
   name: string;
   code: string;
   default_currency: string;
+  country_code: string;
 };
 
 interface DeliveryCenterFormProps {
@@ -33,6 +34,7 @@ export function DeliveryCenterForm({
     name: initialData?.name || "",
     code: initialData?.code || "",
     default_currency: initialData?.default_currency || "USD",
+    country_code: initialData?.country_code ?? "",
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -55,6 +57,7 @@ export function DeliveryCenterForm({
       name: formData.name.trim(),
       code: normalizedCode,
       default_currency: formData.default_currency,
+      country_code: formData.country_code.trim() || undefined,
     });
   };
 
@@ -92,6 +95,24 @@ export function DeliveryCenterForm({
         />
         <p className="text-xs text-gray-500 mt-1">
           Code will be normalized to lowercase with hyphens (e.g., &quot;North America&quot; → &quot;north-america&quot;)
+        </p>
+      </div>
+
+      <div>
+        <Label htmlFor="country_code">Country Code</Label>
+        <Input
+          id="country_code"
+          value={formData.country_code}
+          onChange={(e) =>
+            setFormData({ ...formData, country_code: e.target.value.toUpperCase().slice(0, 2) })
+          }
+          disabled={readOnly}
+          placeholder="e.g., US"
+          maxLength={2}
+          className="w-20 font-mono uppercase"
+        />
+        <p className="text-xs text-gray-500 mt-1">
+          ISO 3166-1 alpha-2 (e.g., US, CA, GB). Used for importing public holidays.
         </p>
       </div>
 

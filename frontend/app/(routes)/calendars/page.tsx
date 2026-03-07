@@ -1,28 +1,66 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   useCalendars,
   useCreateCalendar,
   useUpdateCalendar,
   useDeleteCalendar,
+  useImportPublicHolidays,
 } from "@/hooks/useCalendars";
+import { useAuth } from "@/hooks/useAuth";
+import { useEmployee } from "@/hooks/useEmployees";
+import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { CalendarForm } from "@/components/calendars/calendar-form";
+import { Select } from "@/components/ui/select";
 import type { CalendarCreate, CalendarUpdate } from "@/types/calendar";
 
 export default function CalendarsPage() {
+  const currentYear = new Date().getFullYear();
+  const [year, setYear] = useState(currentYear);
+  const [deliveryCenterId, setDeliveryCenterId] = useState<string>("");
   const [skip, setSkip] = useState(0);
-  const [limit] = useState(10);
+  const [limit] = useState(50);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [editingCalendar, setEditingCalendar] = useState<string | null>(null);
 
-  const { data, isLoading, error, refetch } = useCalendars({ skip, limit });
+  const { user } = useAuth();
+  const { data: employeeData } = useEmployee(user?.employee_id ?? "", false);
+  const { data: deliveryCentersData } = useDeliveryCenters();
+  const defaultDcId = useMemo(() => {
+    if (!employeeData?.delivery_center || !deliveryCentersData?.items?.length) return deliveryCentersData?.items?.[0]?.id ?? "";
+    const dc = deliveryCentersData.items.find((d) => d.code === employeeData.delivery_center);
+    return dc?.id ?? deliveryCentersData.items[0]?.id ?? "";
+  }, [employeeData?.delivery_center, deliveryCentersData?.items]);
+  useEffect(() => {
+    if (defaultDcId && !deliveryCenterId) setDeliveryCenterId(defaultDcId);
+  }, [defaultDcId, deliveryCenterId]);
+
+  const { data, isLoading, error, refetch } = useCalendars(
+    { year, delivery_center_id: deliveryCenterId, skip, limit },
+    { enabled: !!year && !!deliveryCenterId }
+  );
   const createCalendar = useCreateCalendar();
   const updateCalendar = useUpdateCalendar();
   const deleteCalendar = useDeleteCalendar();
+  const importHolidays = useImportPublicHolidays();
+
+  const handleImportHolidays = async () => {
+    if (!deliveryCenterId) {
+      alert("Please select a delivery center first.");
+      return;
+    }
+    try {
+      await importHolidays.mutateAsync({ year, delivery_center_id: deliveryCenterId });
+      refetch();
+    } catch (err) {
+      console.error("Failed to import holidays:", err);
+      alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
 
   const handleCreate = async (data: CalendarCreate | CalendarUpdate) => {
     try {
@@ -69,12 +107,58 @@ export default function CalendarsPage() {
         <div>
           <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Calendars</h1>
           <p className="text-gray-600 mt-1 text-sm sm:text-base">
-            Manage working days, holidays, and financial periods
+            Manage holidays and calendar events by year and delivery center
           </p>
         </div>
-        <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto">+ Add Calendar Entry</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setIsCreateOpen(true)} disabled={!deliveryCenterId}>
+            + Add Calendar Entry
+          </Button>
+        </div>
       </div>
 
+      <Card className="mb-4">
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap gap-4 items-end">
+            <div>
+              <label className="block text-sm font-medium mb-1">Year</label>
+              <select
+                value={year}
+                onChange={(e) => setYear(parseInt(e.target.value))}
+                className="rounded border border-gray-300 px-3 py-2 text-sm"
+              >
+                {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Delivery Center</label>
+              <select
+                value={deliveryCenterId}
+                onChange={(e) => setDeliveryCenterId(e.target.value)}
+                className="rounded border border-gray-300 px-3 py-2 text-sm min-w-[180px]"
+              >
+                <option value="">— Select —</option>
+                {deliveryCentersData?.items?.map((dc) => (
+                  <option key={dc.id} value={dc.id}>{dc.name}</option>
+                ))}
+              </select>
+            </div>
+            <Button
+              variant="outline"
+              onClick={handleImportHolidays}
+              disabled={!deliveryCenterId || importHolidays.isPending}
+            >
+              {importHolidays.isPending ? "Importing..." : "Import Public Holidays"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {!deliveryCenterId && (
+        <p className="text-gray-600 mb-4">Select a year and delivery center to view calendar entries.</p>
+      )}
       {isLoading && <div className="text-gray-600">Loading calendar entries...</div>}
 
       {error && (
@@ -102,33 +186,19 @@ export default function CalendarsPage() {
                       <thead>
                         <tr className="border-b">
                           <th className="text-left p-3 font-semibold">Date</th>
-                          <th className="text-left p-3 font-semibold">Holiday</th>
-                          <th className="text-left p-3 font-semibold">Holiday Name</th>
-                          <th className="text-left p-3 font-semibold">Working Hours</th>
-                          <th className="text-left p-3 font-semibold">Financial Period</th>
+                          <th className="text-left p-3 font-semibold">Name</th>
+                          <th className="text-left p-3 font-semibold">Country Code</th>
+                          <th className="text-left p-3 font-semibold">Hours</th>
                           <th className="text-left p-3 font-semibold">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.items.map((calendar) => (
                           <tr key={calendar.id} className="border-b hover:bg-gray-50">
-                            <td className="p-3 font-medium">
-                              {calendar.year}-{String(calendar.month).padStart(2, "0")}-{String(calendar.day).padStart(2, "0")}
-                            </td>
-                            <td className="p-3">
-                              {calendar.is_holiday ? (
-                                <span className="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800">
-                                  Yes
-                                </span>
-                              ) : (
-                                <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">
-                                  No
-                                </span>
-                              )}
-                            </td>
-                            <td className="p-3">{calendar.holiday_name || "—"}</td>
-                            <td className="p-3">{calendar.working_hours}h</td>
-                            <td className="p-3">{calendar.financial_period || "—"}</td>
+                            <td className="p-3 font-medium">{calendar.date}</td>
+                            <td className="p-3">{calendar.name || "—"}</td>
+                            <td className="p-3">{calendar.country_code || "—"}</td>
+                            <td className="p-3">{calendar.hours}h</td>
                             <td className="p-3">
                               <div className="flex gap-2">
                                 <Button
@@ -163,48 +233,28 @@ export default function CalendarsPage() {
                               <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                                 Date
                               </div>
-                              <div className="text-sm font-medium">
-                                {calendar.year}-{String(calendar.month).padStart(2, "0")}-{String(calendar.day).padStart(2, "0")}
+                              <div className="text-sm font-medium">{calendar.date}</div>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                Name
                               </div>
+                              <div className="text-sm">{calendar.name || "—"}</div>
                             </div>
                             <div className="grid grid-cols-2 gap-2">
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Holiday
+                                  Country Code
                                 </div>
-                                {calendar.is_holiday ? (
-                                  <span className="px-2 py-1 text-xs rounded bg-yellow-100 text-yellow-800">
-                                    Yes
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">
-                                    No
-                                  </span>
-                                )}
+                                <div className="text-sm">{calendar.country_code || "—"}</div>
                               </div>
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Working Hours
+                                  Hours
                                 </div>
-                                <div className="text-sm">{calendar.working_hours}h</div>
+                                <div className="text-sm">{calendar.hours}h</div>
                               </div>
                             </div>
-                            {calendar.holiday_name && (
-                              <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Holiday Name
-                                </div>
-                                <div className="text-sm">{calendar.holiday_name}</div>
-                              </div>
-                            )}
-                            {calendar.financial_period && (
-                              <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Financial Period
-                                </div>
-                                <div className="text-sm">{calendar.financial_period}</div>
-                              </div>
-                            )}
                             <div className="flex gap-2 pt-2">
                               <Button
                                 size="sm"
@@ -275,6 +325,8 @@ export default function CalendarsPage() {
         </DialogHeader>
         <DialogContent>
           <CalendarForm
+            year={year}
+            deliveryCenterId={deliveryCenterId}
             onSubmit={handleCreate}
             onCancel={() => setIsCreateOpen(false)}
             isLoading={createCalendar.isPending}
@@ -294,6 +346,8 @@ export default function CalendarsPage() {
           <DialogContent>
             <CalendarForm
               initialData={calendarToEdit}
+              year={year}
+              deliveryCenterId={deliveryCenterId}
               onSubmit={handleUpdate}
               onCancel={() => setEditingCalendar(null)}
               isLoading={updateCalendar.isPending}

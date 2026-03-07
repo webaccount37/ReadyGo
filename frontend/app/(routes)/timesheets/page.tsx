@@ -5,8 +5,12 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   useMyTimesheet,
+  useTimesheet,
+  useTimesheetByEmployee,
   useSaveTimesheetEntries,
   useSubmitTimesheet,
+  useApproveTimesheet,
+  useRejectTimesheet,
   useTimesheetIncompleteCount,
   useTimesheetIncompleteWeeks,
   useWeekStatuses,
@@ -29,8 +33,9 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Select } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Clock, AlertTriangle, Plus, Trash2 } from "lucide-react";
+import { Clock, AlertTriangle, Plus, Trash2, XCircle, CheckCircle2 } from "lucide-react";
 import { FetchError } from "@/lib/fetchClient";
 import { WeekCarousel, getWeekStart, getWeekRange, formatWeekLabel } from "@/components/timesheets/week-carousel";
 import type { TimesheetEntry, TimesheetEntryUpsert } from "@/types/timesheet";
@@ -40,19 +45,48 @@ const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
 function TimesheetPageContent() {
   const searchParams = useSearchParams();
+  const timesheetIdParam = searchParams.get("timesheet");
+  const employeeIdParam = searchParams.get("employee");
   const weekParam = searchParams.get("week");
   const today = new Date();
   const currentWeekStart = getWeekStart(today);
   const [selectedWeek, setSelectedWeek] = useState(weekParam || currentWeekStart);
 
+  const isViewingByTimesheetId = !!timesheetIdParam;
+  const isViewingByEmployeeWeek = !!employeeIdParam && !!weekParam;
+  const isViewingOwn = !isViewingByTimesheetId && !isViewingByEmployeeWeek;
+
+  const { data: timesheetById, isLoading: loadingById, error: errorById, refetch: refetchById } = useTimesheet(
+    timesheetIdParam ?? "",
+    { enabled: isViewingByTimesheetId }
+  );
+  const { data: timesheetByEmployee, isLoading: loadingByEmployee, error: errorByEmployee, refetch: refetchByEmployee } = useTimesheetByEmployee(
+    employeeIdParam ?? "",
+    weekParam ?? "",
+    { enabled: isViewingByEmployeeWeek }
+  );
+  const { data: myTimesheet, isLoading: loadingMine, error: errorMine, refetch: refetchMine } = useMyTimesheet(
+    isViewingOwn ? (weekParam || selectedWeek) : undefined,
+    { enabled: isViewingOwn }
+  );
+
+  const timesheet = timesheetById ?? timesheetByEmployee ?? myTimesheet;
+  const isLoading = (isViewingByTimesheetId && loadingById) || (isViewingByEmployeeWeek && loadingByEmployee) || (isViewingOwn && loadingMine);
+  const error = errorById ?? errorByEmployee ?? errorMine;
+  const refetch = () => {
+    if (isViewingByTimesheetId) refetchById();
+    else if (isViewingByEmployeeWeek) refetchByEmployee();
+    else refetchMine();
+  };
+
   useEffect(() => {
-    if (weekParam) setSelectedWeek(weekParam);
+    if (timesheet?.week_start_date) setSelectedWeek(timesheet.week_start_date);
+    else if (weekParam) setSelectedWeek(weekParam);
     else setSelectedWeek(currentWeekStart);
-  }, [weekParam, currentWeekStart]);
+  }, [timesheet?.week_start_date, weekParam, currentWeekStart]);
 
   const { user } = useAuth();
-  const { data: timesheet, isLoading, error, refetch } = useMyTimesheet(selectedWeek);
-  const { data: incompleteData } = useTimesheetIncompleteCount();
+  const { data: incompleteData } = useTimesheetIncompleteCount({ enabled: isViewingOwn });
 
   const employeeId = timesheet?.employee_id ?? user?.employee_id;
 
@@ -75,10 +109,14 @@ function TimesheetPageContent() {
   const { data: opportunitiesData } = useOpportunities({ limit: 500 });
   const saveEntries = useSaveTimesheetEntries();
   const submitTimesheet = useSubmitTimesheet();
+  const approveTimesheet = useApproveTimesheet();
+  const rejectTimesheet = useRejectTimesheet();
 
   const [localEntries, setLocalEntries] = useState<TimesheetEntryUpsert[]>([]);
   const [planVsActualModalOpen, setPlanVsActualModalOpen] = useState(false);
   const [planVsActualMessage, setPlanVsActualMessage] = useState("");
+  const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
+  const [rejectNote, setRejectNote] = useState("");
 
   useEffect(() => {
     if (timesheet?.entries) {
@@ -86,7 +124,8 @@ function TimesheetPageContent() {
         timesheet.entries.map((e) => ({
           ...e,
           id: e.id,
-          entry_type: (e.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES",
+          entry_type: (e.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES" | "HOLIDAY",
+          is_holiday_row: (e as TimesheetEntry).is_holiday_row ?? false,
           account_id: e.account_id,
           engagement_id: e.engagement_id,
           opportunity_id: e.opportunity_id,
@@ -128,7 +167,7 @@ function TimesheetPageContent() {
 
   const handleSave = async () => {
     if (!timesheet) return;
-    const filtered = localEntries.filter((e) => e.id || e.account_id);
+    const filtered = localEntries.filter((e) => e.id || e.account_id || e.entry_type === "HOLIDAY");
     const toSend: TimesheetEntryUpsert[] = filtered.map((e, i) => ({
       id: e.id,
       entry_type: e.entry_type,
@@ -249,15 +288,26 @@ function TimesheetPageContent() {
           <Clock className="w-8 h-8" />
           Timesheet Management
         </h1>
-        {incompleteData && incompleteData.count > 0 && (
+        {isViewingOwn && incompleteData && incompleteData.count > 0 && (
           <Badge variant="destructive" className="text-sm">
             {incompleteData.count} week(s) incomplete
           </Badge>
         )}
       </div>
 
-      {/* Backlog banner */}
-      {incompleteData && incompleteData.count > 0 && (
+      {/* Rejection note banner */}
+      {timesheet?.status === "REOPENED" && timesheet?.rejection_note && (
+        <Alert className="mb-4 border-red-200 bg-red-50 dark:border-red-900 dark:bg-red-950/50">
+          <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
+          <AlertDescription>
+            <span className="font-medium">This timesheet was rejected.</span>{" "}
+            <span className="text-red-800 dark:text-red-200">Reason: {timesheet.rejection_note}</span>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Backlog banner - only when viewing own timesheets */}
+      {isViewingOwn && incompleteData && incompleteData.count > 0 && (
         <Alert className="mb-4 border-amber-200 bg-amber-50">
           <AlertTriangle className="h-4 w-4 text-amber-600" />
           <AlertDescription className="flex flex-wrap items-center gap-2">
@@ -282,7 +332,7 @@ function TimesheetPageContent() {
         </Alert>
       )}
 
-      {/* Week carousel */}
+      {/* Week carousel - disabled when approver views others' timesheets */}
       <Card className="mb-4 border-0 shadow-lg bg-gradient-to-r from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
         <CardContent className="p-4">
           <WeekCarousel
@@ -291,6 +341,7 @@ function TimesheetPageContent() {
             incompleteWeeks={incompleteWeeksData?.weeks ?? []}
             weekStatuses={weekStatuses ?? {}}
             visibleCount={5}
+            readOnly={!isViewingOwn}
           />
         </CardContent>
       </Card>
@@ -319,6 +370,28 @@ function TimesheetPageContent() {
                   </Button>
                 </>
               )}
+              {!isViewingOwn && timesheet.status === "SUBMITTED" && (
+                <>
+                  <Button
+                    onClick={() => approveTimesheet.mutate(timesheet.id, { onSuccess: () => refetch() })}
+                    disabled={approveTimesheet.isPending}
+                  >
+                    <CheckCircle2 className="w-4 h-4 mr-1" />
+                    Approve
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setRejectNote("");
+                      setRejectDialogOpen(true);
+                    }}
+                    disabled={rejectTimesheet.isPending}
+                  >
+                    <XCircle className="w-4 h-4 mr-1" />
+                    Reject
+                  </Button>
+                </>
+              )}
             </div>
           </div>
 
@@ -334,6 +407,55 @@ function TimesheetPageContent() {
                   Cancel
                 </Button>
                 <Button onClick={() => handleSubmit(true)}>Submit Anyway</Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          {/* Reject dialog - approver only */}
+          <Dialog
+            open={rejectDialogOpen}
+            onOpenChange={(open) => {
+              setRejectDialogOpen(open);
+              if (!open) setRejectNote("");
+            }}
+          >
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Reject Timesheet</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-gray-600 mb-2">
+                Please provide a reason for rejecting this timesheet. The employee will see this note.
+              </p>
+              <Textarea
+                placeholder="Enter rejection reason (required)..."
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                rows={4}
+                className="mb-4"
+              />
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setRejectDialogOpen(false)}>
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    if (!rejectNote.trim() || !timesheet) return;
+                    rejectTimesheet.mutate(
+                      { timesheetId: timesheet.id, note: rejectNote.trim() },
+                      {
+                        onSuccess: () => {
+                          setRejectDialogOpen(false);
+                          setRejectNote("");
+                          refetch();
+                        },
+                      }
+                    );
+                  }}
+                  disabled={!rejectNote.trim() || rejectTimesheet.isPending}
+                >
+                  Reject
+                </Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -424,6 +546,7 @@ function TimesheetPageContent() {
 const ENTRY_TYPE_OPTIONS = [
   { value: "ENGAGEMENT" as const, label: "Engagement" },
   { value: "SALES" as const, label: "Sales" },
+  { value: "HOLIDAY" as const, label: "Holiday" },
 ];
 
 interface EngagementItem {
@@ -455,8 +578,9 @@ function TimesheetEntryRow({
   onDelete?: () => void;
   onChange: (e: TimesheetEntryUpsert) => void;
 }) {
-  const entryType = (entry.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES";
+  const entryType = (entry.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES" | "HOLIDAY";
   const isSales = entryType === "SALES";
+  const isHoliday = entryType === "HOLIDAY";
 
   const opportunitiesForAccount = useMemo(() => {
     if (!opportunitiesData?.items || !entry.account_id) return opportunitiesData?.items ?? [];
@@ -548,7 +672,7 @@ function TimesheetEntryRow({
   };
 
   const inputBase =
-    "w-14 h-7 text-center text-[11px] rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
+    "w-14 h-7 text-center text-[11px] tabular-nums rounded border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none";
 
   const formatHourDisplay = (key: (typeof DAY_KEYS)[number]) => {
     const v = entry[`${key}_hours`];
@@ -570,10 +694,11 @@ function TimesheetEntryRow({
     return formatHourDisplay(key);
   };
 
+  const rowBg = isHoliday ? "bg-amber-50 dark:bg-amber-950/30" : "bg-white dark:bg-slate-900";
   return (
-    <tr className="border-b border-slate-200/80 hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition-colors">
-      <td className="px-2 py-1 sticky left-0 bg-inherit z-10 w-[95px] align-top">
-        {canEdit ? (
+    <tr className={`border-b border-slate-200/80 transition-colors ${isHoliday ? "" : "hover:bg-slate-50/50 dark:hover:bg-slate-800/30"}`}>
+      <td className={`px-2 py-1 sticky left-0 z-10 w-[95px] align-middle min-h-[28px] ${rowBg}`}>
+        {canEdit && !isHoliday ? (
           <Select
             value={entryType}
             onChange={(e) => handleTypeChange(e.target.value as "ENGAGEMENT" | "SALES")}
@@ -590,8 +715,8 @@ function TimesheetEntryRow({
           <span className="text-xs font-medium">{ENTRY_TYPE_OPTIONS.find((o) => o.value === entryType)?.label ?? entryType}</span>
         )}
       </td>
-      <td className="px-2 py-1 sticky left-[95px] bg-inherit z-10 w-[135px] align-top">
-        {canEdit ? (
+      <td className={`px-2 py-1 sticky left-[95px] z-10 w-[135px] align-middle min-h-[28px] ${rowBg}`}>
+        {canEdit && !isHoliday ? (
           <Select
             value={entry.account_id || ""}
             onChange={(e) => {
@@ -648,8 +773,8 @@ function TimesheetEntryRow({
           accountName || "—"
         )}
       </td>
-      <td className="px-2 py-1 sticky left-[230px] bg-inherit z-10 w-[155px] align-top">
-        {canEdit ? (
+      <td className={`px-2 py-1 sticky left-[230px] z-10 w-[155px] align-middle min-h-[28px] ${rowBg}`}>
+        {canEdit && !isHoliday ? (
           isSales ? (
             <Select
               value={entry.opportunity_id || ""}
@@ -730,7 +855,7 @@ function TimesheetEntryRow({
           </span>
         )}
       </td>
-      <td className="px-2 py-1 w-[100px] align-top">
+      <td className={`px-2 py-1 w-[100px] align-middle min-h-[28px] ${rowBg}`}>
         {isSales ? (
           <Select
             value="sales"
@@ -739,6 +864,8 @@ function TimesheetEntryRow({
           >
             <option value="sales">Sales</option>
           </Select>
+        ) : isHoliday ? (
+          (entry as { phase_name?: string }).phase_name || "PTO"
         ) : canEdit && entry.engagement_id ? (
           <Select
             value={entry.engagement_phase_id || ""}
@@ -759,8 +886,8 @@ function TimesheetEntryRow({
           (entry as { phase_name?: string }).phase_name || "—"
         )}
       </td>
-      <td className="px-2 py-1 text-center align-top">
-        {canEdit ? (
+      <td className={`px-2 py-1 text-center align-middle min-h-[28px] ${rowBg}`}>
+        {canEdit && !isHoliday ? (
           <div className="flex justify-center">
             <Checkbox
               checked={!!entry.billable}
@@ -780,10 +907,10 @@ function TimesheetEntryRow({
       {DAY_KEYS.map((k, dayIndex) => (
         <td
           key={k}
-          className={`px-1 py-1 w-[56px] align-top ${dayIndex === 0 || dayIndex === 6 ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
+          className={`px-1 py-1 w-[56px] align-middle min-h-[28px] text-center ${isHoliday ? "bg-amber-50 dark:bg-amber-950/30" : (dayIndex === 0 || dayIndex === 6) ? "bg-blue-50/50 dark:bg-blue-900/10" : ""}`}
         >
-          {canEdit ? (
-            <div className="flex flex-col gap-0.5 items-center">
+          {canEdit && !isHoliday ? (
+            <div className="flex flex-col gap-0.5 items-center w-14 mx-auto">
               <Input
                 type="number"
                 min={0}
@@ -817,11 +944,13 @@ function TimesheetEntryRow({
               )}
             </div>
           ) : (
-            <span className="text-xs font-medium tabular-nums">{parseFloat(String(entry[`${k}_hours`])) || 0}</span>
+            <div className="w-14 h-7 mx-auto flex items-center justify-center">
+              <span className="text-xs font-medium tabular-nums">{(parseFloat(String(entry[`${k}_hours`])) || 0).toFixed(1)}</span>
+            </div>
           )}
         </td>
       ))}
-      <td className="px-2 py-1 text-center text-[11px] font-semibold tabular-nums align-top">
+      <td className={`px-2 py-1 text-center text-[11px] font-semibold tabular-nums align-middle min-h-[28px] ${rowBg}`}>
         {rowTotal.toFixed(1)}
         {rowTotal > 40 && (
           <span className="block text-[10px] text-amber-600 font-normal mt-0.5" title="Ensure you have approval from the project manager to exceed 40 hours.">
@@ -830,15 +959,17 @@ function TimesheetEntryRow({
         )}
       </td>
       {onDelete && (
-        <td className="px-1 py-1 align-top">
-          <button
-            type="button"
-            onClick={onDelete}
-            className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
-            aria-label="Delete row"
-          >
-            <Trash2 className="w-4 h-4" />
-          </button>
+        <td className={`px-1 py-1 align-middle min-h-[28px] ${rowBg}`}>
+          {(!isHoliday || !(entry as TimesheetEntry & { is_holiday_row?: boolean }).is_holiday_row) && (
+            <button
+              type="button"
+              onClick={onDelete}
+              className="p-1 rounded hover:bg-red-100 text-slate-400 hover:text-red-600 transition-colors"
+              aria-label="Delete row"
+            >
+              <Trash2 className="w-4 h-4" />
+            </button>
+          )}
         </td>
       )}
     </tr>

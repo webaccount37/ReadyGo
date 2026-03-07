@@ -23,6 +23,7 @@ class TimesheetEntryTypeEnum(str, Enum):
     """Timesheet entry type values."""
     ENGAGEMENT = "ENGAGEMENT"
     SALES = "SALES"
+    HOLIDAY = "HOLIDAY"
 
 
 # Day-of-week hours
@@ -119,7 +120,10 @@ class TimesheetEntryResponse(TimesheetDayHours):
     timesheet_id: UUID
     row_order: int
     entry_type: str
-    account_id: UUID
+    account_id: Optional[UUID] = None  # Null for Holiday rows (use account_display_name)
+    account_display_name: Optional[str] = None  # Display-only for Holiday: "Ready"
+    engagement_display_name: Optional[str] = None  # Display-only for Holiday: "PTO"
+    is_holiday_row: bool = False
     engagement_id: Optional[UUID] = None
     opportunity_id: Optional[UUID] = None
     engagement_line_item_id: Optional[UUID] = None
@@ -149,6 +153,7 @@ class TimesheetResponse(BaseModel):
     employee_name: Optional[str] = None
     total_hours: Decimal = Field(default=0)
     entries: Optional[List[TimesheetEntryResponse]] = None
+    rejection_note: Optional[str] = None  # Most recent rejection reason from status history
 
     class Config:
         from_attributes = True
@@ -165,6 +170,11 @@ class TimesheetSubmitRequest(BaseModel):
     force: bool = Field(default=False, description="Force submit despite plan vs actual warning")
 
 
+class RejectTimesheetRequest(BaseModel):
+    """Request schema for rejecting timesheet."""
+    note: str = Field(..., min_length=1, max_length=2000, description="Required reason for rejection")
+
+
 class TimesheetStatusHistoryResponse(BaseModel):
     """Response schema for status history entry."""
     id: UUID
@@ -174,6 +184,7 @@ class TimesheetStatusHistoryResponse(BaseModel):
     changed_by_employee_id: Optional[UUID] = None
     changed_by_name: Optional[str] = None
     changed_at: str
+    note: Optional[str] = None  # Rejection reason when from_status=SUBMITTED, to_status=REOPENED
 
     class Config:
         from_attributes = True
@@ -195,6 +206,31 @@ class TimesheetApprovalListResponse(BaseModel):
     """Response for list of timesheets pending approval."""
     items: List[TimesheetApprovalSummary]
     total: int
+
+
+# Alias for list_approvable_timesheets (same structure)
+TimesheetApprovableListResponse = TimesheetApprovalListResponse
+
+
+class ManageableEmployeeSummary(BaseModel):
+    """Summary of an employee the approver can manage."""
+    id: UUID
+    first_name: str
+    last_name: str
+    email: str
+
+    class Config:
+        from_attributes = True
+
+
+class ManageableEmployeesResponse(BaseModel):
+    """Response for list of manageable employees."""
+    items: List[ManageableEmployeeSummary]
+    total: int
+
+
+# Alias (same structure)
+ManageableEmployeeListResponse = ManageableEmployeesResponse
 
 
 class TimesheetMassApproveRequest(BaseModel):

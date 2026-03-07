@@ -13,6 +13,7 @@ from app.schemas.calendar import (
     CalendarUpdate,
     CalendarResponse,
     CalendarListResponse,
+    ImportPublicHolidaysRequest,
 )
 
 router = APIRouter()
@@ -30,24 +31,34 @@ async def create_calendar_entry(
 
 @router.get("", response_model=CalendarListResponse)
 async def list_calendar_entries(
+    year: int = Query(..., ge=2000, le=2100, description="Year"),
+    delivery_center_id: UUID = Query(..., description="Delivery center ID"),
     skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-    year: int = Query(None, ge=2000, le=2100),
-    month: int = Query(None, ge=1, le=12),
-    is_holiday: bool = Query(None),
-    financial_period: str = Query(None),
+    limit: int = Query(500, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
 ) -> CalendarListResponse:
-    """List calendar entries with optional filters."""
+    """List calendar entries for a year and delivery center."""
     controller = CalendarController(db)
     return await controller.list_calendar_entries(
+        year=year,
+        delivery_center_id=delivery_center_id,
         skip=skip,
         limit=limit,
-        year=year,
-        month=month,
-        is_holiday=is_holiday,
-        financial_period=financial_period,
     )
+
+
+@router.post("/import-public-holidays")
+async def import_public_holidays(
+    body: ImportPublicHolidaysRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Import public holidays from date.nager.at API for the given year and delivery center."""
+    controller = CalendarController(db)
+    try:
+        count = await controller.import_public_holidays(body.year, body.delivery_center_id)
+        return {"imported": count}
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 @router.get("/{calendar_id}", response_model=CalendarResponse)
@@ -58,24 +69,6 @@ async def get_calendar_entry(
     """Get calendar entry by ID."""
     controller = CalendarController(db)
     calendar = await controller.get_calendar_entry(calendar_id)
-    if not calendar:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Calendar entry not found",
-        )
-    return calendar
-
-
-@router.get("/date/{year}/{month}/{day}", response_model=CalendarResponse)
-async def get_calendar_by_date(
-    year: int,
-    month: int,
-    day: int,
-    db: AsyncSession = Depends(get_db),
-) -> CalendarResponse:
-    """Get calendar entry by date."""
-    controller = CalendarController(db)
-    calendar = await controller.get_by_date(year, month, day)
     if not calendar:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

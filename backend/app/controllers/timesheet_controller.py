@@ -40,6 +40,16 @@ class TimesheetController(BaseController):
     ) -> Optional[TimesheetResponse]:
         return await self.timesheet_service.get_timesheet(timesheet_id, current_employee_id)
 
+    async def get_timesheet_for_week(
+        self,
+        employee_id: UUID,
+        week_start_date: date,
+        current_employee_id: UUID,
+    ) -> Optional[TimesheetResponse]:
+        return await self.timesheet_service.get_timesheet_for_week(
+            employee_id, week_start_date, current_employee_id
+        )
+
     async def save_entries(
         self,
         timesheet_id: UUID,
@@ -73,9 +83,10 @@ class TimesheetController(BaseController):
         self,
         timesheet_id: UUID,
         approver_employee_id: UUID,
+        note: str,
     ) -> TimesheetResponse:
         return await self.approval_service.reject_timesheet(
-            timesheet_id, approver_employee_id
+            timesheet_id, approver_employee_id, note
         )
 
     async def reopen_timesheet(
@@ -100,6 +111,24 @@ class TimesheetController(BaseController):
         return await self.approval_service.list_pending_approvals(
             approver_employee_id, skip, limit
         )
+
+    async def list_approvable_timesheets(
+        self,
+        approver_employee_id: UUID,
+        status: Optional[str] = None,
+        employee_id: Optional[UUID] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> TimesheetApprovalListResponse:
+        return await self.approval_service.list_approvable_timesheets(
+            approver_employee_id, status=status, employee_id=employee_id, skip=skip, limit=limit
+        )
+
+    async def list_manageable_employees(
+        self,
+        approver_employee_id: UUID,
+    ):
+        return await self.approval_service.list_manageable_employees(approver_employee_id)
 
     async def count_incomplete_past_weeks(self, employee_id: UUID) -> int:
         return await self.timesheet_service.count_incomplete_past_weeks(employee_id)

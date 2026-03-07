@@ -4,36 +4,30 @@
 
 export interface Calendar {
   id: string;
+  date: string;
+  name: string;
+  country_code: string;
+  hours: number;
   year: number;
-  month: number;
-  day: number;
-  is_holiday: boolean;
-  holiday_name?: string;
-  financial_period?: string;
-  working_hours: number;
-  notes?: string;
+  delivery_center_id: string;
 }
 
 export interface CalendarCreate {
+  date: string;
+  name: string;
+  country_code: string;
+  hours?: number;
   year: number;
-  month: number;
-  day: number;
-  is_holiday?: boolean;
-  holiday_name?: string;
-  financial_period?: string;
-  working_hours?: number;
-  notes?: string;
+  delivery_center_id: string;
 }
 
 export interface CalendarUpdate {
+  date?: string;
+  name?: string;
+  country_code?: string;
+  hours?: number;
   year?: number;
-  month?: number;
-  day?: number;
-  is_holiday?: boolean;
-  holiday_name?: string;
-  financial_period?: string;
-  working_hours?: number;
-  notes?: string;
+  delivery_center_id?: string;
 }
 
 export type CalendarResponse = Calendar;
@@ -43,13 +37,7 @@ export interface CalendarListResponse {
   total: number;
 }
 
-
-
-
-
-
-
-
-
-
-
+export interface ImportPublicHolidaysRequest {
+  year: number;
+  delivery_center_id: string;
+}
