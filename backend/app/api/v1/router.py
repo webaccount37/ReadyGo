@@ -25,6 +25,7 @@ from app.api.v1.endpoints import (
     quotes,
     engagements,
     timesheets,
+    staffing_forecast,
 )
 
 api_router = APIRouter()
@@ -119,6 +120,12 @@ api_router.include_router(
     timesheets.router,
     prefix="/timesheets",
     tags=["timesheets"],
+    dependencies=[Depends(require_authentication)],
+)
+api_router.include_router(
+    staffing_forecast.router,
+    prefix="/staffing-forecast",
+    tags=["staffing-forecast"],
     dependencies=[Depends(require_authentication)],
 )
 
