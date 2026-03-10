@@ -440,14 +440,24 @@ class TimesheetApprovalService(BaseService):
         limit: int = 100,
     ) -> TimesheetApprovalListResponse:
         """List timesheets the approver can manage, with optional status and employee filters."""
+        from app.services.timesheet_service import TimesheetService
+
+        ts_service = TimesheetService(self.session)
+
         # Ensure timesheets exist for employees on engagements (so approvers see them even if employee hasn't visited)
         eng_ids = await self.eng_approver_repo.list_engagement_ids_by_approver(approver_employee_id)
         opp_dc_eng_ids = await self._get_engagement_ids_for_opp_dc_approver(approver_employee_id)
         all_eng_ids = list(set(eng_ids) | set(opp_dc_eng_ids))
         if all_eng_ids:
-            from app.services.timesheet_service import TimesheetService
-            ts_service = TimesheetService(self.session)
             await ts_service.ensure_timesheets_for_engagement_employees(all_eng_ids)
+
+        # Ensure timesheets exist for ALL employees in approver's delivery centers.
+        # Employees must submit timesheets every week (even without engagements), from start_date onward.
+        dc_repo = DeliveryCenterApproverRepository(self.session)
+        approver_dcs = await dc_repo.get_by_employee(approver_employee_id)
+        approver_dc_ids = [a.delivery_center_id for a in approver_dcs if a.delivery_center_id]
+        if approver_dc_ids:
+            await ts_service.ensure_timesheets_for_dc_employees(approver_dc_ids)
 
         status_enum = TimesheetStatus(status) if status else None
         timesheets = await self.timesheet_repo.list_approvable_timesheets_for_approver(

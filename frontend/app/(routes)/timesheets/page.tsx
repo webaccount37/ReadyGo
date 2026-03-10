@@ -46,6 +46,16 @@ import type { TimesheetEntry, TimesheetEntryUpsert } from "@/types/timesheet";
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
 
+function getWeekDates(weekStart: Date): string[] {
+  return Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(weekStart);
+    d.setDate(weekStart.getDate() + i);
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${m}/${day}`;
+  });
+}
+
 /** Sort order for Time Entries: Holiday first, then Engagement, then Sales. Applied on load and after Save. */
 const ENTRY_TYPE_ORDER: Record<string, number> = {
   HOLIDAY: 0,
@@ -529,6 +539,20 @@ function TimesheetPageContent() {
               <div className="min-w-[860px]">
                 <table className="w-full text-[11px] border-collapse table-fixed">
                   <thead>
+                    {/* Date row (MM/DD) above day names */}
+                    <tr className="border-b border-slate-200/60 bg-slate-50/80 dark:bg-slate-800/60">
+                      <th colSpan={5} className="px-2 py-0.5"></th>
+                      {getWeekDates(weekRange.start).map((dateStr, i) => (
+                        <th
+                          key={dateStr}
+                          className={`px-1 py-0.5 text-center text-[10px] font-normal text-slate-600 dark:text-slate-400 w-[56px] ${i === 0 || i === 6 ? "bg-blue-100/60 dark:bg-blue-900/20" : ""}`}
+                        >
+                          {dateStr}
+                        </th>
+                      ))}
+                      <th className="px-2 py-0.5 w-[50px]"></th>
+                      {canEdit && <th className="px-1 py-0.5 w-[36px]"></th>}
+                    </tr>
                     <tr className="border-b bg-slate-100/80 dark:bg-slate-800/80">
                       <th className="px-2 py-1.5 text-left font-medium sticky left-0 bg-slate-100 dark:bg-slate-800 z-10 w-[95px]">Type</th>
                       <th className="px-2 py-1.5 text-left font-medium sticky left-[95px] bg-slate-100 dark:bg-slate-800 z-10 w-[135px]">Account</th>

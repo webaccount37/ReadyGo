@@ -31,7 +31,7 @@ from app.models.timesheet import (
     HOLIDAY_DISMISSED_SENTINEL,
 )
 from app.models.engagement import EngagementLineItem, EngagementPhase, EngagementWeeklyHours
-from app.models.employee import Employee
+from app.models.employee import Employee, EmployeeStatus
 from app.models.quote import InvoiceDetail
 from app.utils.currency_converter import convert_currency
 from app.schemas.timesheet import (
@@ -150,6 +150,62 @@ class TimesheetService(BaseService):
                 range_end = end_of_current_week
             while week_start <= range_end:
                 if week_end >= start_date and (not end_date or week_start <= end_date):
+                    key = (employee_id, week_start)
+                    if key not in seen:
+                        seen.add(key)
+                        existing = await self.timesheet_repo.get_by_employee_and_week(
+                            employee_id, week_start
+                        )
+                        if not existing:
+                            ts = await self.timesheet_repo.create(
+                                employee_id=employee_id,
+                                week_start_date=week_start,
+                                status=TimesheetStatus.NOT_SUBMITTED,
+                            )
+                            await self._default_entries_from_resource_plan(ts)
+                            await self._add_holiday_entries(ts)
+                week_start += timedelta(days=7)
+                week_end = week_start + timedelta(days=6)
+        if seen:
+            await self.session.commit()
+
+    async def ensure_timesheets_for_dc_employees(
+        self, delivery_center_ids: List[UUID], max_weeks_back: int = 12
+    ) -> None:
+        """Create missing timesheets for ALL employees in these delivery centers.
+        Timesheets are required every week from employee start_date through current week.
+        Employees need to submit timesheets even without engagements.
+        Does not create timesheets for weeks before employee start_date.
+        """
+        if not delivery_center_ids:
+            return
+        result = await self.session.execute(
+            select(Employee.id, Employee.start_date).where(
+                Employee.delivery_center_id.in_(delivery_center_ids),
+                Employee.status.in_([EmployeeStatus.ACTIVE, EmployeeStatus.ON_LEAVE]),
+            )
+        )
+        rows = result.fetchall()
+        today = date.today()
+        end_of_current_week = _get_week_start(today) + timedelta(days=6)
+        oldest_week = today - timedelta(days=7 * max_weeks_back)
+        oldest_week_start = _get_week_start(oldest_week)
+
+        seen: set[tuple[UUID, date]] = set()
+        for employee_id, emp_start_date in rows:
+            if not employee_id or not emp_start_date:
+                continue
+            # First week = week containing employee start_date (timesheets not required before)
+            week_start = _get_week_start(emp_start_date)
+            if week_start < oldest_week_start:
+                week_start = oldest_week_start
+            week_end = week_start + timedelta(days=6)
+            # Skip if week ends before employee started
+            if week_end < emp_start_date:
+                week_start += timedelta(days=7)
+                week_end = week_start + timedelta(days=6)
+            while week_start <= end_of_current_week:
+                if week_end >= emp_start_date:
                     key = (employee_id, week_start)
                     if key not in seen:
                         seen.add(key)
@@ -420,29 +476,13 @@ class TimesheetService(BaseService):
             dc_id, week_start, week_end
         )
         if not events:
-            # Still add 0-hour holiday row so Load Defaults restores consistent base structure
-            max_row = max((e.row_order for e in existing_entries), default=-1)
-            await self.entry_repo.create(
-                timesheet_id=timesheet.id,
-                row_order=max_row + 1,
-                entry_type=TimesheetEntryType.HOLIDAY,
-                account_id=None,
-                account_display_name="Ready",
-                engagement_display_name="PTO",
-                engagement_id=None,
-                opportunity_id=None,
-                engagement_phase_id=None,
-                billable=False,
-                is_holiday_row=True,
-                sun_hours=Decimal("0"),
-                mon_hours=Decimal("0"),
-                tue_hours=Decimal("0"),
-                wed_hours=Decimal("0"),
-                thu_hours=Decimal("0"),
-                fri_hours=Decimal("0"),
-                sat_hours=Decimal("0"),
-            )
-            await self.session.flush()
+            return
+        hours_by_dow = [Decimal("0")] * 7
+        for ev in events:
+            dow = (ev.date.weekday() + 1) % 7
+            hours_by_dow[dow] += Decimal(str(ev.hours or 8))
+        if sum(hours_by_dow) == 0:
+            # Do not add a holiday row when total hours would be 0 (no holidays or all 0-hour events).
             return
         logger.info(
             "Timesheet holiday: adding row for timesheet %s (dc=%s, week %s–%s, %d events)",
@@ -452,10 +492,6 @@ class TimesheetService(BaseService):
             week_end,
             len(events),
         )
-        hours_by_dow = [Decimal("0")] * 7
-        for ev in events:
-            dow = (ev.date.weekday() + 1) % 7
-            hours_by_dow[dow] += Decimal(str(ev.hours or 8))
         max_row = max((e.row_order for e in existing_entries), default=-1)
         await self.entry_repo.create(
             timesheet_id=timesheet.id,
