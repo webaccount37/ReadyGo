@@ -14,7 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { DeliveryCenterForm } from "@/components/delivery-centers/delivery-center-form";
 import { DeliveryCenterApprovers } from "@/components/delivery-centers/delivery-center-approvers";
-import { Trash2 } from "lucide-react";
+import { Trash2, Pencil, Eye } from "lucide-react";
 import type { DeliveryCenterCreate, DeliveryCenterUpdate, DeliveryCenter } from "@/types/delivery-center";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -161,7 +161,7 @@ function DeliveryCentersPageContent() {
       {!isLoading && !error && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="px-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <CardTitle>Delivery Centers ({data?.total ?? 0})</CardTitle>
                 <div className="w-full sm:w-64">
@@ -175,21 +175,30 @@ function DeliveryCentersPageContent() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2">
               {filteredItems.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full">
+                    <div className="hidden md:block w-full overflow-hidden">
+                      <table className="w-full text-xs table-fixed border-collapse">
+                        <colgroup>
+                          <col style={{ width: "22%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "16%" }} />
+                        </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Name</th>
-                            <th className="text-left p-3 font-semibold">Code</th>
-                            <th className="text-left p-3 font-semibold">Country</th>
-                            <th className="text-left p-3 font-semibold">Default Currency</th>
-                            <th className="text-left p-3 font-semibold">Opportunities</th>
-                            <th className="text-left p-3 font-semibold">Employees</th>
-                            <th className="text-left p-3 font-semibold">Actions</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center Name">Name</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Code">Code</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Country Code">Country</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Default Currency">Currency</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Count">Opps</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Count">Employees</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -199,65 +208,81 @@ function DeliveryCentersPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingDeliveryCenter(dc)}
                           >
-                            <td className="p-3 font-medium">{highlightText(dc.name, searchQuery)}</td>
-                            <td className="p-3">
-                              <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 font-mono">
+                            <td className="p-1.5 font-medium text-xs overflow-hidden" title={dc.name}>
+                              <span className="truncate block">{highlightText(dc.name, searchQuery)}</span>
+                            </td>
+                            <td className="p-1.5 overflow-hidden min-w-0">
+                              <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-800 font-mono">
                                 {highlightText(dc.code, searchQuery)}
                               </span>
                             </td>
-                            <td className="p-3">
+                            <td className="p-1.5 overflow-hidden min-w-0">
                               {dc.country_code ? (
-                                <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800 font-mono uppercase">
+                                <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-800 font-mono uppercase">
                                   {highlightText(dc.country_code, searchQuery)}
                                 </span>
                               ) : (
-                                <span className="text-gray-400">—</span>
+                                <span className="text-gray-500">—</span>
                               )}
                             </td>
-                            <td className="p-3">
-                              <span className="px-2 py-1 text-xs rounded border border-gray-200 text-gray-700 bg-white">
+                            <td className="p-1.5 overflow-hidden min-w-0">
+                              <span className="px-2 py-0.5 text-xs rounded border border-gray-200 text-gray-700 bg-white">
                                 {highlightText(dc.default_currency, searchQuery)}
                               </span>
                             </td>
-                            <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-1.5 text-xs overflow-hidden min-w-0" onClick={(e) => e.stopPropagation()}>
                               <Link
                                 href={`/opportunities?search=${encodeURIComponent(dc.name)}`}
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
                               >
                                 {opportunityCounts[dc.id] ?? 0}
                               </Link>
                             </td>
-                            <td className="p-3" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-1.5 text-xs overflow-hidden min-w-0" onClick={(e) => e.stopPropagation()}>
                               <Link
                                 href={`/employees?search=${encodeURIComponent(dc.name)}`}
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
                               >
                                 {employeeCounts[dc.id] ?? 0}
                               </Link>
                             </td>
-                            <td className="p-3">
-                          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setViewingDeliveryCenter(dc)}
-                            >
-                              View
-                            </Button>
+                            <td className="p-1 overflow-hidden min-w-0">
+                              <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setEditingDeliveryCenter(dc.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setViewingDeliveryCenter(dc);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="View"
                                 >
-                                  Edit
+                                  <Eye className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleDelete(dc.id)}
-                                  className="text-red-600 hover:text-red-700"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingDeliveryCenter(dc.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="Edit"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Pencil className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(dc.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-3 h-3" />
                                 </Button>
                               </div>
                             </td>
@@ -335,30 +360,33 @@ function DeliveryCentersPageContent() {
                                 {employeeCounts[dc.id] ?? 0}
                               </Link>
                             </div>
-                            <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-nowrap gap-0.5 justify-start pt-2" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setViewingDeliveryCenter(dc)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="View"
                               >
-                                View
+                                <Eye className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setEditingDeliveryCenter(dc.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="Edit"
                               >
-                                Edit
+                                <Pencil className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleDelete(dc.id)}
-                                className="flex-1 text-red-600 hover:text-red-700"
+                                className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                title="Delete"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3 h-3" />
                               </Button>
                             </div>
                           </div>

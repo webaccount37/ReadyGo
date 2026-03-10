@@ -11,7 +11,7 @@ import {
   useDeleteCurrencyRate,
 } from "@/hooks/useCurrencyRates";
 import type { CurrencyRateCreate, CurrencyRateUpdate } from "@/types/currency-rate";
-import { Plus, Trash2, Save, X } from "lucide-react";
+import { Plus, Trash2, Save, X, Pencil } from "lucide-react";
 
 export function CurrencyRatesManager() {
   const { data, isLoading, error } = useCurrencyRates({ limit: 1000 });
@@ -144,7 +144,7 @@ export function CurrencyRatesManager() {
       </div>
 
       <div className="bg-white dark:bg-gray-800 rounded-lg shadow">
-        <div className="p-4 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
+        <div className="px-2 py-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
           <h2 className="text-lg font-semibold">Currency Rates</h2>
           {!showAddForm && (
             <Button
@@ -208,20 +208,26 @@ export function CurrencyRatesManager() {
           </div>
         )}
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
+        <div className="w-full overflow-hidden">
+          <table className="w-full text-xs table-fixed border-collapse">
+            <colgroup>
+              <col style={{ width: "20%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "42%" }} />
+              <col style={{ width: "14%" }} />
+            </colgroup>
             <thead className="bg-gray-50 dark:bg-gray-900">
               <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="text-left p-1.5 font-semibold whitespace-nowrap text-gray-500 dark:text-gray-400">
                   Currency Code
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="text-left p-1.5 font-semibold whitespace-nowrap text-gray-500 dark:text-gray-400">
                   Rate to USD
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="text-left p-1.5 font-semibold whitespace-nowrap text-gray-500 dark:text-gray-400">
                   Example
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                <th className="text-left p-1.5 font-semibold whitespace-nowrap text-gray-500 dark:text-gray-400">
                   Actions
                 </th>
               </tr>
@@ -229,20 +235,20 @@ export function CurrencyRatesManager() {
             <tbody className="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
               {sortedRates.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={4} className="p-1.5 text-center text-gray-500 text-xs">
                     No currency rates found. Add one to get started.
                   </td>
                 </tr>
               ) : (
                 sortedRates.map((rate) => (
                   <tr key={rate.id} className="hover:bg-gray-50 dark:hover:bg-gray-900">
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className="font-medium">{rate.currency_code}</span>
+                    <td className="p-1.5 overflow-hidden min-w-0">
+                      <span className="font-medium text-xs">{rate.currency_code}</span>
                       {rate.currency_code.toUpperCase() === "USD" && (
-                        <span className="ml-2 text-xs text-gray-500 dark:text-gray-400">(Base)</span>
+                        <span className="ml-1 text-xs text-gray-500 dark:text-gray-400">(Base)</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
+                    <td className="p-1.5 overflow-hidden min-w-0">
                       {editingId === rate.id ? (
                         <Input
                           type="number"
@@ -250,46 +256,50 @@ export function CurrencyRatesManager() {
                           min="0.01"
                           value={editRate ?? ""}
                           onChange={(e) => setEditRate(parseFloat(e.target.value))}
-                          className="w-32"
+                          className="w-24 h-7 text-xs"
                           autoFocus
                         />
                       ) : (
-                        <span>{rate.rate_to_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
+                        <span className="text-xs">{rate.rate_to_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })}</span>
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                    <td className="p-1.5 overflow-hidden min-w-0 text-xs text-gray-500 dark:text-gray-400 truncate" title={rate.currency_code.toUpperCase() === "USD" ? "1 USD = 1 USD" : `1 USD = ${rate.rate_to_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${rate.currency_code}`}>
                       {rate.currency_code.toUpperCase() === "USD" ? (
                         "1 USD = 1 USD"
                       ) : (
                         `1 USD = ${rate.rate_to_usd.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })} ${rate.currency_code}`
                       )}
                     </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <td className="p-1 overflow-hidden min-w-0">
                       {editingId === rate.id ? (
-                        <div className="flex justify-end gap-2">
+                        <div className="flex flex-nowrap gap-0.5 justify-start">
                           <Button
                             size="sm"
                             onClick={() => handleSave(rate.id)}
                             disabled={updateMutation.isPending}
+                            className="h-5 w-5 p-0 shrink-0"
                           >
-                            <Save className="w-4 h-4" />
+                            <Save className="w-3 h-3" />
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={handleCancelEdit}
+                            className="h-5 w-5 p-0 shrink-0"
                           >
-                            <X className="w-4 h-4" />
+                            <X className="w-3 h-3" />
                           </Button>
                         </div>
                       ) : (
-                        <div className="flex justify-end gap-2">
+                        <div className="flex flex-nowrap gap-0.5 justify-start">
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => handleEdit(rate)}
+                            className="h-5 w-5 p-0 shrink-0"
+                            title="Edit"
                           >
-                            Edit
+                            <Pencil className="w-3 h-3" />
                           </Button>
                           {rate.currency_code.toUpperCase() !== "USD" && (
                             <Button
@@ -297,9 +307,10 @@ export function CurrencyRatesManager() {
                               variant="outline"
                               onClick={() => handleDelete(rate.id, rate.currency_code)}
                               disabled={deleteMutation.isPending}
-                              className="text-red-600 hover:text-red-700"
+                              className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                              title="Delete"
                             >
-                              <Trash2 className="w-4 h-4" />
+                              <Trash2 className="w-3 h-3" />
                             </Button>
                           )}
                         </div>

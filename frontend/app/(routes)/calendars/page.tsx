@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import {
   useCalendars,
   useCreateCalendar,
@@ -174,46 +175,65 @@ export default function CalendarsPage() {
       {!isLoading && !error && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="px-2">
               <CardTitle>Calendar Entries ({data?.total ?? 0})</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2">
               {data?.items && data.items.length > 0 ? (
                 <>
                   {/* Desktop Table View */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full">
+                  <div className="hidden md:block w-full overflow-hidden">
+                    <table className="w-full text-xs table-fixed border-collapse">
+                      <colgroup>
+                        <col style={{ width: "18%" }} />
+                        <col style={{ width: "30%" }} />
+                        <col style={{ width: "16%" }} />
+                        <col style={{ width: "10%" }} />
+                        <col style={{ width: "18%" }} />
+                      </colgroup>
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left p-3 font-semibold">Date</th>
-                          <th className="text-left p-3 font-semibold">Name</th>
-                          <th className="text-left p-3 font-semibold">Country Code</th>
-                          <th className="text-left p-3 font-semibold">Hours</th>
-                          <th className="text-left p-3 font-semibold">Actions</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Date">Date</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Name">Name</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Country Code">Country</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Hours">Hours</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {data.items.map((calendar) => (
-                          <tr key={calendar.id} className="border-b hover:bg-gray-50">
-                            <td className="p-3 font-medium">{calendar.date}</td>
-                            <td className="p-3">{calendar.name || "—"}</td>
-                            <td className="p-3">{calendar.country_code || "—"}</td>
-                            <td className="p-3">{calendar.hours}h</td>
-                            <td className="p-3">
-                              <div className="flex gap-2">
+                          <tr key={calendar.id} className="border-b hover:bg-gray-50 cursor-pointer" onClick={() => setEditingCalendar(calendar.id)}>
+                            <td className="p-1.5 font-medium text-xs overflow-hidden whitespace-nowrap" title={calendar.date}>{calendar.date}</td>
+                            <td className="p-1.5 text-xs overflow-hidden min-w-0" title={calendar.name || "—"}>
+                              <span className="truncate block">{calendar.name || "—"}</span>
+                            </td>
+                            <td className="p-1.5 overflow-hidden min-w-0">
+                              {calendar.country_code ? (
+                                <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-800 font-mono uppercase">{calendar.country_code}</span>
+                              ) : (
+                                <span className="text-gray-500">—</span>
+                              )}
+                            </td>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0">{calendar.hours}h</td>
+                            <td className="p-1 overflow-hidden min-w-0">
+                              <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setEditingCalendar(calendar.id)}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="Edit"
                                 >
-                                  Edit
+                                  <Pencil className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
-                                  variant="destructive"
+                                  variant="outline"
                                   onClick={() => handleDelete(calendar.id)}
+                                  className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                  title="Delete"
                                 >
-                                  Delete
+                                  <Trash2 className="w-3 h-3" />
                                 </Button>
                               </div>
                             </td>
@@ -255,22 +275,24 @@ export default function CalendarsPage() {
                                 <div className="text-sm">{calendar.hours}h</div>
                               </div>
                             </div>
-                            <div className="flex gap-2 pt-2">
+                            <div className="flex flex-nowrap gap-0.5 justify-start pt-2">
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setEditingCalendar(calendar.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="Edit"
                               >
-                                Edit
+                                <Pencil className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
-                                variant="destructive"
+                                variant="outline"
                                 onClick={() => handleDelete(calendar.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                title="Delete"
                               >
-                                Delete
+                                <Trash2 className="w-3 h-3" />
                               </Button>
                             </div>
                           </div>

@@ -25,6 +25,10 @@ export interface Account {
   created_at: string;
   contact_count?: number;
   opportunities_count?: number;
+  forecast_sum?: number;
+  plan_sum?: number;
+  actuals_sum?: number;
+  has_locked_opportunities?: boolean;
 }
 
 export interface AccountCreate {

@@ -22,7 +22,6 @@ import {
   Users,
   Shield,
   Calendar,
-  Network,
   DollarSign,
   MapPin,
   Clock,
@@ -91,9 +90,6 @@ const navGroups: NavGroup[] = [
       { title: "Employees", href: "/employees", icon: Users },
       { title: "Roles", href: "/roles", icon: Shield },
     ],
-  },
-  {
-    items: [{ title: "Relationships", href: "/test-relationships", icon: Network }],
   },
 ];
 

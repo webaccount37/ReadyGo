@@ -81,6 +81,10 @@ export interface Engagement {
   quote_display_name?: string;
   line_items?: EngagementLineItem[];
   phases?: EngagementPhase[];
+  plan_amount?: string | number;
+  actuals_amount?: string | number;
+  revenue_deviation_percentage?: string | number;
+  plan_vs_actuals_revenue_deviation_percentage?: string | number;
 }
 
 export interface EngagementTimesheetApprover {

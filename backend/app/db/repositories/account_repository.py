@@ -5,7 +5,7 @@ Account repository for database operations.
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
@@ -39,6 +39,15 @@ class AccountRepository(BaseRepository[Account]):
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+    
+    async def count(self, **filters) -> int:
+        """Count accounts matching filters."""
+        query = select(func.count(Account.id))
+        for key, value in filters.items():
+            if hasattr(Account, key):
+                query = query.where(getattr(Account, key) == value)
+        result = await self.session.execute(query)
+        return result.scalar_one() or 0
     
     async def get(self, id: UUID) -> Optional[Account]:
         """Get account by ID with billing_term relationship loaded."""

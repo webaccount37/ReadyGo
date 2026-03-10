@@ -10,7 +10,7 @@ import {
   useAccount,
 } from "@/hooks/useAccounts";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, Pencil, Eye } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { AccountForm } from "@/components/accounts/account-form";
@@ -19,6 +19,7 @@ import type { AccountCreate, AccountUpdate, Account } from "@/types/account";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
 import { getAccountTypeColor, getAccountTypeLabel } from "@/lib/utils/account-type";
+import { cn } from "@/lib/utils";
 import Link from "next/link";
 
 function AccountsPageContent() {
@@ -102,6 +103,8 @@ function AccountsPageContent() {
   };
 
   const handleDelete = async (id: string) => {
+    const account = data?.items.find((a) => a.id === id);
+    if (account?.has_locked_opportunities) return;
     if (confirm("Are you sure you want to delete this account?")) {
       try {
         await deleteAccount.mutateAsync(id);
@@ -116,6 +119,21 @@ function AccountsPageContent() {
   const accountToEdit = editingAccount
     ? data?.items.find((a) => a.id === editingAccount)
     : null;
+
+  const formatCurrency = (amount: number | undefined, currency: string = "USD") => {
+    if (amount == null || amount === undefined) return "—";
+    if (isNaN(amount)) return "—";
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency,
+    }).format(amount);
+  };
+
+  const formatLocation = (account: Account) => {
+    const parts = [account.city, account.region].filter(Boolean);
+    if (parts.length) return parts.join(", ");
+    return account.country || "—";
+  };
 
   return (
     <div>
@@ -144,7 +162,7 @@ function AccountsPageContent() {
       {!isLoading && !error && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="px-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <CardTitle>Accounts ({data?.total ?? 0})</CardTitle>
                 <div className="w-full sm:w-64">
@@ -158,20 +176,34 @@ function AccountsPageContent() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2">
               {filteredItems.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full">
+                    <div className="hidden md:block w-full overflow-hidden">
+                      <table className="w-full text-xs table-fixed border-collapse">
+                        <colgroup>
+                          <col style={{ width: "18%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "14%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "9%" }} />
+                          <col style={{ width: "9%" }} />
+                          <col style={{ width: "9%" }} />
+                          <col style={{ width: "13%" }} />
+                        </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Company Name</th>
-                            <th className="text-left p-3 font-semibold">Type</th>
-                            <th className="text-left p-3 font-semibold">Location</th>
-                            <th className="text-left p-3 font-semibold">Contacts</th>
-                            <th className="text-left p-3 font-semibold">Opportunities</th>
-                            <th className="text-left p-3 font-semibold">Actions</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Company Name">Company</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account Type">Type</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Location">Location</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Contact Count">Contacts</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Count">Opps</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Forecast Value (USD)">Forecast $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Plan Revenue (USD)">Plan $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Actuals (USD)">Actuals $</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -181,87 +213,106 @@ function AccountsPageContent() {
                               className="border-b hover:bg-gray-50 cursor-pointer"
                               onClick={() => setViewingAccount(account)}
                             >
-                              <td className="p-3">
-                                <div className="font-medium">{highlightText(account.company_name, searchQuery)}</div>
+                              <td className="p-1.5 font-medium text-xs overflow-hidden" title={account.company_name}>
+                                <div className="truncate">{highlightText(account.company_name, searchQuery)}</div>
                                 {account.industry && (
-                                  <div className="text-sm text-gray-500">{highlightText(account.industry, searchQuery)}</div>
+                                  <div className="text-xs text-gray-500 truncate">{highlightText(account.industry, searchQuery)}</div>
                                 )}
                               </td>
-                              <td className="p-3">
+                              <td className="p-1.5 overflow-hidden min-w-0">
                                 {account.type ? (
                                   <span
-                                    className={`px-2 py-1 text-xs rounded font-medium ${getAccountTypeColor(account.type).bg} ${getAccountTypeColor(account.type).text}`}
+                                    className={`px-2 py-0.5 text-xs rounded font-medium ${getAccountTypeColor(account.type).bg} ${getAccountTypeColor(account.type).text}`}
                                     style={{ backgroundColor: getAccountTypeColor(account.type).bgColor }}
                                   >
                                     {getAccountTypeLabel(account.type)}
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">
-                                    —
-                                  </span>
+                                  <span className="text-gray-500">—</span>
                                 )}
                               </td>
-                              <td className="p-3">
-                                <div className="text-sm">
-                                  {account.city && account.region
-                                    ? highlightText(`${account.city}, ${account.region}`, searchQuery)
-                                    : account.city || account.region || "—"}
-                                </div>
-                                <div className="text-sm text-gray-500">{highlightText(account.country, searchQuery)}</div>
+                              <td className="p-1.5 truncate text-xs overflow-hidden" title={formatLocation(account)}>
+                                {formatLocation(account)}
                               </td>
-                              <td className="p-3">
+                              <td className="p-1.5 text-xs overflow-hidden min-w-0">
                                 <Link
                                   href={`/contacts?search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-blue-600 hover:text-blue-800 underline"
+                                  className="text-blue-600 hover:text-blue-800 hover:underline"
                                 >
                                   {account.contact_count ?? 0}
                                 </Link>
                               </td>
-                              <td className="p-3">
+                              <td className="p-1.5 text-xs overflow-hidden min-w-0">
                                 <Link
                                   href={`/opportunities?account_id=${account.id}&search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-blue-600 hover:text-blue-800 underline"
+                                  className="text-blue-600 hover:text-blue-800 hover:underline"
                                 >
                                   {account.opportunities_count ?? 0}
                                 </Link>
                               </td>
-                            <td className="p-3">
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setViewingAccount(account);
-                                  }}
-                                >
-                                  View
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setEditingAccount(account.id);
-                                  }}
-                                >
-                                  Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleDelete(account.id);
-                                  }}
-                                  className="text-red-600 hover:text-red-700"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </div>
-                            </td>
+                              <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={account.forecast_sum != null ? formatCurrency(account.forecast_sum, "USD") : "—"}>
+                                {account.forecast_sum != null && account.forecast_sum !== undefined && account.forecast_sum !== 0
+                                  ? formatCurrency(account.forecast_sum, "USD")
+                                  : "—"}
+                              </td>
+                              <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={account.plan_sum != null ? formatCurrency(account.plan_sum, "USD") : "—"}>
+                                {account.plan_sum != null && account.plan_sum !== undefined && account.plan_sum !== 0
+                                  ? formatCurrency(account.plan_sum, "USD")
+                                  : "—"}
+                              </td>
+                              <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={account.actuals_sum != null ? formatCurrency(account.actuals_sum, "USD") : "—"}>
+                                {account.actuals_sum != null && account.actuals_sum !== undefined && account.actuals_sum !== 0
+                                  ? formatCurrency(account.actuals_sum, "USD")
+                                  : "—"}
+                              </td>
+                              <td className="p-1 overflow-hidden min-w-0">
+                                <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setViewingAccount(account);
+                                    }}
+                                    className="h-5 w-5 p-0 shrink-0"
+                                    title="View"
+                                  >
+                                    <Eye className="w-3 h-3" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setEditingAccount(account.id);
+                                    }}
+                                    className="h-5 w-5 p-0 shrink-0"
+                                    title="Edit"
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleDelete(account.id);
+                                    }}
+                                    disabled={account.has_locked_opportunities}
+                                    className={cn(
+                                      "h-5 w-5 p-0 shrink-0",
+                                      account.has_locked_opportunities
+                                        ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white hover:text-gray-400 disabled:opacity-100 disabled:pointer-events-auto"
+                                        : "text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                    )}
+                                    title={account.has_locked_opportunities ? "Cannot delete account with locked or permanently locked opportunities" : "Delete"}
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -279,53 +330,58 @@ function AccountsPageContent() {
                           <CardContent className="pt-6">
                             <div className="space-y-3">
                               <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Company Name
-                                </div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Company</div>
                                 <div className="text-sm font-medium">{highlightText(account.company_name, searchQuery)}</div>
+                                {account.industry && (
+                                  <div className="text-xs text-gray-500">{highlightText(account.industry, searchQuery)}</div>
+                                )}
                               </div>
-                              <div className="text-sm text-gray-600">
-                                {account.city && account.region
-                                  ? highlightText(`${account.city}, ${account.region}`, searchQuery)
-                                  : account.city || account.region || "—"}
-                              </div>
-                              <div className="flex flex-wrap gap-2 text-xs">
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Type</div>
                                 {account.type ? (
                                   <span
-                                    className={`px-2 py-1 rounded font-medium ${getAccountTypeColor(account.type).bg} ${getAccountTypeColor(account.type).text}`}
+                                    className={`inline-block px-2 py-0.5 text-xs rounded font-medium ${getAccountTypeColor(account.type).bg} ${getAccountTypeColor(account.type).text}`}
                                     style={{ backgroundColor: getAccountTypeColor(account.type).bgColor }}
                                   >
                                     {getAccountTypeLabel(account.type)}
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-1 rounded bg-gray-100 text-gray-800">
-                                    —
-                                  </span>
+                                  <span className="text-sm text-gray-500">—</span>
                                 )}
-                                <span className="px-2 py-1 rounded border border-gray-200 text-gray-700 bg-white">
-                                  {account.default_currency}
-                                </span>
-                                {account.industry && (
-                                  <span className="px-2 py-1 rounded border border-gray-200 text-gray-700 bg-white">
-                                    {highlightText(account.industry, searchQuery)}
-                                  </span>
-                                )}
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Location</div>
+                                <span className="text-sm">{formatLocation(account)}</span>
                               </div>
                               <div className="flex gap-4 text-sm">
                                 <Link
                                   href={`/contacts?search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-blue-600 hover:text-blue-800 underline"
+                                  className="text-blue-600 hover:text-blue-800 hover:underline"
                                 >
                                   Contacts: {account.contact_count ?? 0}
                                 </Link>
                                 <Link
                                   href={`/opportunities?account_id=${account.id}&search=${encodeURIComponent(account.company_name)}`}
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-blue-600 hover:text-blue-800 underline"
+                                  className="text-blue-600 hover:text-blue-800 hover:underline"
                                 >
-                                  Opportunities: {account.opportunities_count ?? 0}
+                                  Opps: {account.opportunities_count ?? 0}
                                 </Link>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-sm">
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Forecast $</div>
+                                  <span>{account.forecast_sum != null && account.forecast_sum !== 0 ? formatCurrency(account.forecast_sum, "USD") : "—"}</span>
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Plan $</div>
+                                  <span>{account.plan_sum != null && account.plan_sum !== 0 ? formatCurrency(account.plan_sum, "USD") : "—"}</span>
+                                </div>
+                                <div>
+                                  <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Actuals $</div>
+                                  <span>{account.actuals_sum != null && account.actuals_sum !== 0 ? formatCurrency(account.actuals_sum, "USD") : "—"}</span>
+                                </div>
                               </div>
                               <div className="flex gap-2 pt-2">
                                 <Button
@@ -336,8 +392,9 @@ function AccountsPageContent() {
                                     setViewingAccount(account);
                                   }}
                                   className="flex-1"
+                                  title="View"
                                 >
-                                  View
+                                  <Eye className="w-4 h-4" />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -347,8 +404,9 @@ function AccountsPageContent() {
                                     setEditingAccount(account.id);
                                   }}
                                   className="flex-1"
+                                  title="Edit"
                                 >
-                                  Edit
+                                  <Pencil className="w-4 h-4" />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -357,7 +415,14 @@ function AccountsPageContent() {
                                     e.stopPropagation();
                                     handleDelete(account.id);
                                   }}
-                                  className="flex-1 text-red-600 hover:text-red-700"
+                                  disabled={account.has_locked_opportunities}
+                                  className={cn(
+                                    "flex-1",
+                                    account.has_locked_opportunities
+                                      ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white hover:text-gray-400 disabled:opacity-100 disabled:pointer-events-auto"
+                                      : "text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                  )}
+                                  title={account.has_locked_opportunities ? "Cannot delete account with locked or permanently locked opportunities" : "Delete"}
                                 >
                                   <Trash2 className="w-4 h-4" />
                                 </Button>

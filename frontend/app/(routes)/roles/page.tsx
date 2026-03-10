@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { RoleForm } from "@/components/roles/role-form";
-import { Trash2 } from "lucide-react";
+import { Trash2, Eye, Pencil } from "lucide-react";
 import type { RoleCreate, RoleUpdate } from "@/types/role";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -114,7 +114,7 @@ export default function RolesPage() {
       {!isLoading && !error && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="px-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <CardTitle>Roles ({data?.total ?? 0})</CardTitle>
                 <div className="w-full sm:w-64">
@@ -128,18 +128,24 @@ export default function RolesPage() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2">
               {filteredItems.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block overflow-x-auto">
-                      <table className="w-full">
+                    <div className="hidden md:block w-full overflow-hidden">
+                      <table className="w-full text-xs table-fixed border-collapse">
+                        <colgroup>
+                          <col style={{ width: "20%" }} />
+                          <col style={{ width: "50%" }} />
+                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "12%" }} />
+                        </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Role Name</th>
-                            <th className="text-left p-3 font-semibold">Rates</th>
-                            <th className="text-left p-3 font-semibold">Status</th>
-                            <th className="text-left p-3 font-semibold">Actions</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Role Name">Role</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Rates by Delivery Center">Rates</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Status">Status</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -149,22 +155,26 @@ export default function RolesPage() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingRole(role.id)}
                           >
-                            <td className="p-3 font-medium">{highlightText(role.role_name, searchQuery)}</td>
-                            <td className="p-3">
-                              <div className="space-y-1">
-                                {role.role_rates?.map((r) => (
-                                  <div key={`${r.delivery_center_code}-${r.default_currency}`} className="text-sm">
-                                    <span className="font-semibold">
-                                      {highlightText(`${r.delivery_center_code.replace("-", " ")} (${r.default_currency})`, searchQuery)}
-                                    </span>
-                                    : ICR ${r.internal_cost_rate.toFixed(2)} / Ext ${r.external_rate.toFixed(2)}
-                                  </div>
-                                )) || "—"}
-                              </div>
+                            <td className="p-1.5 font-medium text-xs overflow-hidden" title={role.role_name}>
+                              <span className="truncate block">{highlightText(role.role_name, searchQuery)}</span>
                             </td>
-                            <td className="p-3">
+                            <td className="p-1.5 overflow-hidden min-w-0 text-xs" title={role.role_rates?.map((r) => `${r.delivery_center_code.replace("-", " ")} (${r.default_currency}): ICR $${r.internal_cost_rate.toFixed(2)} / Ext $${r.external_rate.toFixed(2)}`).join("; ") || "—"}>
+                              {role.role_rates?.length ? (
+                                <span className="truncate block">
+                                  {role.role_rates[0] && (
+                                    <>
+                                      {highlightText(role.role_rates[0].delivery_center_code.replace("-", " "), searchQuery)} ({role.role_rates[0].default_currency}): ${role.role_rates[0].internal_cost_rate.toFixed(0)}/${role.role_rates[0].external_rate.toFixed(0)}
+                                      {role.role_rates.length > 1 ? ` +${role.role_rates.length - 1} more` : ""}
+                                    </>
+                                  )}
+                                </span>
+                              ) : (
+                                <span className="text-gray-500">—</span>
+                              )}
+                            </td>
+                            <td className="p-1.5 overflow-hidden min-w-0">
                               <span
-                                className={`px-2 py-1 text-xs rounded ${
+                                className={`px-1.5 py-0.5 text-xs rounded ${
                                   role.status === "active"
                                     ? "bg-green-100 text-green-800"
                                     : "bg-gray-100 text-gray-800"
@@ -173,29 +183,43 @@ export default function RolesPage() {
                                 {highlightText(role.status, searchQuery)}
                               </span>
                             </td>
-                            <td className="p-3">
-                          <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setViewingRole(role.id)}
-                            >
-                              View
-                            </Button>
+                            <td className="p-1 overflow-hidden min-w-0">
+                              <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setEditingRole(role.id)}
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setViewingRole(role.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="View"
                                 >
-                                  Edit
+                                  <Eye className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleDelete(role.id)}
-                                  className="text-red-600 hover:text-red-700"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingRole(role.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="Edit"
                                 >
-                                  <Trash2 className="w-4 h-4" />
+                                  <Pencil className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(role.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                  title="Delete"
+                                >
+                                  <Trash2 className="w-3 h-3" />
                                 </Button>
                               </div>
                             </td>
@@ -260,30 +284,33 @@ export default function RolesPage() {
                                 <div className="text-sm">{role.default_currency}</div>
                               </div>
                             </div>
-                            <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-nowrap gap-0.5 justify-start pt-2" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setViewingRole(role.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="View"
                               >
-                                View
+                                <Eye className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setEditingRole(role.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="Edit"
                               >
-                                Edit
+                                <Pencil className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleDelete(role.id)}
-                                className="flex-1 text-red-600 hover:text-red-700"
+                                className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                title="Delete"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3 h-3" />
                               </Button>
                             </div>
                           </div>

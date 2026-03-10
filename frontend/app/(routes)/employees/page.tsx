@@ -16,7 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { EmployeeForm } from "@/components/employees/employee-form";
 import { EmployeeRelationships } from "@/components/employees/employee-relationships";
-import { Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Trash2, ChevronDown, ChevronUp, Eye, Pencil } from "lucide-react";
 import type { EmployeeCreate, EmployeeUpdate } from "@/types/employee";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -228,7 +228,7 @@ function EmployeesPageContent() {
       {!isLoading && !error && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="px-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <CardTitle>
                   Employees ({data?.total ?? 0})
@@ -244,12 +244,25 @@ function EmployeesPageContent() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2">
               {filteredItems.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block">
-                      <table className="w-full text-xs">
+                    <div className="hidden md:block w-full">
+                      <table className="w-full text-xs table-fixed border-collapse">
+                        <colgroup>
+                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "14%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "9%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "12%" }} />
+                        </colgroup>
                         <thead>
                           <tr className="border-b">
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Name">Name</th>
@@ -261,7 +274,7 @@ function EmployeesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="External Bill Rate">EBR</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Timezone">TZ</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunities">Opportunities</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunities">Opps</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
@@ -272,18 +285,18 @@ function EmployeesPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingEmployee(employee.id)}
                           >
-                            <td className="p-1.5 font-medium max-w-[120px] truncate text-xs" title={`${employee.first_name} ${employee.last_name}`}>
-                              {highlightText(`${employee.first_name} ${employee.last_name}`, searchQuery)}
+                            <td className="p-1.5 font-medium text-xs overflow-hidden" title={`${employee.first_name} ${employee.last_name}`}>
+                              <span className="truncate block">{highlightText(`${employee.first_name} ${employee.last_name}`, searchQuery)}</span>
                             </td>
-                            <td className="p-1.5 max-w-[150px] truncate text-xs" title={employee.email || "—"}>{employee.email ? highlightText(employee.email, searchQuery) : "—"}</td>
-                            <td className="p-1.5">
-                              <span className="px-1 py-0.5 text-xs rounded bg-blue-100 text-blue-800 whitespace-nowrap">
+                            <td className="p-1.5 truncate text-xs overflow-hidden min-w-0" title={employee.email || "—"}>{employee.email ? highlightText(employee.email, searchQuery) : "—"}</td>
+                            <td className="p-1.5 overflow-hidden min-w-0">
+                              <span className="px-1.5 py-0.5 text-xs rounded bg-blue-100 text-blue-800 whitespace-nowrap">
                                 {highlightText(employee.employee_type, searchQuery)}
                               </span>
                             </td>
-                            <td className="p-1.5">
+                            <td className="p-1.5 overflow-hidden min-w-0">
                               <span
-                                className={`px-1 py-0.5 text-xs rounded whitespace-nowrap ${
+                                className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${
                                   employee.status === "active"
                                     ? "bg-green-100 text-green-800"
                                     : employee.status === "on-leave"
@@ -294,22 +307,22 @@ function EmployeesPageContent() {
                                 {highlightText(employee.status, searchQuery)}
                               </span>
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={employee.internal_cost_rate ? formatCurrency(employee.internal_cost_rate, employee.default_currency || "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={employee.internal_cost_rate ? formatCurrency(employee.internal_cost_rate, employee.default_currency || "USD") : "—"}>
                               {employee.internal_cost_rate ? formatCurrency(employee.internal_cost_rate, employee.default_currency || "USD") : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={employee.internal_bill_rate ? formatCurrency(employee.internal_bill_rate, employee.default_currency || "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={employee.internal_bill_rate ? formatCurrency(employee.internal_bill_rate, employee.default_currency || "USD") : "—"}>
                               {employee.internal_bill_rate ? formatCurrency(employee.internal_bill_rate, employee.default_currency || "USD") : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={employee.external_bill_rate ? formatCurrency(employee.external_bill_rate, employee.default_currency || "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={employee.external_bill_rate ? formatCurrency(employee.external_bill_rate, employee.default_currency || "USD") : "—"}>
                               {employee.external_bill_rate ? formatCurrency(employee.external_bill_rate, employee.default_currency || "USD") : "—"}
                             </td>
-                            <td className="p-1.5 max-w-[80px] truncate text-xs" title={getDeliveryCenterName(employee.delivery_center)}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden min-w-0" title={getDeliveryCenterName(employee.delivery_center)}>
                               {getDeliveryCenterName(employee.delivery_center)}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={employee.timezone || "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={employee.timezone || "—"}>
                               {employee.timezone || "—"}
                             </td>
-                            <td className="p-1.5 max-w-[180px] text-xs" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-1.5 min-w-0 text-xs overflow-visible" onClick={(e) => e.stopPropagation()}>
                               {(() => {
                                 const opportunities = getOpportunities(employee.id);
                                 
@@ -360,29 +373,41 @@ function EmployeesPageContent() {
                                 );
                               })()}
                             </td>
-                            <td className="p-1.5">
-                              <div className="flex gap-0.5" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-1 overflow-hidden min-w-0">
+                              <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setViewingEmployee(employee.id)}
-                                  className="h-6 px-1.5 text-xs"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setViewingEmployee(employee.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="View"
                                 >
-                                  View
+                                  <Eye className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setEditingEmployee(employee.id)}
-                                  className="h-6 px-1.5 text-xs"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setEditingEmployee(employee.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="Edit"
                                 >
-                                  Edit
+                                  <Pencil className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleDelete(employee.id)}
-                                  className="h-6 px-1.5 text-red-600 hover:text-red-700"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDelete(employee.id);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                  title="Delete"
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </Button>
@@ -526,30 +551,33 @@ function EmployeesPageContent() {
                                 </div>
                               );
                             })()}
-                            <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
+                            <div className="flex flex-nowrap gap-0.5 justify-start pt-2" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setViewingEmployee(employee.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="View"
                               >
-                                View
+                                <Eye className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => setEditingEmployee(employee.id)}
-                                className="flex-1"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="Edit"
                               >
-                                Edit
+                                <Pencil className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleDelete(employee.id)}
-                                className="flex-1 text-red-600 hover:text-red-700"
+                                className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                title="Delete"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3 h-3" />
                               </Button>
                             </div>
                           </div>

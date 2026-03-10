@@ -78,6 +78,10 @@ class AccountResponse(AccountBase):
     created_at: datetime
     contact_count: Optional[int] = None
     opportunities_count: Optional[int] = None
+    forecast_sum: Optional[float] = None  # Sum of opportunities' forecast_value_usd (for list view)
+    plan_sum: Optional[float] = None  # Sum of opportunities' plan_amount (for list view)
+    actuals_sum: Optional[float] = None  # Sum of opportunities' actuals_amount (for list view)
+    has_locked_opportunities: Optional[bool] = None  # True if account has any locked or permanently locked opportunities (disables delete)
     
     class Config:
         from_attributes = True

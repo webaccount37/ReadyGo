@@ -12,7 +12,7 @@ import {
 import { useEstimates } from "@/hooks/useEstimates";
 import { useQuotes } from "@/hooks/useQuotes";
 import { Button } from "@/components/ui/button";
-import { Trash2, Calculator, FileCheck, Lock, Briefcase } from "lucide-react";
+import { Trash2, Calculator, FileCheck, Lock, Briefcase, Pencil } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
@@ -316,6 +316,8 @@ function OpportunitiesPageContent() {
   };
 
   const handleDelete = async (id: string) => {
+    const opp = data?.items.find((e) => e.id === id);
+    if (opp?.is_permanently_locked || opp?.is_locked) return;
     if (confirm("Are you sure you want to delete this opportunity?")) {
       try {
         await deleteOpportunity.mutateAsync(id);
@@ -382,7 +384,7 @@ function OpportunitiesPageContent() {
       {!isLoading && !error && (
         <>
           <Card>
-            <CardHeader>
+            <CardHeader className="px-2">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
                 <CardTitle>Opportunities ({data?.total ?? 0})</CardTitle>
                 <div className="w-full sm:w-64">
@@ -396,12 +398,26 @@ function OpportunitiesPageContent() {
                 </div>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-2">
               {filteredItems.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
-                    <div className="hidden md:block">
-                      <table className="w-full text-xs">
+                    <div className="hidden md:block w-full overflow-hidden">
+                      <table className="w-full text-xs table-fixed border-collapse">
+                        <colgroup>
+                          <col style={{ width: "14%" }} />
+                          <col style={{ width: "9%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "4%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "11%" }} />
+                        </colgroup>
                         <thead>
                           <tr className="border-b">
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Name">Name</th>
@@ -415,7 +431,6 @@ function OpportunitiesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Forecast Value (USD)">Forecast $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Plan Revenue (USD)">Plan $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actuals from Approved Timesheets (USD)">Actuals $</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Count">Emp</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
@@ -426,7 +441,7 @@ function OpportunitiesPageContent() {
                             className="border-b hover:bg-gray-50 cursor-pointer"
                             onClick={() => setViewingOpportunity(opportunity.id)}
                           >
-                            <td className="p-1.5 font-medium max-w-[120px] text-xs" title={opportunity.name}>
+                            <td className="p-1.5 font-medium text-xs overflow-hidden" title={opportunity.name}>
                               <div className="flex items-center gap-1.5 min-w-0">
                                 <span className="truncate">{highlightText(opportunity.name, searchQuery)}</span>
                                 {(opportunity.is_permanently_locked || hasActiveQuote(opportunity.id)) && (
@@ -446,7 +461,7 @@ function OpportunitiesPageContent() {
                                 )}
                               </div>
                             </td>
-                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getAccountName(opportunity.account_id)}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getAccountName(opportunity.account_id)}>
                               <Link
                                 href={`/accounts?search=${encodeURIComponent(getAccountName(opportunity.account_id))}`}
                                 onClick={(e) => e.stopPropagation()}
@@ -455,7 +470,7 @@ function OpportunitiesPageContent() {
                                 {highlightText(getAccountName(opportunity.account_id), searchQuery)}
                               </Link>
                             </td>
-                            <td className="p-1.5 max-w-[100px] truncate text-xs" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>
                               {opportunity.parent_opportunity_id ? (
                                 <Link
                                   href={`/opportunities?search=${encodeURIComponent(getParentOpportunityName(opportunity.parent_opportunity_id))}`}
@@ -468,38 +483,38 @@ function OpportunitiesPageContent() {
                                 "None"
                               )}
                             </td>
-                            <td className="p-1.5">
+                            <td className="p-1.5 overflow-hidden min-w-0">
                               <span
-                                className={`px-1 py-0.5 text-xs rounded whitespace-nowrap ${
+                                className={cn(
+                                  "inline-block w-3 h-3 rounded-sm shrink-0",
                                   opportunity.status === "won"
-                                    ? "bg-green-100 text-green-800"
+                                    ? "bg-green-500"
                                     : opportunity.status === "lost"
-                                    ? "bg-red-100 text-red-800"
+                                    ? "bg-red-500"
                                     : opportunity.status === "cancelled"
-                                    ? "bg-gray-100 text-gray-800"
+                                    ? "bg-gray-500"
                                     : opportunity.status === "negotiation"
-                                    ? "bg-orange-100 text-orange-800"
+                                    ? "bg-orange-500"
                                     : opportunity.status === "proposal"
-                                    ? "bg-yellow-100 text-yellow-800"
+                                    ? "bg-yellow-500"
                                     : opportunity.status === "qualified"
-                                    ? "bg-cyan-100 text-cyan-800"
-                                    : "bg-blue-100 text-blue-800" // discovery
-                                }`}
-                              >
-                                {highlightText(opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1), searchQuery)}
-                              </span>
+                                    ? "bg-cyan-500"
+                                    : "bg-blue-500" // discovery
+                                )}
+                                title={opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1)}
+                              />
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
                               {opportunity.start_date
-                                ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+                                ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.end_date ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden" title={opportunity.end_date ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
                               {opportunity.end_date
-                                ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })
+                                ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
                                 : "—"}
                             </td>
-                            <td className="p-1.5 max-w-[80px] truncate text-xs" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>
                               <Link
                                 href={`/delivery-centers?search=${encodeURIComponent(getDeliveryCenterName(opportunity.delivery_center_id))}`}
                                 onClick={(e) => e.stopPropagation()}
@@ -508,50 +523,42 @@ function OpportunitiesPageContent() {
                                 {getDeliveryCenterName(opportunity.delivery_center_id)}
                               </Link>
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.deal_value_usd ? formatCurrency(opportunity.deal_value_usd, "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.deal_value_usd ? formatCurrency(opportunity.deal_value_usd, "USD") : "—"}>
                               {opportunity.deal_value_usd
                                 ? formatCurrency(opportunity.deal_value_usd, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.forecast_value_usd ? formatCurrency(opportunity.forecast_value_usd, "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.forecast_value_usd ? formatCurrency(opportunity.forecast_value_usd, "USD") : "—"}>
                               {opportunity.forecast_value_usd
                                 ? formatCurrency(opportunity.forecast_value_usd, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.plan_amount ? formatCurrency(opportunity.plan_amount, "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.plan_amount ? formatCurrency(opportunity.plan_amount, "USD") : "—"}>
                               {opportunity.plan_amount != null && opportunity.plan_amount !== undefined && opportunity.plan_amount !== ""
                                 ? formatCurrency(opportunity.plan_amount, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs" title={opportunity.actuals_amount != null ? formatCurrency(opportunity.actuals_amount, "USD") : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={opportunity.actuals_amount != null ? formatCurrency(opportunity.actuals_amount, "USD") : "—"}>
                               {opportunity.actuals_amount != null && opportunity.actuals_amount !== undefined && String(opportunity.actuals_amount) !== "0"
                                 ? formatCurrency(opportunity.actuals_amount, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs">
-                              <Link
-                                href={`/employees?search=${encodeURIComponent(opportunity.name)}`}
-                                onClick={(e) => e.stopPropagation()}
-                                className="text-blue-600 hover:text-blue-800 hover:underline font-medium"
-                              >
-                                {employeeCounts[opportunity.id] ?? "—"}
-                              </Link>
-                            </td>
-                            <td className="p-1.5">
-                              <div className="flex gap-0.5" onClick={(e) => e.stopPropagation()}>
+                            <td className="p-1 overflow-hidden min-w-0">
+                              <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={() => setEditingOpportunity(opportunity.id)}
-                                  className="h-6 px-1.5 text-xs"
+                                  className="h-5 w-5 p-0 shrink-0"
+                                  title="Edit"
                                 >
-                                  Edit
+                                  <Pencil className="w-3 h-3" />
                                 </Button>
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   onClick={(e) => handleEstimatesClick(opportunity.id, e)}
-                                  className="h-6 px-1.5 text-xs text-blue-600 hover:text-blue-700"
+                                  className="h-5 w-5 p-0 shrink-0 text-blue-600 hover:text-blue-700"
                                   title={getActiveEstimateId(opportunity.id) ? "View Active Estimate" : "View Estimates"}
                                 >
                                   <Calculator className="w-3 h-3" />
@@ -560,7 +567,7 @@ function OpportunitiesPageContent() {
                                   size="sm"
                                   variant="outline"
                                   onClick={(e) => handleQuotesClick(opportunity.id, e)}
-                                  className="h-6 px-1.5 text-xs text-green-600 hover:text-green-700"
+                                  className="h-5 w-5 p-0 shrink-0 text-green-600 hover:text-green-700"
                                   title={getActiveQuoteId(opportunity.id) ? "View Active Quote" : hasQuotes(opportunity.id) ? "View Quotes" : "Create Quote"}
                                 >
                                   <FileCheck className="w-3 h-3" />
@@ -575,7 +582,7 @@ function OpportunitiesPageContent() {
                                     }
                                   }}
                                   className={cn(
-                                    "h-6 px-1.5 text-xs",
+                                    "h-5 w-5 p-0 shrink-0",
                                     opportunity.engagement_id
                                       ? "text-purple-600 hover:text-purple-700"
                                       : "text-gray-400 cursor-not-allowed"
@@ -589,7 +596,14 @@ function OpportunitiesPageContent() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleDelete(opportunity.id)}
-                                  className="h-6 px-1.5 text-red-600 hover:text-red-700"
+                                  disabled={opportunity.is_permanently_locked || opportunity.is_locked}
+                                  className={cn(
+                                    "h-5 w-5 p-0 shrink-0",
+                                    opportunity.is_permanently_locked || opportunity.is_locked
+                                      ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white hover:text-gray-400 disabled:opacity-100 disabled:pointer-events-auto"
+                                      : "text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                  )}
+                                  title={opportunity.is_permanently_locked || opportunity.is_locked ? "Cannot delete locked or permanently locked opportunity" : "Delete"}
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </Button>
@@ -745,7 +759,14 @@ function OpportunitiesPageContent() {
                                 size="sm"
                                 variant="outline"
                                 onClick={() => handleDelete(opportunity.id)}
-                                className="flex-1 text-red-600 hover:text-red-700"
+                                disabled={opportunity.is_permanently_locked || opportunity.is_locked}
+                                className={cn(
+                                  "flex-1",
+                                  opportunity.is_permanently_locked || opportunity.is_locked
+                                    ? "text-gray-400 border-gray-200 cursor-not-allowed hover:bg-white hover:text-gray-400 disabled:opacity-100 disabled:pointer-events-auto"
+                                    : "text-red-600 hover:text-red-700 border-red-200 hover:border-red-300"
+                                )}
+                                title={opportunity.is_permanently_locked || opportunity.is_locked ? "Cannot delete locked or permanently locked opportunity" : "Delete"}
                               >
                                 <Trash2 className="w-4 h-4" />
                               </Button>

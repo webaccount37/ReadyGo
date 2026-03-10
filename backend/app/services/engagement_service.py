@@ -717,10 +717,26 @@ class EngagementService(BaseService):
                 filters["opportunity_id"] = opportunity_id
             if quote_id:
                 filters["quote_id"] = quote_id
-            engagements = await self.engagement_repo.list(skip=skip, limit=limit, **filters)
+            engagements = await self.engagement_repo.list(
+                skip=skip, limit=limit, include_line_items=True, **filters
+            )
             total = await self.engagement_repo.count(**filters)
 
-        responses = [await self._to_response(e, include_line_items=False) for e in engagements]
+        responses = []
+        for e in engagements:
+            base = await self._to_response(e, include_line_items=False)
+            plan_summary = await self.calculate_resource_plan_summary(e)
+            actuals_summary = await self.calculate_actuals_summary(e)
+            try:
+                comparative = await self.calculate_comparative_summary(e)
+            except ValueError:
+                comparative = await self._calculate_partial_comparative_summary(e)
+            base_dict = base.model_dump()
+            base_dict["plan_amount"] = plan_summary.get("total_revenue")
+            base_dict["actuals_amount"] = actuals_summary.get("total_revenue")
+            base_dict["revenue_deviation_percentage"] = comparative.revenue_deviation_percentage
+            base_dict["plan_vs_actuals_revenue_deviation_percentage"] = comparative.plan_vs_actuals_revenue_deviation_percentage
+            responses.append(EngagementResponse(**base_dict))
         return responses, total
     
     async def update_engagement(

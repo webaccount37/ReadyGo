@@ -21,16 +21,20 @@ class EngagementRepository(BaseRepository[Engagement]):
     def __init__(self, session: AsyncSession):
         super().__init__(Engagement, session)
     
-    def _base_query(self):
+    def _base_query(self, include_line_items: bool = False):
         """Base query with eager loading of relationships."""
+        from app.models.engagement import EngagementLineItem
         from app.models.opportunity import Opportunity
-        
-        return select(Engagement).options(
+
+        opts = [
             selectinload(Engagement.opportunity).selectinload(Opportunity.account),
             selectinload(Engagement.created_by_employee),
             selectinload(Engagement.quote),
             selectinload(Engagement.phases),
-        )
+        ]
+        if include_line_items:
+            opts.append(selectinload(Engagement.line_items).selectinload(EngagementLineItem.weekly_hours))
+        return select(Engagement).options(*opts)
     
     async def get(self, id: UUID) -> Optional[Engagement]:
         """Get engagement by ID with relationships loaded."""
@@ -42,10 +46,11 @@ class EngagementRepository(BaseRepository[Engagement]):
         self,
         skip: int = 0,
         limit: int = 100,
+        include_line_items: bool = False,
         **filters,
     ) -> List[Engagement]:
         """List engagements with pagination and filters."""
-        query = self._base_query()
+        query = self._base_query(include_line_items=include_line_items)
         
         # Apply filters
         for key, value in filters.items():
@@ -108,7 +113,7 @@ class EngagementRepository(BaseRepository[Engagement]):
             .distinct()
         )
         query = (
-            self._base_query()
+            self._base_query(include_line_items=True)
             .where(Engagement.id.in_(subq))
             .offset(skip)
             .limit(limit)

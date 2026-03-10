@@ -339,7 +339,30 @@ class OpportunityService(BaseService):
         return await self._to_response(updated)
     
     async def delete_opportunity(self, opportunity_id: UUID) -> bool:
-        """Delete an opportunity."""
+        """Delete an opportunity. Fails if permanently locked or locked by active quote."""
+        opportunity = await self.opportunity_repo.get(opportunity_id)
+        if not opportunity:
+            return False
+
+        from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
+        from app.db.repositories.quote_repository import QuoteRepository
+        from app.core.exceptions import AppException
+
+        lock_repo = OpportunityPermanentLockRepository(self.session)
+        if await lock_repo.is_opportunity_locked(opportunity_id):
+            raise AppException(
+                message="Cannot delete permanently locked opportunity",
+                status_code=403,
+            )
+
+        quote_repo = QuoteRepository(self.session)
+        active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity_id)
+        if active_quote:
+            raise AppException(
+                message=f"Cannot delete opportunity: it is locked by active quote {active_quote.quote_number}. Deactivate the quote first.",
+                status_code=403,
+            )
+
         deleted = await self.opportunity_repo.delete(opportunity_id)
         await self.session.commit()
         return deleted

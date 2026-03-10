@@ -1,16 +1,17 @@
 "use client";
 
 import { useState, Suspense } from "react";
+import { useRouter } from "next/navigation";
 import { useEngagements } from "@/hooks/useEngagements";
-import { useOpportunities } from "@/hooks/useOpportunities";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { FileText, Search } from "lucide-react";
+import { FileText, ExternalLink } from "lucide-react";
 import type { Engagement } from "@/types/engagement";
 
 function EngagementsPageContent() {
+  const router = useRouter();
   const [skip] = useState(0);
   const [limit] = useState(1000);
   const [searchQuery, setSearchQuery] = useState("");
@@ -19,32 +20,47 @@ function EngagementsPageContent() {
     skip,
     limit,
   });
-  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
 
-  const formatLocalDate = (dateStr: string): string => {
+  const formatDate = (dateStr: string): string => {
     const datePart = dateStr.split("T")[0];
     const [year, month, day] = datePart.split("-").map(Number);
     const date = new Date(year, month - 1, day);
     return date.toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
+      month: "numeric",
       day: "numeric",
+      year: "2-digit",
     });
   };
 
-  const formatCurrency = (amount: string | undefined, currency: string = "USD") => {
-    if (!amount) return "-";
+  const formatCurrency = (amount: string | number | undefined, currency: string = "USD") => {
+    if (amount == null || amount === "" || amount === undefined) return "—";
+    const num = typeof amount === "string" ? parseFloat(amount) : amount;
+    if (isNaN(num)) return "—";
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: currency,
-    }).format(parseFloat(amount));
+    }).format(num);
+  };
+
+  const formatPercentage = (value: string | number | undefined) => {
+    if (value == null || value === "" || value === undefined) return "—";
+    const num = typeof value === "string" ? parseFloat(value) : value;
+    if (isNaN(num)) return "—";
+    return `${num >= 0 ? "+" : ""}${num.toFixed(1)}%`;
+  };
+
+  const REVENUE_DEVIATION_THRESHOLD = 5;
+  const getDeviationColor = (deviation: number) => {
+    if (Math.abs(deviation) <= REVENUE_DEVIATION_THRESHOLD) return "text-green-600";
+    if (Math.abs(deviation) <= REVENUE_DEVIATION_THRESHOLD * 2) return "text-yellow-600";
+    return "text-red-600";
   };
 
   const filteredEngagements = data?.items.filter((engagement) => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
-      engagement.name.toLowerCase().includes(query) ||
+      engagement.name?.toLowerCase().includes(query) ||
       engagement.quote_number?.toLowerCase().includes(query) ||
       engagement.quote_display_name?.toLowerCase().includes(query) ||
       engagement.opportunity_name?.toLowerCase().includes(query) ||
@@ -57,7 +73,7 @@ function EngagementsPageContent() {
       <div className="container mx-auto p-6">
         <Card>
           <CardContent className="p-6">
-            <p>Loading engagements...</p>
+            <p className="text-gray-600">Loading engagements...</p>
           </CardContent>
         </Card>
       </div>
@@ -67,9 +83,9 @@ function EngagementsPageContent() {
   if (error) {
     return (
       <div className="container mx-auto p-6">
-        <Card>
-          <CardContent className="p-6">
-            <p className="text-red-600">
+        <Card className="border-red-200 bg-red-50">
+          <CardContent className="pt-6">
+            <p className="text-red-800">
               Error loading engagements: {error instanceof Error ? error.message : String(error)}
             </p>
           </CardContent>
@@ -80,79 +96,286 @@ function EngagementsPageContent() {
 
   return (
     <div className="container mx-auto p-6">
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-3xl font-bold">Engagements</h1>
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
+        <div>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Engagements</h1>
+          <p className="text-gray-600 mt-1 text-sm sm:text-base">
+            Manage your engagements and resource plans
+          </p>
+        </div>
       </div>
 
       <Card>
-        <CardHeader>
-          <div className="flex justify-between items-center">
-            <CardTitle>All Engagements</CardTitle>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="absolute left-2 top-2.5 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Search engagements..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 w-64"
-                />
-              </div>
+        <CardHeader className="px-2">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <CardTitle>Engagements ({data?.total ?? 0})</CardTitle>
+            <div className="w-full sm:w-64">
+              <Input
+                type="text"
+                placeholder="Search engagements..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full"
+              />
             </div>
           </div>
         </CardHeader>
-        <CardContent>
-          {filteredEngagements.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
-              {searchQuery ? "No engagements match your search." : "No engagements found."}
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {filteredEngagements.map((engagement) => (
-                <div
-                  key={engagement.id}
-                  className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50"
-                >
-                    <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <FileText className="h-5 w-5 text-gray-400" />
-                      <Link
-                        href={`/engagements/${engagement.id}`}
-                        className="text-lg font-semibold text-blue-600 hover:underline"
+        <CardContent className="px-2">
+          {filteredEngagements.length > 0 ? (
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden md:block w-full overflow-hidden">
+                <table className="w-full text-xs table-fixed border-collapse">
+                  <colgroup>
+                    <col style={{ width: "5%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "12%" }} />
+                    <col style={{ width: "15%" }} />
+                    <col style={{ width: "7%" }} />
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "8%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "10%" }} />
+                    <col style={{ width: "13%" }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Engagement">Name</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account">Account</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity">Opportunity</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Quote">Quote</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Created Date">Created</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Resource Plan Revenue (USD)">Plan $</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actuals from Approved Timesheets (USD)">Actuals $</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Quote/Estimate vs Resource Plan Revenue Deviation %">% Quote Dev</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Resource Plan vs Actuals Revenue Deviation %">% Plan Dev</th>
+                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEngagements.map((engagement) => (
+                      <tr
+                        key={engagement.id}
+                        className="border-b hover:bg-gray-50 cursor-pointer"
+                        onClick={() => router.push(`/engagements/${engagement.id}`)}
                       >
-                        Engagement - {engagement.opportunity_name || engagement.opportunity_id}
-                      </Link>
-                    </div>
-                    <div className="mt-2 text-sm text-gray-600 space-y-1">
-                      {engagement.account_name && (
+                        <td className="p-1.5 overflow-hidden min-w-0" title={engagement.name || `Engagement - ${engagement.opportunity_name || engagement.opportunity_id}`}>
+                          <FileText className="h-4 w-4 text-gray-500 shrink-0" />
+                        </td>
+                        <td className="p-1.5 truncate text-xs overflow-hidden" title={engagement.account_name || "—"}>
+                          {engagement.account_name ? (
+                            <Link
+                              href={`/accounts?search=${encodeURIComponent(engagement.account_name)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {engagement.account_name}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-1.5 truncate text-xs overflow-hidden" title={engagement.opportunity_name || "—"}>
+                          {engagement.opportunity_name ? (
+                            <Link
+                              href={`/opportunities?search=${encodeURIComponent(engagement.opportunity_name)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {engagement.opportunity_name}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-1.5 truncate text-xs overflow-hidden" title={engagement.quote_display_name || engagement.quote_number || "—"}>
+                          {(engagement.quote_display_name || engagement.quote_number) ? (
+                            <Link
+                              href={`/quotes?search=${encodeURIComponent(engagement.quote_display_name || engagement.quote_number || "")}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {engagement.quote_display_name || engagement.quote_number}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={engagement.created_at ? new Date(engagement.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "—"}>
+                          {engagement.created_at ? formatDate(engagement.created_at) : "—"}
+                        </td>
+                        <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={engagement.plan_amount != null ? formatCurrency(engagement.plan_amount, "USD") : "—"}>
+                          {engagement.plan_amount != null && engagement.plan_amount !== undefined && String(engagement.plan_amount) !== "0"
+                            ? formatCurrency(engagement.plan_amount, "USD")
+                            : "—"}
+                        </td>
+                        <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={engagement.actuals_amount != null ? formatCurrency(engagement.actuals_amount, "USD") : "—"}>
+                          {engagement.actuals_amount != null && engagement.actuals_amount !== undefined && String(engagement.actuals_amount) !== "0"
+                            ? formatCurrency(engagement.actuals_amount, "USD")
+                            : "—"}
+                        </td>
+                        <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={engagement.revenue_deviation_percentage != null ? `Quote vs Plan: ${formatPercentage(engagement.revenue_deviation_percentage)}` : "—"}>
+                          {engagement.revenue_deviation_percentage != null && engagement.revenue_deviation_percentage !== undefined ? (
+                            <span className={getDeviationColor(typeof engagement.revenue_deviation_percentage === "string" ? parseFloat(engagement.revenue_deviation_percentage) : engagement.revenue_deviation_percentage)}>
+                              {formatPercentage(engagement.revenue_deviation_percentage)}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={engagement.plan_vs_actuals_revenue_deviation_percentage != null ? `Plan vs Actuals: ${formatPercentage(engagement.plan_vs_actuals_revenue_deviation_percentage)}` : "—"}>
+                          {engagement.plan_vs_actuals_revenue_deviation_percentage != null && engagement.plan_vs_actuals_revenue_deviation_percentage !== undefined ? (
+                            <span className={getDeviationColor(typeof engagement.plan_vs_actuals_revenue_deviation_percentage === "string" ? parseFloat(engagement.plan_vs_actuals_revenue_deviation_percentage) : engagement.plan_vs_actuals_revenue_deviation_percentage)}>
+                              {formatPercentage(engagement.plan_vs_actuals_revenue_deviation_percentage)}
+                            </span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td className="p-1 overflow-hidden min-w-0">
+                          <Link
+                            href={`/engagements/${engagement.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-5 w-5 p-0 shrink-0"
+                              title="View Details"
+                            >
+                              <ExternalLink className="w-3 h-3" />
+                            </Button>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile Card View */}
+              <div className="md:hidden space-y-4">
+                {filteredEngagements.map((engagement) => (
+                  <Card
+                    key={engagement.id}
+                    className="cursor-pointer"
+                    onClick={() => router.push(`/engagements/${engagement.id}`)}
+                  >
+                    <CardContent className="pt-6">
+                      <div className="space-y-3">
                         <div>
-                          <span className="font-medium">Account:</span> {engagement.account_name}
+                          <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Name</div>
+                          <div title={engagement.name || `Engagement - ${engagement.opportunity_name || engagement.opportunity_id}`}>
+                            <FileText className="h-4 w-4 text-gray-500 shrink-0" />
+                          </div>
                         </div>
-                      )}
-                      <div>
-                        <span className="font-medium">Opportunity:</span>{" "}
-                        {engagement.opportunity_name || engagement.opportunity_id}
-                      </div>
-                      {(engagement.quote_display_name || engagement.quote_number) && (
+                        {engagement.account_name && (
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Account</div>
+                            <Link
+                              href={`/accounts?search=${encodeURIComponent(engagement.account_name)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {engagement.account_name}
+                            </Link>
+                          </div>
+                        )}
                         <div>
-                          <span className="font-medium">Quote:</span> {engagement.quote_display_name || engagement.quote_number}
+                          <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Opportunity</div>
+                          {engagement.opportunity_name ? (
+                            <Link
+                              href={`/opportunities?search=${encodeURIComponent(engagement.opportunity_name)}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {engagement.opportunity_name}
+                            </Link>
+                          ) : (
+                            <span className="text-sm">—</span>
+                          )}
                         </div>
-                      )}
-                      <div>
-                        <span className="font-medium">Created:</span> {formatLocalDate(engagement.created_at)}
+                        {(engagement.quote_display_name || engagement.quote_number) && (
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Quote</div>
+                            <Link
+                              href={`/quotes?search=${encodeURIComponent(engagement.quote_display_name || engagement.quote_number || "")}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              {engagement.quote_display_name || engagement.quote_number}
+                            </Link>
+                          </div>
+                        )}
+                        <div>
+                          <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Created</div>
+                          <span className="text-sm">{engagement.created_at ? formatDate(engagement.created_at) : "—"}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Plan $</div>
+                            <span className="text-sm">
+                              {engagement.plan_amount != null && String(engagement.plan_amount) !== "0"
+                                ? formatCurrency(engagement.plan_amount, "USD")
+                                : "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Actuals $</div>
+                            <span className="text-sm">
+                              {engagement.actuals_amount != null && String(engagement.actuals_amount) !== "0"
+                                ? formatCurrency(engagement.actuals_amount, "USD")
+                                : "—"}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">% Quote Dev</div>
+                            <span className="text-sm">
+                              {engagement.revenue_deviation_percentage != null && engagement.revenue_deviation_percentage !== undefined ? (
+                                <span className={getDeviationColor(typeof engagement.revenue_deviation_percentage === "string" ? parseFloat(engagement.revenue_deviation_percentage) : engagement.revenue_deviation_percentage)}>
+                                  {formatPercentage(engagement.revenue_deviation_percentage)}
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </span>
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">% Plan Dev</div>
+                            <span className="text-sm">
+                              {engagement.plan_vs_actuals_revenue_deviation_percentage != null && engagement.plan_vs_actuals_revenue_deviation_percentage !== undefined ? (
+                                <span className={getDeviationColor(typeof engagement.plan_vs_actuals_revenue_deviation_percentage === "string" ? parseFloat(engagement.plan_vs_actuals_revenue_deviation_percentage) : engagement.plan_vs_actuals_revenue_deviation_percentage)}>
+                                  {formatPercentage(engagement.plan_vs_actuals_revenue_deviation_percentage)}
+                                </span>
+                              ) : (
+                                "—"
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="pt-2">
+                          <Link
+                            href={`/engagements/${engagement.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Button variant="outline" size="sm" className="w-full">
+                              View Details
+                            </Button>
+                          </Link>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <Link href={`/engagements/${engagement.id}`}>
-                      <Button variant="outline" size="sm">
-                        View Details
-                      </Button>
-                    </Link>
-                  </div>
-                </div>
-              ))}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12 text-gray-500">
+              <p>
+                {searchQuery.trim()
+                  ? `No engagements found matching "${searchQuery}"`
+                  : "No engagements found."}
+              </p>
             </div>
           )}
         </CardContent>
@@ -163,7 +386,7 @@ function EngagementsPageContent() {
 
 export default function EngagementsPage() {
   return (
-    <Suspense fallback={<div>Loading...</div>}>
+    <Suspense fallback={<div className="p-6">Loading...</div>}>
       <EngagementsPageContent />
     </Suspense>
   );

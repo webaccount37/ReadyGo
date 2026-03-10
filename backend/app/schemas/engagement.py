@@ -182,6 +182,10 @@ class EngagementResponse(EngagementBase):
     created_at: str  # ISO datetime string
     line_items: Optional[List[EngagementLineItemResponse]] = None
     phases: Optional[List[EngagementPhaseResponse]] = None
+    plan_amount: Optional[Decimal] = None  # Resource plan revenue (for list view)
+    actuals_amount: Optional[Decimal] = None  # Actuals from approved timesheets (for list view)
+    revenue_deviation_percentage: Optional[Decimal] = None  # Quote vs Plan % (for list view)
+    plan_vs_actuals_revenue_deviation_percentage: Optional[Decimal] = None  # Plan vs Actuals % (for list view)
     
     class Config:
         from_attributes = True

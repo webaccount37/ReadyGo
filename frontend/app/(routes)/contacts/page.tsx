@@ -9,7 +9,7 @@ import {
   useDeleteContact,
 } from "@/hooks/useContacts";
 import { Button } from "@/components/ui/button";
-import { Trash2 } from "lucide-react";
+import { Trash2, Pencil, Eye } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { ContactForm } from "@/components/contacts/contact-form";
@@ -143,7 +143,7 @@ function ContactsPageContent() {
 
       {!isLoading && !error && (
         <Card>
-          <CardHeader>
+          <CardHeader className="px-2">
             <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <CardTitle>Contacts ({data?.total ?? 0})</CardTitle>
               <div className="w-full sm:w-64">
@@ -157,23 +157,34 @@ function ContactsPageContent() {
               </div>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-2">
             {filteredItems.length > 0 ? (
                 <>
                   {/* Desktop Table View */}
-                  <div className="hidden md:block overflow-x-auto">
-                    <table className="w-full">
-                        <thead>
-                          <tr className="border-b">
-                            <th className="text-left p-3 font-semibold">Name</th>
-                            <th className="text-left p-3 font-semibold">Account</th>
-                            <th className="text-left p-3 font-semibold">Type</th>
-                            <th className="text-left p-3 font-semibold">Email</th>
-                            <th className="text-left p-3 font-semibold">Phone</th>
-                            <th className="text-left p-3 font-semibold">Job Title</th>
-                            <th className="text-left p-3 font-semibold">Actions</th>
-                          </tr>
-                        </thead>
+                  <div className="hidden md:block w-full overflow-hidden">
+                    <table className="w-full text-xs table-fixed border-collapse">
+                      <colgroup>
+                        <col style={{ width: "16%" }} />
+                        <col style={{ width: "13%" }} />
+                        <col style={{ width: "7%" }} />
+                        <col style={{ width: "15%" }} />
+                        <col style={{ width: "11%" }} />
+                        <col style={{ width: "13%" }} />
+                        <col style={{ width: "5%" }} />
+                        <col style={{ width: "10%" }} />
+                      </colgroup>
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Contact Name">Name</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account">Account</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account Type">Type</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Email">Email</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Phone">Phone</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Job Title">Job Title</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account Opportunities">Opps</th>
+                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
+                        </tr>
+                      </thead>
                       <tbody>
                       {filteredItems.map((contact) => (
                         <tr 
@@ -181,20 +192,18 @@ function ContactsPageContent() {
                           className="border-b hover:bg-gray-50 cursor-pointer"
                           onClick={() => setViewingContact(contact)}
                         >
-                          <td className="p-3">
-                            <div className="font-medium">
-                              {highlightText(`${contact.first_name} ${contact.last_name}`, searchQuery)}
-                            </div>
-                            <div className="flex gap-1 mt-1">
+                          <td className="p-1.5 font-medium text-xs overflow-hidden" title={`${contact.first_name} ${contact.last_name}`}>
+                            <div className="flex items-center gap-1.5 min-w-0 flex-nowrap">
+                              <span className="truncate">{highlightText(`${contact.first_name} ${contact.last_name}`, searchQuery)}</span>
                               {contact.is_primary && (
-                                <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded font-medium">Primary</span>
+                                <span className="text-[10px] bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0 rounded shrink-0">Primary</span>
                               )}
                               {contact.is_billing && (
-                                <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded font-medium">Billing</span>
+                                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0 rounded shrink-0">Billing</span>
                               )}
                             </div>
                           </td>
-                          <td className="p-3">
+                          <td className="p-1.5 truncate text-xs overflow-hidden" title={contact.account_name || getAccountName(contact.account_id)}>
                             <Link
                               href={`/accounts?search=${encodeURIComponent(contact.account_name || getAccountName(contact.account_id))}`}
                               onClick={(e) => e.stopPropagation()}
@@ -203,50 +212,93 @@ function ContactsPageContent() {
                               {highlightText(contact.account_name || getAccountName(contact.account_id), searchQuery)}
                             </Link>
                           </td>
-                          <td className="p-3">
+                          <td className="p-1.5 overflow-hidden min-w-0">
                             {contact.account_type ? (
                               <span
-                                className={`px-2 py-1 text-xs rounded font-medium ${getAccountTypeColor(contact.account_type as AccountType).bg} ${getAccountTypeColor(contact.account_type as AccountType).text}`}
+                                className={`px-2 py-0.5 text-xs rounded font-medium ${getAccountTypeColor(contact.account_type as AccountType).bg} ${getAccountTypeColor(contact.account_type as AccountType).text}`}
                                 style={{ backgroundColor: getAccountTypeColor(contact.account_type as AccountType).bgColor }}
                               >
                                 {getAccountTypeLabel(contact.account_type as AccountType)}
                               </span>
                             ) : (
-                              <span className="px-2 py-1 text-xs rounded bg-gray-100 text-gray-800">—</span>
+                              <span className="text-gray-500">—</span>
                             )}
                           </td>
-                          <td className="p-3">
-                            <div className="text-sm">{contact.email ? highlightText(contact.email, searchQuery) : "—"}</div>
+                          <td className="p-1.5 truncate text-xs overflow-hidden" title={contact.email || "—"}>
+                            {contact.email ? (
+                              <a
+                                href={`mailto:${contact.email}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                {highlightText(contact.email, searchQuery)}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
                           </td>
-                          <td className="p-3">
-                            <div className="text-sm">{contact.phone ? highlightText(contact.phone, searchQuery) : "—"}</div>
+                          <td className="p-1.5 truncate text-xs overflow-hidden" title={contact.phone || "—"}>
+                            {contact.phone ? (
+                              <a
+                                href={`tel:${contact.phone}`}
+                                onClick={(e) => e.stopPropagation()}
+                                className="text-blue-600 hover:text-blue-800 hover:underline"
+                              >
+                                {highlightText(contact.phone, searchQuery)}
+                              </a>
+                            ) : (
+                              "—"
+                            )}
                           </td>
-                          <td className="p-3">
-                            <div className="text-sm">{contact.job_title ? highlightText(contact.job_title, searchQuery) : "—"}</div>
+                          <td className="p-1.5 truncate text-xs overflow-hidden" title={contact.job_title || "—"}>
+                            {contact.job_title ? highlightText(contact.job_title, searchQuery) : "—"}
                           </td>
-                          <td className="p-3">
-                            <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+                          <td className="p-1.5 text-xs overflow-hidden min-w-0">
+                            <Link
+                              href={`/opportunities?account_id=${contact.account_id}&search=${encodeURIComponent(contact.account_name || getAccountName(contact.account_id))}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              View
+                            </Link>
+                          </td>
+                          <td className="p-1 overflow-hidden min-w-0">
+                            <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => setViewingContact(contact)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setViewingContact(contact);
+                                }}
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="View"
                               >
-                                View
+                                <Eye className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => setEditingContact(contact.id)}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditingContact(contact.id);
+                                }}
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="Edit"
                               >
-                                Edit
+                                <Pencil className="w-3 h-3" />
                               </Button>
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleDelete(contact.id)}
-                                className="text-red-600 hover:text-red-700"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDelete(contact.id);
+                                }}
+                                className="h-5 w-5 p-0 shrink-0 text-red-600 hover:text-red-700"
+                                title="Delete"
                               >
-                                <Trash2 className="w-4 h-4" />
+                                <Trash2 className="w-3 h-3" />
                               </Button>
                             </div>
                           </td>
@@ -325,34 +377,54 @@ function ContactsPageContent() {
                           )}
                           {contact.job_title && (
                             <div>
-                              <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                Job Title
-                              </div>
+                              <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Job Title</div>
                               <div className="text-sm">{contact.job_title}</div>
                             </div>
                           )}
+                          <div>
+                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Opportunities</div>
+                            <Link
+                              href={`/opportunities?account_id=${contact.account_id}&search=${encodeURIComponent(contact.account_name || getAccountName(contact.account_id))}`}
+                              onClick={(e) => e.stopPropagation()}
+                              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                            >
+                              View account opportunities
+                            </Link>
+                          </div>
                           <div className="flex gap-2 pt-2" onClick={(e) => e.stopPropagation()}>
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => setViewingContact(contact)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setViewingContact(contact);
+                              }}
                               className="flex-1"
+                              title="View"
                             >
-                              View
+                              <Eye className="w-4 h-4" />
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => setEditingContact(contact.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingContact(contact.id);
+                              }}
                               className="flex-1"
+                              title="Edit"
                             >
-                              Edit
+                              <Pencil className="w-4 h-4" />
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleDelete(contact.id)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDelete(contact.id);
+                              }}
                               className="flex-1 text-red-600 hover:text-red-700"
+                              title="Delete"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
