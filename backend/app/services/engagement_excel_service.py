@@ -852,14 +852,6 @@ class EngagementExcelService:
                     final_rate = final_rate if final_rate is not None else default_rate
                     final_cost = final_cost if final_cost is not None else default_cost
                 
-                if item_data["cost"] is not None and item_data["rate"] is not None:
-                    cost_changed = abs(float(opportunity_role_rate.internal_cost_rate) - float(item_data["cost"])) > 0.01
-                    rate_changed = abs(float(opportunity_role_rate.external_rate) - float(item_data["rate"])) > 0.01
-                    if cost_changed or rate_changed:
-                        opportunity_role_rate.internal_cost_rate = float(item_data["cost"])
-                        opportunity_role_rate.external_rate = float(item_data["rate"])
-                        await self.session.flush()
-                
                 line_item = existing_by_row_order.get(row_order)
                 if line_item:
                     await self.line_item_repo.update(

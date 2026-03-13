@@ -19,9 +19,11 @@ COPY . .
 # Ensure public directory exists (Next.js needs it)
 RUN mkdir -p ./public
 
-# Set environment variable for build
+# Set environment variables for build (Next.js rewrites are evaluated at build time)
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG BACKEND_URL=http://backend:8000
+ENV BACKEND_URL=$BACKEND_URL
 
 RUN npm run build
 

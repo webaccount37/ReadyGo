@@ -44,8 +44,8 @@ services:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@postgres:5432/readygo
       REDIS_URL: redis://redis:6379/0
       # Override CORS for Docker setup (can be overridden in .env)
-      CORS_ORIGINS: '["http://localhost:3000","http://frontend:3000"]'
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      CORS_ORIGINS: '["http://localhost:3000","http://frontend:3000","http://127.0.0.1:3000"]'
+      # OTEL collector is optional - removed to avoid connection errors when not running
       # Override redirect URI for Docker (if needed)
       # AZURE_REDIRECT_URI: http://localhost:8000/api/v1/auth/callback
     ports:
@@ -64,10 +64,15 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
       args:
-        NEXT_PUBLIC_API_URL: http://localhost:8000
+        # Empty = use relative URLs, proxied by Next.js to backend (fixes 404 when accessing via IP/hostname)
+        NEXT_PUBLIC_API_URL: ""
+        # Baked in at build time - Next.js rewrites are evaluated during build, not runtime
+        BACKEND_URL: http://backend:8000
     container_name: readygo-frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_API_URL: ""
+      # Backend URL for Next.js rewrites (proxy) - use Docker service name
+      BACKEND_URL: http://backend:8000
     ports:
       - "3000:3000"
     depends_on:
