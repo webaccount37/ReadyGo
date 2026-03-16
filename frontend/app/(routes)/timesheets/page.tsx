@@ -125,14 +125,23 @@ function TimesheetPageContent() {
 
   const { data: engagementsAll } = useEngagements({ limit: 500 });
   const { data: engagementsForEmployee } = useEngagements(
-    { employee_id: employeeId ?? undefined, limit: 200 },
+    {
+      employee_id: employeeId ?? undefined,
+      limit: 200,
+      week_start_date: timesheet ? selectedWeek : undefined,
+    },
     { enabled: !!employeeId }
   );
+  const useWeekFilter = !!(employeeId && selectedWeek);
   const engagementsSource = useMemo(() => {
+    // When filtering by week, use filtered result only (even if empty) - don't fall back to all engagements
+    if (useWeekFilter && engagementsForEmployee) {
+      return engagementsForEmployee.items ?? [];
+    }
     if (engagementsForEmployee?.items?.length) return engagementsForEmployee.items;
     if (engagementsAll?.items?.length) return engagementsAll.items;
     return [];
-  }, [engagementsForEmployee?.items, engagementsAll?.items]);
+  }, [useWeekFilter, engagementsForEmployee, engagementsAll?.items]);
 
   const { data: incompleteWeeksData } = useTimesheetIncompleteWeeks({
     enabled: (incompleteData?.count ?? 0) > 0,
@@ -211,6 +220,21 @@ function TimesheetPageContent() {
     }, 0);
   }, [localEntries]);
 
+  const hasMissingTypeAccountOrProject = useMemo(() => {
+    for (const e of localEntries) {
+      const rowSum = DAY_KEYS.reduce(
+        (s, k) => s + (parseFloat(String(e[`${k}_hours`])) || 0),
+        0
+      );
+      if (rowSum <= 0) continue;
+      const entryType = (e.entry_type || "ENGAGEMENT") as string;
+      if (entryType === "HOLIDAY") continue;
+      if (!e.account_id) return true;
+      if (entryType === "ENGAGEMENT" && !e.engagement_id) return true;
+    }
+    return false;
+  }, [localEntries]);
+
   const handleSave = async () => {
     if (!timesheet) return;
     const filtered = localEntries.filter((e) => e.id || e.account_id || e.entry_type === "HOLIDAY");
@@ -252,6 +276,10 @@ function TimesheetPageContent() {
       alert("Total hours must be at least 40 to submit.");
       return;
     }
+    if (hasMissingTypeAccountOrProject) {
+      alert("Every row with hours must have Type, Account, and Project (for Engagement rows) selected.");
+      return;
+    }
     setPlanVsActualModalOpen(false);
     try {
       await submitTimesheet.mutateAsync({
@@ -268,18 +296,25 @@ function TimesheetPageContent() {
         setPlanVsActualMessage(msg);
         setPlanVsActualModalOpen(true);
       } else {
-        alert(err instanceof Error ? err.message : "Failed to submit");
+        const msg =
+          (detail && typeof detail === "string") ? detail
+          : (resp && typeof resp === "object" && "detail" in resp) ? String((resp as { detail?: unknown }).detail)
+          : err instanceof Error ? err.message
+          : "Failed to submit";
+        alert(msg);
       }
     }
   };
 
   const handleAddRow = () => {
-    const firstAccount = localEntries[0]?.account_id;
     setLocalEntries((prev) => [
       ...prev,
       {
-        entry_type: "ENGAGEMENT" as const,
-        account_id: firstAccount,
+        entry_type: undefined,
+        account_id: undefined,
+        engagement_id: undefined,
+        opportunity_id: undefined,
+        engagement_phase_id: undefined,
         billable: true,
         row_order: prev.length,
         sun_hours: 0,
@@ -419,7 +454,8 @@ function TimesheetPageContent() {
                   </Button>
                   <Button
                     onClick={() => handleSubmit(false)}
-                    disabled={submitTimesheet.isPending || totalHours < 40}
+                    disabled={submitTimesheet.isPending || totalHours < 40 || hasMissingTypeAccountOrProject}
+                    title={hasMissingTypeAccountOrProject ? "Fill in Type, Account, and Project for all rows with hours" : undefined}
                   >
                     {submitTimesheet.isPending ? "Submitting..." : "Submit for Approval"}
                   </Button>
@@ -730,6 +766,7 @@ function TimesheetPageContent() {
 }
 
 const ENTRY_TYPE_OPTIONS = [
+  { value: "" as const, label: "— Select —" },
   { value: "ENGAGEMENT" as const, label: "Engagement" },
   { value: "SALES" as const, label: "Sales" },
   { value: "HOLIDAY" as const, label: "Holiday" },
@@ -768,9 +805,16 @@ function TimesheetEntryRow({
   entryIdx?: number;
 }) {
   if (!onOpenNote) throw new Error("TimesheetEntryRow requires onOpenNote");
-  const entryType = (entry.entry_type || "ENGAGEMENT") as "ENGAGEMENT" | "SALES" | "HOLIDAY";
+  const entryType = (entry.entry_type ?? "") as "" | "ENGAGEMENT" | "SALES" | "HOLIDAY";
   const isSales = entryType === "SALES";
   const isHoliday = entryType === "HOLIDAY";
+
+  /** For Sales: only accounts that have at least one Opportunity (no opportunities = no Sales project). */
+  const accountsWithOpportunities = useMemo(() => {
+    if (!accountsData?.items || !opportunitiesData?.items?.length) return [];
+    const accountIdsWithOpps = new Set(opportunitiesData.items.map((o) => o.account_id).filter(Boolean));
+    return accountsData.items.filter((a) => accountIdsWithOpps.has(a.id));
+  }, [accountsData?.items, opportunitiesData?.items]);
 
   const opportunitiesForAccount = useMemo(() => {
     if (!opportunitiesData?.items || !entry.account_id) return opportunitiesData?.items ?? [];
@@ -828,16 +872,22 @@ function TimesheetEntryRow({
   const accountName = (entry as { account_name?: string }).account_name;
   const projectDisplayName = (entry as { opportunity_name?: string }).opportunity_name ?? (entry as { engagement_name?: string }).engagement_name;
 
-  const handleTypeChange = (newType: "ENGAGEMENT" | "SALES") => {
+  const handleTypeChange = (newType: "" | "ENGAGEMENT" | "SALES" | "HOLIDAY") => {
     const base: TimesheetEntryUpsert = {
       ...entry,
-      entry_type: newType,
+      entry_type: newType === "" ? undefined : newType,
       account_id: undefined,
       engagement_id: undefined,
       opportunity_id: undefined,
       engagement_phase_id: undefined,
     };
     if (newType === "SALES") {
+      base.billable = false;
+      DAY_KEYS.forEach((k) => {
+        base[`${k}_hours`] = 0;
+      });
+    }
+    if (newType === "HOLIDAY") {
       base.billable = false;
       DAY_KEYS.forEach((k) => {
         base[`${k}_hours`] = 0;
@@ -876,7 +926,7 @@ function TimesheetEntryRow({
         {canEdit && !isHoliday ? (
           <Select
             value={entryType}
-            onChange={(e) => handleTypeChange(e.target.value as "ENGAGEMENT" | "SALES")}
+            onChange={(e) => handleTypeChange(e.target.value as "" | "ENGAGEMENT" | "SALES" | "HOLIDAY")}
             className="w-full max-w-[90px] rounded border-slate-200 text-xs py-1 h-7 min-h-0"
             title={ENTRY_TYPE_OPTIONS.find((o) => o.value === entryType)?.label}
           >
@@ -903,17 +953,19 @@ function TimesheetEntryRow({
                 engagement_id: undefined,
                 engagement_phase_id: undefined,
                 account_name: isSales
-                  ? accountsData?.items?.find((a) => a.id === accountId)?.company_name
+                  ? accountsWithOpportunities.find((a) => a.id === accountId)?.company_name
                   : accountsFromEngagements.find((a) => a.id === accountId)?.name,
               });
             }}
             className="w-full max-w-[130px] rounded border-slate-200 text-xs py-1 h-7 min-h-0"
-            title={accountName || (isSales ? accountsData?.items?.find((a) => a.id === entry.account_id)?.company_name : accountsFromEngagements.find((a) => a.id === entry.account_id)?.name)}
+            title={accountName || (isSales ? accountsWithOpportunities.find((a) => a.id === entry.account_id)?.company_name : accountsFromEngagements.find((a) => a.id === entry.account_id)?.name)}
           >
             <option value="">— Select —</option>
-            {isSales
+            {!entryType
+              ? []
+              : isSales
               ? (() => {
-                  const accts = accountsData?.items ?? [];
+                  const accts = accountsWithOpportunities;
                   if (entry.account_id && accountName && !accts.some((a) => a.id === entry.account_id)) {
                     return [
                       <option key={entry.account_id} value={entry.account_id}>

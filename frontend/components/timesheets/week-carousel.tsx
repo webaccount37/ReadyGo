@@ -92,6 +92,17 @@ export function WeekCarousel({
     scrollToSelected();
   }, [scrollToSelected, selectedWeek, readOnly]);
 
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el || readOnly) return;
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      el.scrollLeft += e.deltaY;
+    };
+    el.addEventListener("wheel", handleWheel, { passive: false });
+    return () => el.removeEventListener("wheel", handleWheel);
+  }, [readOnly]);
+
   if (readOnly) {
     return (
       <div className={cn("flex items-center gap-2 py-2", className)}>

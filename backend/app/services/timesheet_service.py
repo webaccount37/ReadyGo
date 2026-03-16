@@ -841,7 +841,10 @@ class TimesheetService(BaseService):
         current_employee_id: UUID,
         force: bool = False,
     ) -> Tuple[TimesheetResponse, Optional[str]]:
-        """Submit timesheet. Returns (response, warning_message)."""
+        """Submit timesheet. Returns (response, warning_message).
+        Submission is allowed for any week including before employee start_date; only incomplete
+        flagging excludes pre-start weeks. Weeks before start_date are not required but can be submitted.
+        """
         timesheet = await self.timesheet_repo.get(timesheet_id)
         if not timesheet:
             raise ValueError("Timesheet not found")
@@ -856,6 +859,22 @@ class TimesheetService(BaseService):
         await self._ensure_resource_plan_zero_entries(timesheet)
         await self.session.flush()
         await self.session.refresh(timesheet)  # reload entries including new 0-hour rows
+
+        # Validate rows with hours: Type, Account, and Project (for ENGAGEMENT) are required
+        for entry in timesheet.entries or []:
+            entry_total = sum(
+                Decimal(str(getattr(entry, f"{d}_hours") or 0))
+                for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
+            )
+            if entry_total <= 0:
+                continue
+            entry_type = getattr(entry, "entry_type", None) or TimesheetEntryType.ENGAGEMENT
+            if entry_type == TimesheetEntryType.HOLIDAY:
+                continue
+            if not entry.account_id:
+                raise ValueError("Every timesheet row with hours must have an Account selected")
+            if entry_type == TimesheetEntryType.ENGAGEMENT and not entry.engagement_id:
+                raise ValueError("Every Engagement row with hours must have a Project selected")
 
         total = Decimal("0")
         plan_vs_actual_warnings = []
@@ -1030,15 +1049,21 @@ class TimesheetService(BaseService):
             status_history=status_history_resp,
         )
 
-    async def count_incomplete_past_weeks(self, employee_id: UUID) -> int:
-        """Count weeks in the past with NOT_SUBMITTED or REOPENED status."""
+    async def count_incomplete_past_weeks(self, employee_id: UUID, employee_start_date: date) -> int:
+        """Count weeks in the past (on/after employee start_date) with NOT_SUBMITTED or REOPENED status."""
         today = date.today()
-        return await self.timesheet_repo.count_incomplete_past_weeks(employee_id, today)
+        return await self.timesheet_repo.count_incomplete_past_weeks(
+            employee_id, today, employee_start_date
+        )
 
-    async def list_incomplete_past_weeks(self, employee_id: UUID, limit: int = 20) -> List[date]:
-        """List week_start_date for past weeks with NOT_SUBMITTED or REOPENED."""
+    async def list_incomplete_past_weeks(
+        self, employee_id: UUID, employee_start_date: date, limit: int = 20
+    ) -> List[date]:
+        """List week_start_date for past weeks (on/after employee start_date) with NOT_SUBMITTED or REOPENED."""
         today = date.today()
-        return await self.timesheet_repo.list_incomplete_past_weeks(employee_id, today, limit)
+        return await self.timesheet_repo.list_incomplete_past_weeks(
+            employee_id, today, employee_start_date, limit
+        )
 
     async def get_week_statuses(
         self,

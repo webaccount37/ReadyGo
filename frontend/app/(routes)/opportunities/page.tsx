@@ -1,33 +1,32 @@
 "use client";
 
 import { useState, useMemo, useEffect, Suspense } from "react";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import {
   useOpportunities,
-  useCreateOpportunity,
-  useUpdateOpportunity,
-  useDeleteOpportunity,
 } from "@/hooks/useOpportunities";
-import { useEstimates } from "@/hooks/useEstimates";
-import { useQuotes } from "@/hooks/useQuotes";
+import { useOpportunityActions } from "@/hooks/useOpportunityActions";
 import { Button } from "@/components/ui/button";
 import { Trash2, Calculator, FileCheck, Lock, Briefcase, Pencil } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
-import { OpportunityForm } from "@/components/opportunities/opportunity-form";
-import { OpportunityRelationships } from "@/components/opportunities/opportunity-relationships";
-import type { OpportunityCreate, OpportunityUpdate } from "@/types/opportunity";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
 import { cn } from "@/lib/utils";
-import { useOpportunity } from "@/hooks/useOpportunities";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { useEmployees } from "@/hooks/useEmployees";
 import { opportunitiesApi } from "@/lib/api/opportunities";
+import {
+  formatCurrency,
+  getForecastDisplayValue,
+  getAccountName,
+  getDeliveryCenterName,
+  getBillingTermName,
+  getEmployeeName,
+  getParentOpportunityName,
+} from "@/lib/opportunity-utils";
 import Link from "next/link";
 
 function OpportunitiesPageContent() {
@@ -35,10 +34,9 @@ function OpportunitiesPageContent() {
   const accountIdParam = searchParams.get("account_id");
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [editingOpportunity, setEditingOpportunity] = useState<string | null>(null);
-  const [viewingOpportunity, setViewingOpportunity] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+
+  const router = useRouter();
 
   // Initialize search query from URL parameter
   useEffect(() => {
@@ -48,24 +46,29 @@ function OpportunitiesPageContent() {
     }
   }, [searchParams]);
 
-  // Initialize viewing opportunity from URL parameter
+  // Redirect ?opportunity_id= to the opportunity detail page
   useEffect(() => {
     const opportunityIdParam = searchParams.get("opportunity_id");
     if (opportunityIdParam) {
-      setViewingOpportunity(opportunityIdParam);
+      router.replace(`/opportunities/${opportunityIdParam}`);
     }
-  }, [searchParams]);
+  }, [searchParams, router]);
 
-  const router = useRouter();
   const { data, isLoading, error, refetch } = useOpportunities({ 
     skip, 
     limit,
     account_id: accountIdParam || undefined
   });
-  const createOpportunity = useCreateOpportunity();
-  const updateOpportunity = useUpdateOpportunity();
-  const deleteOpportunity = useDeleteOpportunity();
-  
+  const {
+    getActiveEstimateId,
+    getActiveQuoteId,
+    hasQuotes,
+    hasActiveQuote,
+    handleEstimatesClick,
+    handleQuotesClick,
+    handleDelete,
+  } = useOpportunityActions();
+
   // Fetch related data for display names
   const { data: accountsData } = useAccounts({ limit: 100 });
   const { data: deliveryCentersData } = useDeliveryCenters();
@@ -73,73 +76,6 @@ function OpportunitiesPageContent() {
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: allOpportunitiesData } = useOpportunities({ limit: 100 });
   
-  // Fetch all estimates and quotes to determine active estimates and quote existence
-  // Note: API limit is 1000, so we fetch up to 1000 items
-  const { data: allEstimatesData } = useEstimates({ limit: 1000 });
-  const { data: allQuotesData } = useQuotes({ limit: 1000 });
-  
-  // Fetch opportunity with relationships for viewing/editing
-  const { data: viewingOpportunityData, refetch: refetchViewingOpportunity } = useOpportunity(
-    viewingOpportunity || "",
-    true, // include relationships
-    { enabled: !!viewingOpportunity }
-  );
-  
-  const { data: editingOpportunityData, refetch: refetchEditingOpportunity } = useOpportunity(
-    editingOpportunity || "",
-    true, // include relationships
-    { enabled: !!editingOpportunity }
-  );
-
-  // Helper functions for formatting display values (must be defined before filteredItems)
-  const formatCurrency = (value: string | number | undefined, currency?: string): string => {
-    if (value === undefined || value === null || value === "") return "—";
-    const numValue = typeof value === "string" ? parseFloat(value) : value;
-    if (isNaN(numValue)) return "—";
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: currency || "USD",
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 0,
-    }).format(numValue);
-  };
-
-  const formatMonth = (month: number | undefined): string => {
-    if (!month) return "—";
-    return new Date(2000, month - 1).toLocaleString("default", { month: "long" });
-  };
-
-  // Get display names for IDs
-  const getAccountName = (accountId: string | undefined): string => {
-    if (!accountId) return "—";
-    const account = accountsData?.items.find((a) => a.id === accountId);
-    return account?.company_name || accountId;
-  };
-
-  const getDeliveryCenterName = (dcId: string | undefined): string => {
-    if (!dcId) return "—";
-    const dc = deliveryCentersData?.items.find((d) => d.id === dcId);
-    return dc?.name || dcId;
-  };
-
-  const getBillingTermName = (termId: string | undefined): string => {
-    if (!termId) return "—";
-    const term = billingTermsData?.items.find((t) => t.id === termId);
-    return term?.name || termId;
-  };
-
-  const getEmployeeName = (empId: string | undefined): string => {
-    if (!empId) return "—";
-    const emp = employeesData?.items.find((e) => e.id === empId);
-    return emp ? `${emp.first_name} ${emp.last_name}` : empId;
-  };
-
-  const getParentOpportunityName = (parentId: string | undefined): string => {
-    if (!parentId) return "None";
-    const parent = allOpportunitiesData?.items.find((e) => e.id === parentId);
-    return parent?.name || parentId;
-  };
-
   // Fetch opportunities with relationships for accurate counts (only for current page)
   const opportunityIdsForCounts = useMemo(() => (data?.items || []).map(opp => opp.id), [data]);
   const opportunityCountsQueries = useQueries({
@@ -173,66 +109,6 @@ function OpportunitiesPageContent() {
     return countDict;
   }, [opportunityCountsQueries]);
 
-  // Helper function to get active estimate ID for an opportunity
-  const getActiveEstimateId = (opportunityId: string): string | null => {
-    if (!allEstimatesData?.items) return null;
-    const activeEstimate = allEstimatesData.items.find(
-      (est) => est.opportunity_id === opportunityId && est.active_version === true
-    );
-    return activeEstimate?.id || null;
-  };
-
-  // Helper function to check if quotes exist for an opportunity
-  const hasQuotes = (opportunityId: string): boolean => {
-    if (!allQuotesData?.items) return false;
-    return allQuotesData.items.some((quote) => quote.opportunity_id === opportunityId);
-  };
-
-  // Helper function to check if there's an active quote for an opportunity
-  const hasActiveQuote = (opportunityId: string): boolean => {
-    if (!allQuotesData?.items || !opportunityId) {
-      return false;
-    }
-    return allQuotesData.items.some((quote) => {
-      return quote.opportunity_id === opportunityId && quote.is_active === true;
-    });
-  };
-
-  // Helper function to get active quote ID for an opportunity
-  const getActiveQuoteId = (opportunityId: string): string | null => {
-    if (!allQuotesData?.items || !opportunityId) {
-      return null;
-    }
-    const activeQuote = allQuotesData.items.find((quote) => {
-      return quote.opportunity_id === opportunityId && quote.is_active === true;
-    });
-    return activeQuote?.id || null;
-  };
-
-  // Handler for Estimates button - navigate to active estimate or estimates page
-  const handleEstimatesClick = (opportunityId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const activeEstimateId = getActiveEstimateId(opportunityId);
-    if (activeEstimateId) {
-      router.push(`/estimates/${activeEstimateId}`);
-    } else {
-      router.push(`/estimates?opportunity_id=${opportunityId}`);
-    }
-  };
-
-  // Handler for Quotes button - navigate to active quote if exists, otherwise quotes page or create
-  const handleQuotesClick = (opportunityId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    const activeQuoteId = getActiveQuoteId(opportunityId);
-    if (activeQuoteId) {
-      router.push(`/quotes/${activeQuoteId}`);
-    } else if (hasQuotes(opportunityId)) {
-      router.push(`/quotes?opportunity_id=${opportunityId}`);
-    } else {
-      router.push(`/quotes/create?opportunity_id=${opportunityId}`);
-    }
-  };
-
   const filteredItems = useMemo(() => {
     if (!data?.items || !searchQuery.trim()) {
       return data?.items || [];
@@ -246,10 +122,10 @@ function OpportunitiesPageContent() {
       const description = (opportunity.description || "").toLowerCase();
       
       // Get display names for searchable fields
-      const accountName = getAccountName(opportunity.account_id).toLowerCase();
-      const parentName = getParentOpportunityName(opportunity.parent_opportunity_id).toLowerCase();
-      const deliveryCenterName = getDeliveryCenterName(opportunity.delivery_center_id).toLowerCase();
-      const ownerName = getEmployeeName(opportunity.opportunity_owner_id).toLowerCase();
+      const accountName = getAccountName(accountsData, opportunity.account_id).toLowerCase();
+      const parentName = getParentOpportunityName(allOpportunitiesData, opportunity.parent_opportunity_id).toLowerCase();
+      const deliveryCenterName = getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id).toLowerCase();
+      const ownerName = getEmployeeName(employeesData, opportunity.opportunity_owner_id).toLowerCase();
       
       // Date fields
       const startDate = opportunity.start_date 
@@ -292,51 +168,6 @@ function OpportunitiesPageContent() {
     });
   }, [data, searchQuery, accountsData, deliveryCentersData, employeesData, allOpportunitiesData, employeeCounts]);
 
-  const handleCreate = async (data: OpportunityCreate | OpportunityUpdate) => {
-    try {
-      await createOpportunity.mutateAsync(data as OpportunityCreate);
-      setIsCreateOpen(false);
-      refetch();
-    } catch (err) {
-      console.error("Failed to create opportunity:", err);
-      alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const handleUpdate = async (data: OpportunityCreate | OpportunityUpdate) => {
-    if (!editingOpportunity) return;
-    try {
-      await updateOpportunity.mutateAsync({ id: editingOpportunity, data: data as OpportunityUpdate });
-      setEditingOpportunity(null);
-      refetch();
-    } catch (err) {
-      console.error("Failed to update opportunity:", err);
-      alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    const opp = data?.items.find((e) => e.id === id);
-    if (opp?.is_permanently_locked || opp?.is_locked) return;
-    if (confirm("Are you sure you want to delete this opportunity?")) {
-      try {
-        await deleteOpportunity.mutateAsync(id);
-        refetch();
-      } catch (err) {
-        console.error("Failed to delete opportunity:", err);
-        alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-  };
-
-  const opportunityToEdit = editingOpportunityData || (editingOpportunity
-    ? data?.items.find((e) => e.id === editingOpportunity)
-    : null);
-
-  const opportunityToView = viewingOpportunityData || (viewingOpportunity
-    ? data?.items.find((e) => e.id === viewingOpportunity)
-    : null);
-
   // Helper functions for formatting display values
   const formatEnumValue = (value: string | undefined): string => {
     if (!value) return "—";
@@ -356,6 +187,41 @@ function OpportunitiesPageContent() {
     return new Date(dateStr).toLocaleDateString();
   };
 
+  // Compute probability from status (matches form logic); used for Forecast $ display
+  const getProbabilityFromStatus = (status: string | undefined): number => {
+    const map: Record<string, number> = {
+      qualified: 25,
+      proposal: 50,
+      negotiation: 80,
+      won: 100,
+    };
+    return status ? (map[status] ?? 0) : 0;
+  };
+
+  // Compute Forecast $ from status + deal_value_usd (matches Edit form; avoids stale stored value)
+  const getForecastDisplayValue = (
+    opportunity: { status?: string; deal_value_usd?: string | number }
+  ): string | number | undefined => {
+    const prob = getProbabilityFromStatus(opportunity.status);
+    const dealUsd = opportunity.deal_value_usd;
+    if (prob <= 0 || dealUsd == null || dealUsd === "") return undefined;
+    const num = typeof dealUsd === "string" ? parseFloat(dealUsd) : dealUsd;
+    if (isNaN(num) || num <= 0) return undefined;
+    return (num * prob / 100).toFixed(2);
+  };
+
+  // Compute Forecast Value in default currency (matches Edit form; avoids stale stored value)
+  const getForecastDisplayValueInCurrency = (
+    opportunity: { status?: string; deal_value?: string | number }
+  ): string | number | undefined => {
+    const prob = getProbabilityFromStatus(opportunity.status);
+    const dealVal = opportunity.deal_value;
+    if (prob <= 0 || dealVal == null || dealVal === "") return undefined;
+    const num = typeof dealVal === "string" ? parseFloat(dealVal) : dealVal;
+    if (isNaN(num) || num <= 0) return undefined;
+    return (num * prob / 100).toFixed(2);
+  };
+
 
   return (
     <div>
@@ -366,7 +232,7 @@ function OpportunitiesPageContent() {
             Manage your opportunities and their details
           </p>
         </div>
-        <Button onClick={() => setIsCreateOpen(true)} className="w-full sm:w-auto">+ Add Opportunity</Button>
+        <Button onClick={() => router.push("/opportunities/create")} className="w-full sm:w-auto">+ Add Opportunity</Button>
       </div>
 
       {isLoading && <div className="text-gray-600">Loading opportunities...</div>}
@@ -439,7 +305,7 @@ function OpportunitiesPageContent() {
                           <tr 
                             key={opportunity.id} 
                             className="border-b hover:bg-gray-50 cursor-pointer"
-                            onClick={() => setViewingOpportunity(opportunity.id)}
+                            onClick={() => router.push(`/opportunities/${opportunity.id}`)}
                           >
                             <td className="p-1.5 font-medium text-xs overflow-hidden" title={opportunity.name}>
                               <div className="flex items-center gap-1.5 min-w-0">
@@ -461,23 +327,23 @@ function OpportunitiesPageContent() {
                                 )}
                               </div>
                             </td>
-                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getAccountName(opportunity.account_id)}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getAccountName(accountsData, opportunity.account_id)}>
                               <Link
-                                href={`/accounts?search=${encodeURIComponent(getAccountName(opportunity.account_id))}`}
+                                href={`/accounts?search=${encodeURIComponent(getAccountName(accountsData, opportunity.account_id))}`}
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-blue-600 hover:text-blue-800 hover:underline"
                               >
-                                {highlightText(getAccountName(opportunity.account_id), searchQuery)}
+                                {highlightText(getAccountName(accountsData, opportunity.account_id), searchQuery)}
                               </Link>
                             </td>
-                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getParentOpportunityName(opportunity.parent_opportunity_id)}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getParentOpportunityName(allOpportunitiesData, opportunity.parent_opportunity_id)}>
                               {opportunity.parent_opportunity_id ? (
                                 <Link
-                                  href={`/opportunities?search=${encodeURIComponent(getParentOpportunityName(opportunity.parent_opportunity_id))}`}
+                                  href={`/opportunities/${opportunity.parent_opportunity_id}`}
                                   onClick={(e) => e.stopPropagation()}
                                   className="text-blue-600 hover:text-blue-800 hover:underline"
                                 >
-                                  {getParentOpportunityName(opportunity.parent_opportunity_id)}
+                                  {getParentOpportunityName(allOpportunitiesData, opportunity.parent_opportunity_id)}
                                 </Link>
                               ) : (
                                 "None"
@@ -514,13 +380,13 @@ function OpportunitiesPageContent() {
                                 ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
                                 : "—"}
                             </td>
-                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getDeliveryCenterName(opportunity.delivery_center_id) || "—"}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id) || "—"}>
                               <Link
-                                href={`/delivery-centers?search=${encodeURIComponent(getDeliveryCenterName(opportunity.delivery_center_id))}`}
+                                href={`/delivery-centers?search=${encodeURIComponent(getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id))}`}
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-blue-600 hover:text-blue-800 hover:underline"
                               >
-                                {getDeliveryCenterName(opportunity.delivery_center_id)}
+                                {getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id)}
                               </Link>
                             </td>
                             <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.deal_value_usd ? formatCurrency(opportunity.deal_value_usd, "USD") : "—"}>
@@ -528,9 +394,9 @@ function OpportunitiesPageContent() {
                                 ? formatCurrency(opportunity.deal_value_usd, "USD")
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.forecast_value_usd ? formatCurrency(opportunity.forecast_value_usd, "USD") : "—"}>
-                              {opportunity.forecast_value_usd
-                                ? formatCurrency(opportunity.forecast_value_usd, "USD")
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={getForecastDisplayValue(opportunity) ? formatCurrency(getForecastDisplayValue(opportunity), "USD") : "—"}>
+                              {getForecastDisplayValue(opportunity)
+                                ? formatCurrency(getForecastDisplayValue(opportunity), "USD")
                                 : "—"}
                             </td>
                             <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.plan_amount ? formatCurrency(opportunity.plan_amount, "USD") : "—"}>
@@ -548,7 +414,7 @@ function OpportunitiesPageContent() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => setEditingOpportunity(opportunity.id)}
+                                  onClick={() => router.push(`/opportunities/${opportunity.id}`)}
                                   className="h-5 w-5 p-0 shrink-0"
                                   title="Edit"
                                 >
@@ -595,7 +461,7 @@ function OpportunitiesPageContent() {
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  onClick={() => handleDelete(opportunity.id)}
+                                  onClick={() => handleDelete(opportunity.id, opportunity, refetch)}
                                   disabled={opportunity.is_permanently_locked || opportunity.is_locked}
                                   className={cn(
                                     "h-5 w-5 p-0 shrink-0",
@@ -621,7 +487,7 @@ function OpportunitiesPageContent() {
                         <Card 
                           key={opportunity.id}
                           className="cursor-pointer"
-                          onClick={() => setViewingOpportunity(opportunity.id)}
+                          onClick={() => router.push(`/opportunities/${opportunity.id}`)}
                         >
                           <CardContent className="pt-6">
                             <div className="space-y-3">
@@ -692,6 +558,22 @@ function OpportunitiesPageContent() {
                             )}
                             <div className="grid grid-cols-2 gap-2">
                               <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Deal $</div>
+                                <div className="text-sm">
+                                  {opportunity.deal_value_usd
+                                    ? formatCurrency(opportunity.deal_value_usd, "USD")
+                                    : "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Forecast $</div>
+                                <div className="text-sm">
+                                  {getForecastDisplayValue(opportunity)
+                                    ? formatCurrency(getForecastDisplayValue(opportunity), "USD")
+                                    : "—"}
+                                </div>
+                              </div>
+                              <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Plan $</div>
                                 <div className="text-sm">
                                   {opportunity.plan_amount != null && opportunity.plan_amount !== undefined && opportunity.plan_amount !== ""
@@ -712,7 +594,7 @@ function OpportunitiesPageContent() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => setEditingOpportunity(opportunity.id)}
+                                onClick={() => router.push(`/opportunities/${opportunity.id}`)}
                                 className="flex-1"
                               >
                                 Edit
@@ -758,7 +640,7 @@ function OpportunitiesPageContent() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => handleDelete(opportunity.id)}
+                                onClick={() => handleDelete(opportunity.id, opportunity, refetch)}
                                 disabled={opportunity.is_permanently_locked || opportunity.is_locked}
                                 className={cn(
                                   "flex-1",
@@ -787,7 +669,7 @@ function OpportunitiesPageContent() {
                     {!searchQuery.trim() && (
                       <Button
                         className="mt-4"
-                        onClick={() => setIsCreateOpen(true)}
+                        onClick={() => router.push("/opportunities/create")}
                       >
                         Create First Opportunity
                       </Button>
@@ -821,304 +703,6 @@ function OpportunitiesPageContent() {
           )}
         </>
       )}
-
-      {/* Create Dialog */}
-      <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-        <DialogHeader>
-          <DialogTitle>Create New Opportunity</DialogTitle>
-        </DialogHeader>
-        <DialogContent>
-          <OpportunityForm
-            onSubmit={handleCreate}
-            onCancel={() => setIsCreateOpen(false)}
-            isLoading={createOpportunity.isPending}
-          />
-        </DialogContent>
-      </Dialog>
-
-      {/* View Dialog */}
-      {viewingOpportunity && opportunityToView && (
-        <Dialog open={!!viewingOpportunity} onOpenChange={(open) => !open && setViewingOpportunity(null)}>
-          <DialogHeader>
-            <DialogTitle>Opportunity Details</DialogTitle>
-          </DialogHeader>
-          <DialogContent className="space-y-4 max-h-[90vh] overflow-y-auto">
-            {/* Basic Information */}
-            <div className="space-y-4">
-              {((opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked || (opportunityToView?.id && hasActiveQuote(opportunityToView.id))) && (
-                <div className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded border",
-                  (opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked
-                    ? "bg-violet-50 text-violet-800 border-violet-200"
-                    : "bg-yellow-50 text-yellow-800 border-yellow-200"
-                )}>
-                  <Lock className="w-4 h-4 shrink-0" />
-                  <span className="text-sm font-medium">
-                    {(opportunityToView as { is_permanently_locked?: boolean })?.is_permanently_locked
-                      ? "Permanently Locked by Active Timesheets"
-                      : "Locked by Active Quote"}
-                  </span>
-                </div>
-              )}
-              <h3 className="text-lg font-semibold border-b pb-2">Basic Information</h3>
-              
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Opportunity Name</p>
-                <p className="text-sm text-gray-700">{opportunityToView.name}</p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Account</p>
-                  <p className="text-sm text-gray-700">{getAccountName(opportunityToView.account_id)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Parent Opportunity</p>
-                  <p className="text-sm text-gray-700">{getParentOpportunityName(opportunityToView.parent_opportunity_id)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Status</p>
-                  <p className="text-sm text-gray-700">{formatStatus(opportunityToView.status)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Start Date</p>
-                  <p className="text-sm text-gray-700">{formatDate(opportunityToView.start_date)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">End Date</p>
-                  <p className="text-sm text-gray-700">{formatDate(opportunityToView.end_date)}</p>
-                </div>
-              </div>
-
-              {opportunityToView.description && (
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Description</p>
-                  <p className="text-sm text-gray-700 whitespace-pre-wrap">{opportunityToView.description}</p>
-                </div>
-              )}
-            </div>
-
-            {/* Financial & Billing Information */}
-            <div className="space-y-4 pt-4 border-t">
-              <h3 className="text-lg font-semibold border-b pb-2">Financial & Billing Information</h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Invoice Center</p>
-                  <p className="text-sm text-gray-700">{getDeliveryCenterName(opportunityToView.delivery_center_id)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Opportunity Owner</p>
-                  <p className="text-sm text-gray-700">{getEmployeeName(opportunityToView.opportunity_owner_id)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Default Currency</p>
-                  <p className="text-sm text-gray-700">{opportunityToView.default_currency || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Billing Terms</p>
-                  <p className="text-sm text-gray-700">{getBillingTermName(opportunityToView.billing_term_id)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Invoice Customer?</p>
-                  <p className="text-sm text-gray-700">{opportunityToView.invoice_customer ? "Yes" : "No"}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Billable Expenses?</p>
-                  <p className="text-sm text-gray-700">{opportunityToView.billable_expenses ? "Yes" : "No"}</p>
-                </div>
-              </div>
-
-              {opportunityToView.utilization !== undefined && opportunityToView.utilization !== null && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <p className="text-sm font-semibold text-gray-800">Utilization</p>
-                    <p className="text-sm text-gray-700">{opportunityToView.utilization}%</p>
-                  </div>
-                  {opportunityToView.margin !== undefined && opportunityToView.margin !== null && (
-                    <div>
-                      <p className="text-sm font-semibold text-gray-800">Margin</p>
-                      <p className="text-sm text-gray-700">{opportunityToView.margin}%</p>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            {/* Deal & Forecast Information */}
-            <div className="space-y-4 pt-4 border-t">
-              <h3 className="text-lg font-semibold border-b pb-2">Deal & Forecast Information</h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Probability</p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.probability !== undefined && opportunityToView.probability !== null
-                      ? `${opportunityToView.probability}%`
-                      : "—"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Accountability</p>
-                  <p className="text-sm text-gray-700">{formatEnumValue(opportunityToView.accountability)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Strategic Importance</p>
-                  <p className="text-sm text-gray-700">{formatEnumValue(opportunityToView.strategic_importance)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Deal Creation Date</p>
-                  <p className="text-sm text-gray-700">{formatDate(opportunityToView.deal_creation_date)}</p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Close Date</p>
-                  <p className="text-sm text-gray-700">{formatDate(opportunityToView.close_date)}</p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">
-                    Deal Value ({opportunityToView.default_currency || "USD"})
-                  </p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.deal_value
-                      ? formatCurrency(opportunityToView.deal_value, opportunityToView.default_currency)
-                      : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Deal Value (USD)</p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.deal_value_usd ? formatCurrency(opportunityToView.deal_value_usd, "USD") : "—"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Deal Length (days)</p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.deal_length !== undefined && opportunityToView.deal_length !== null
-                      ? opportunityToView.deal_length
-                      : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">
-                    Forecast Value ({opportunityToView.default_currency || "USD"})
-                  </p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.forecast_value
-                      ? formatCurrency(opportunityToView.forecast_value, opportunityToView.default_currency)
-                      : "—"}
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm font-semibold text-gray-800">Forecast Value (USD)</p>
-                  <p className="text-sm text-gray-700">
-                    {opportunityToView.forecast_value_usd
-                      ? formatCurrency(opportunityToView.forecast_value_usd, "USD")
-                      : "—"}
-                  </p>
-                </div>
-              </div>
-            </div>
-            
-            {/* Relationships Section */}
-            {viewingOpportunityData && (
-              <div className="pt-4 border-t">
-                <OpportunityRelationships
-                  opportunity={viewingOpportunityData}
-                  onUpdate={async () => {
-                    await refetchViewingOpportunity();
-                    await refetch();
-                  }}
-                  readOnly={true}
-                />
-              </div>
-            )}
-            
-            <div className="flex justify-end pt-4">
-              <Button variant="outline" onClick={() => setViewingOpportunity(null)}>
-                Close
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      {/* Edit Dialog */}
-      {editingOpportunity && opportunityToEdit && (
-        <Dialog
-          open={!!editingOpportunity}
-          onOpenChange={(open) => !open && setEditingOpportunity(null)}
-        >
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              Edit Opportunity
-              {((opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked || (opportunityToEdit?.id && hasActiveQuote(opportunityToEdit.id))) && (
-                <span
-                  className={cn(
-                    "inline-flex items-center justify-center w-6 h-6 rounded shrink-0",
-                    (opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked
-                      ? "bg-violet-100 text-violet-700 border border-violet-200"
-                      : "bg-yellow-100 text-yellow-700 border border-yellow-200"
-                  )}
-                  title={(opportunityToEdit as { is_permanently_locked?: boolean })?.is_permanently_locked
-                    ? "Permanently Locked by Active Timesheets"
-                    : "Locked by Active Quote"}
-                >
-                  <Lock className="w-4 h-4 shrink-0" />
-                </span>
-              )}
-            </DialogTitle>
-          </DialogHeader>
-          <DialogContent className="max-h-[90vh] overflow-y-auto">
-            <OpportunityForm
-              initialData={opportunityToEdit}
-              onSubmit={handleUpdate}
-              onCancel={() => setEditingOpportunity(null)}
-              isLoading={updateOpportunity.isPending}
-            />
-            
-            {/* Relationships Section */}
-            {editingOpportunityData && (
-              <div className="pt-6 border-t mt-6">
-                <OpportunityRelationships
-                  opportunity={editingOpportunityData}
-                  onUpdate={async () => {
-                    await refetchEditingOpportunity();
-                    await refetch();
-                  }}
-                  readOnly={(editingOpportunityData as { is_permanently_locked?: boolean })?.is_permanently_locked ?? false}
-                />
-              </div>
-            )}
-          </DialogContent>
-        </Dialog>
-      )}
     </div>
   );
 }
@@ -1130,4 +714,3 @@ export default function OpportunitiesPage() {
     </Suspense>
   );
 }
-

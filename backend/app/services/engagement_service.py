@@ -704,13 +704,25 @@ class EngagementService(BaseService):
         opportunity_id: Optional[UUID] = None,
         quote_id: Optional[UUID] = None,
         employee_id: Optional[UUID] = None,
+        week_start_date: Optional["date"] = None,
     ) -> Tuple[List[EngagementResponse], int]:
-        """List engagements with pagination."""
+        """List engagements with pagination.
+        When employee_id and week_start_date are both set, only return engagements where
+        a line item for that employee overlaps the given week (for timesheet project dropdown).
+        """
         if employee_id:
             engagements = await self.engagement_repo.list_by_employee_on_resource_plan(
-                employee_id=employee_id, skip=skip, limit=limit
+                employee_id=employee_id,
+                skip=skip,
+                limit=limit,
+                week_start_date=week_start_date,
             )
-            total = await self.engagement_repo.count_by_employee_on_resource_plan(employee_id)
+            if week_start_date is not None:
+                total = await self.engagement_repo.count_by_employee_on_resource_plan_for_week(
+                    employee_id, week_start_date
+                )
+            else:
+                total = await self.engagement_repo.count_by_employee_on_resource_plan(employee_id)
         else:
             filters = {}
             if opportunity_id:

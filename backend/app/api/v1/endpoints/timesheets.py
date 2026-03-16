@@ -60,9 +60,13 @@ async def get_my_incomplete_count(
     db: AsyncSession = Depends(get_db),
     current_employee: Employee = Depends(require_authentication),
 ):
-    """Count of past weeks with NOT_SUBMITTED or REOPENED status."""
+    """Count of past weeks (on/after employee start date) with NOT_SUBMITTED or REOPENED status."""
     controller = TimesheetController(db)
-    return {"count": await controller.count_incomplete_past_weeks(current_employee.id)}
+    return {
+        "count": await controller.count_incomplete_past_weeks(
+            current_employee.id, current_employee.start_date
+        )
+    }
 
 
 @router.get("/me/incomplete-weeks")
@@ -71,9 +75,11 @@ async def get_my_incomplete_weeks(
     db: AsyncSession = Depends(get_db),
     current_employee: Employee = Depends(require_authentication),
 ):
-    """List week_start_date for past weeks with NOT_SUBMITTED or REOPENED status."""
+    """List week_start_date for past weeks (on/after employee start date) with NOT_SUBMITTED or REOPENED status."""
     controller = TimesheetController(db)
-    weeks = await controller.list_incomplete_past_weeks(current_employee.id, limit)
+    weeks = await controller.list_incomplete_past_weeks(
+        current_employee.id, current_employee.start_date, limit
+    )
     return {"count": len(weeks), "weeks": [w.isoformat() for w in weeks]}
 
 

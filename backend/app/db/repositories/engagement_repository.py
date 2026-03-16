@@ -98,20 +98,32 @@ class EngagementRepository(BaseRepository[Engagement]):
         employee_id: UUID,
         skip: int = 0,
         limit: int = 200,
+        week_start_date: Optional["date"] = None,
     ) -> List[Engagement]:
         """List engagements where the employee has a line item on the resource plan.
+        
+        When week_start_date is provided, only return engagements where a line item for
+        this employee overlaps the given week (line_item.start_date <= week_end and
+        line_item.end_date >= week_start). Used for timesheet project dropdown filtering.
         
         Uses subquery for distinct IDs to avoid PostgreSQL 'equality operator for type json'
         error when DISTINCT is applied to full Engagement rows (attributes column is JSON).
         """
+        from datetime import date as date_type, timedelta
         from app.models.engagement import EngagementLineItem
 
         subq = (
             select(Engagement.id)
             .join(EngagementLineItem, Engagement.id == EngagementLineItem.engagement_id)
             .where(EngagementLineItem.employee_id == employee_id)
-            .distinct()
         )
+        if week_start_date is not None:
+            week_end = week_start_date + timedelta(days=6)
+            subq = subq.where(
+                EngagementLineItem.start_date <= week_end,
+                EngagementLineItem.end_date >= week_start_date,
+            )
+        subq = subq.distinct()
         query = (
             self._base_query(include_line_items=True)
             .where(Engagement.id.in_(subq))
@@ -120,6 +132,26 @@ class EngagementRepository(BaseRepository[Engagement]):
         )
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def count_by_employee_on_resource_plan_for_week(
+        self, employee_id: UUID, week_start_date
+    ) -> int:
+        """Count engagements where the employee has a line item overlapping the given week."""
+        from datetime import timedelta
+        from app.models.engagement import EngagementLineItem
+
+        week_end = week_start_date + timedelta(days=6)
+        result = await self.session.execute(
+            select(func.count(distinct(Engagement.id)))
+            .select_from(Engagement)
+            .join(EngagementLineItem, Engagement.id == EngagementLineItem.engagement_id)
+            .where(
+                EngagementLineItem.employee_id == employee_id,
+                EngagementLineItem.start_date <= week_end,
+                EngagementLineItem.end_date >= week_start_date,
+            )
+        )
+        return result.scalar() or 0
 
     async def count_by_employee_on_resource_plan(self, employee_id: UUID) -> int:
         """Count engagements where the employee has a line item on the resource plan."""

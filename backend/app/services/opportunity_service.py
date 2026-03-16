@@ -150,7 +150,11 @@ class OpportunityService(BaseService):
             opportunity = await self.opportunity_repo.get(opportunity_id)
         if not opportunity:
             return None
-        return await self._to_response(opportunity, include_relationships=include_relationships)
+        return await self._to_response(
+            opportunity,
+            include_relationships=include_relationships,
+            include_plan_actuals=True,  # Include Plan $ and Actuals $ for View screen
+        )
     
     async def get_opportunity_with_relationships(self, opportunity_id: UUID) -> Optional[OpportunityResponse]:
         """Get opportunity with related entities (alias for get_opportunity with include_relationships=True)."""

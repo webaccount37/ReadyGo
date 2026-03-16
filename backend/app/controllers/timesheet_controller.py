@@ -146,11 +146,15 @@ class TimesheetController(BaseController):
     ):
         return await self.approval_service.list_manageable_employees(approver_employee_id)
 
-    async def count_incomplete_past_weeks(self, employee_id: UUID) -> int:
-        return await self.timesheet_service.count_incomplete_past_weeks(employee_id)
+    async def count_incomplete_past_weeks(self, employee_id: UUID, employee_start_date: date) -> int:
+        return await self.timesheet_service.count_incomplete_past_weeks(employee_id, employee_start_date)
 
-    async def list_incomplete_past_weeks(self, employee_id: UUID, limit: int = 20) -> List[date]:
-        return await self.timesheet_service.list_incomplete_past_weeks(employee_id, limit)
+    async def list_incomplete_past_weeks(
+        self, employee_id: UUID, employee_start_date: date, limit: int = 20
+    ) -> List[date]:
+        return await self.timesheet_service.list_incomplete_past_weeks(
+            employee_id, employee_start_date, limit
+        )
 
     async def get_week_statuses(
         self,

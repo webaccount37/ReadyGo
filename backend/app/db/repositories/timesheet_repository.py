@@ -91,8 +91,10 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         await self.session.refresh(instance)
         return instance
 
-    async def count_incomplete_weeks(self, employee_id: UUID, today: date, lookback_weeks: int = 52) -> int:
-        """Count weeks (that have started) where employee has no timesheet OR timesheet is NOT_SUBMITTED/REOPENED."""
+    async def count_incomplete_weeks(
+        self, employee_id: UUID, today: date, employee_start_date: date, lookback_weeks: int = 52
+    ) -> int:
+        """Count weeks (that have started, on/after employee start_date) where employee has no timesheet OR timesheet is NOT_SUBMITTED/REOPENED."""
         from datetime import timedelta
 
         def _sunday_of(d: date) -> date:
@@ -101,6 +103,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
 
         current_sunday = _sunday_of(today)
         oldest_sunday = current_sunday - timedelta(days=7 * lookback_weeks)
+        first_required_week_start = _sunday_of(employee_start_date)
 
         result = await self.session.execute(
             select(Timesheet.week_start_date, Timesheet.status)
@@ -119,14 +122,24 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         cursor = current_sunday
         for _ in range(lookback_weeks + 1):
             if cursor > today:
-                break
+                cursor -= timedelta(days=7)
+                continue
+            if cursor < first_required_week_start:
+                cursor -= timedelta(days=7)
+                continue
             if cursor not in submitted_weeks:
                 incomplete += 1
             cursor -= timedelta(days=7)
         return incomplete
 
-    async def list_incomplete_weeks(self, employee_id: UUID, today: date, limit: int = 52) -> List[date]:
-        """List week_start_date for incomplete weeks, earliest first (asc)."""
+    async def list_incomplete_weeks(
+        self,
+        employee_id: UUID,
+        today: date,
+        employee_start_date: date,
+        limit: int = 52,
+    ) -> List[date]:
+        """List week_start_date for incomplete weeks (on or after employee start_date), earliest first (asc)."""
         from datetime import timedelta
 
         def _sunday_of(d: date) -> date:
@@ -135,6 +148,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
 
         current_sunday = _sunday_of(today)
         oldest_sunday = current_sunday - timedelta(days=7 * limit)
+        first_required_week_start = _sunday_of(employee_start_date)
 
         result = await self.session.execute(
             select(Timesheet.week_start_date, Timesheet.status)
@@ -153,20 +167,32 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         cursor = current_sunday
         for _ in range(limit + 1):
             if cursor > today:
-                break
+                cursor -= timedelta(days=7)
+                continue
+            if cursor < first_required_week_start:
+                cursor -= timedelta(days=7)
+                continue
             if cursor not in submitted_weeks:
                 weeks.append(cursor)
             cursor -= timedelta(days=7)
         weeks.reverse()
         return weeks  # return all incomplete weeks to match count_incomplete_weeks
 
-    async def count_incomplete_past_weeks(self, employee_id: UUID, today: date) -> int:
+    async def count_incomplete_past_weeks(
+        self, employee_id: UUID, today: date, employee_start_date: date
+    ) -> int:
         """Legacy: Count weeks with NOT_SUBMITTED or REOPENED. Use count_incomplete_weeks for accurate pre-visit count."""
-        return await self.count_incomplete_weeks(employee_id, today)
+        return await self.count_incomplete_weeks(
+            employee_id, today, employee_start_date
+        )
 
-    async def list_incomplete_past_weeks(self, employee_id: UUID, today: date, limit: int = 20) -> List[date]:
+    async def list_incomplete_past_weeks(
+        self, employee_id: UUID, today: date, employee_start_date: date, limit: int = 20
+    ) -> List[date]:
         """List week_start_date for incomplete weeks, earliest first."""
-        return await self.list_incomplete_weeks(employee_id, today, limit)
+        return await self.list_incomplete_weeks(
+            employee_id, today, employee_start_date, limit
+        )
 
     async def get_week_statuses(
         self,

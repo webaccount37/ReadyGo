@@ -2,6 +2,7 @@
 Engagement API endpoints.
 """
 
+from datetime import date
 from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
@@ -43,6 +44,7 @@ async def list_engagements(
     opportunity_id: Optional[UUID] = Query(None),
     quote_id: Optional[UUID] = Query(None),
     employee_id: Optional[UUID] = Query(None, description="Filter engagements where employee has resource plan line items"),
+    week_start_date: Optional[str] = Query(None, description="When used with employee_id, only engagements whose line items overlap this week (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ) -> EngagementListResponse:
     """List engagements with optional filters."""
@@ -53,6 +55,7 @@ async def list_engagements(
         opportunity_id=opportunity_id,
         quote_id=quote_id,
         employee_id=employee_id,
+        week_start_date=week_start_date,
     )
 
 

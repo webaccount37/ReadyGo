@@ -302,7 +302,7 @@ export default function QuoteDetailPage() {
               )}
               <Button 
                 variant="outline"
-                onClick={() => router.push(`/opportunities?opportunity_id=${quote.opportunity_id}`)}
+                onClick={() => router.push(`/opportunities/${quote.opportunity_id}`)}
               >
                 View Opportunity
               </Button>

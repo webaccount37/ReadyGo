@@ -50,14 +50,21 @@ class EngagementController(BaseController):
         opportunity_id: Optional[UUID] = None,
         quote_id: Optional[UUID] = None,
         employee_id: Optional[UUID] = None,
+        week_start_date: Optional[str] = None,
     ) -> EngagementListResponse:
-        """List engagements with optional filters."""
+        """List engagements with optional filters.
+        When employee_id and week_start_date are both set, only return engagements
+        where a line item for that employee overlaps the given week (for timesheet project dropdown).
+        """
+        from datetime import date
+        week_date = date.fromisoformat(week_start_date) if week_start_date else None
         engagements, total = await self.engagement_service.list_engagements(
             skip=skip,
             limit=limit,
             opportunity_id=opportunity_id,
             quote_id=quote_id,
             employee_id=employee_id,
+            week_start_date=week_date,
         )
         return EngagementListResponse(items=engagements, total=total)
     
