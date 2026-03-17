@@ -64,6 +64,8 @@ export function useCreateDeliveryCenter(
     mutationFn: (data) => deliveryCentersApi.createDeliveryCenter(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
+      // New DC is added to all roles; roles data is stale
+      queryClient.invalidateQueries({ queryKey: ["roles"] });
     },
     ...options,
   });
@@ -100,6 +102,8 @@ export function useDeleteDeliveryCenter(
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
       queryClient.removeQueries({ queryKey: QUERY_KEYS.detail(id) });
+      // Roles have rates per DC; when a DC is deleted, roles data is stale
+      queryClient.invalidateQueries({ queryKey: ["roles"] });
     },
     ...options,
   });

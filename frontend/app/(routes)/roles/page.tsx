@@ -15,6 +15,17 @@ import { Trash2, Eye, Pencil } from "lucide-react";
 import type { RoleCreate, RoleUpdate } from "@/types/role";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
+import type { RoleRate } from "@/types/role";
+
+/** Sort rates by delivery center (code), then currency for consistent display. */
+function sortRoleRates(rates: RoleRate[] | undefined): RoleRate[] {
+  if (!rates?.length) return [];
+  return [...rates].sort((a, b) => {
+    const dcCompare = (a.delivery_center_code || "").localeCompare(b.delivery_center_code || "");
+    if (dcCompare !== 0) return dcCompare;
+    return (a.default_currency || "").localeCompare(b.default_currency || "");
+  });
+}
 
 export default function RolesPage() {
   const [skip, setSkip] = useState(0);
@@ -36,15 +47,10 @@ export default function RolesPage() {
     const query = searchQuery.toLowerCase();
     return data.items.filter((role) => {
       const name = (role.role_name || "").toLowerCase();
-      const status = (role.status || "").toLowerCase();
       const rates = role.role_rates?.map(r => 
         `${r.delivery_center_code} ${r.default_currency} ${r.internal_cost_rate} ${r.external_rate}`
       ).join(" ").toLowerCase() || "";
-      return (
-        name.includes(query) ||
-        status.includes(query) ||
-        rates.includes(query)
-      );
+      return name.includes(query) || rates.includes(query);
     });
   }, [data, searchQuery]);
 
@@ -136,15 +142,13 @@ export default function RolesPage() {
                       <table className="w-full text-xs table-fixed border-collapse">
                         <colgroup>
                           <col style={{ width: "20%" }} />
-                          <col style={{ width: "50%" }} />
-                          <col style={{ width: "12%" }} />
-                          <col style={{ width: "12%" }} />
+                          <col style={{ width: "60%" }} />
+                          <col style={{ width: "20%" }} />
                         </colgroup>
                         <thead>
                           <tr className="border-b">
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Role Name">Role</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Rates by Delivery Center">Rates</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Status">Status</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
@@ -158,30 +162,27 @@ export default function RolesPage() {
                             <td className="p-1.5 font-medium text-xs overflow-hidden" title={role.role_name}>
                               <span className="truncate block">{highlightText(role.role_name, searchQuery)}</span>
                             </td>
-                            <td className="p-1.5 overflow-hidden min-w-0 text-xs" title={role.role_rates?.map((r) => `${r.delivery_center_code.replace("-", " ")} (${r.default_currency}): ICR $${r.internal_cost_rate.toFixed(2)} / Ext $${r.external_rate.toFixed(2)}`).join("; ") || "—"}>
+                            <td className="p-1.5 overflow-auto min-w-0 text-xs">
                               {role.role_rates?.length ? (
-                                <span className="truncate block">
-                                  {role.role_rates[0] && (
-                                    <>
-                                      {highlightText(role.role_rates[0].delivery_center_code.replace("-", " "), searchQuery)} ({role.role_rates[0].default_currency}): ${role.role_rates[0].internal_cost_rate.toFixed(0)}/${role.role_rates[0].external_rate.toFixed(0)}
-                                      {role.role_rates.length > 1 ? ` +${role.role_rates.length - 1} more` : ""}
-                                    </>
-                                  )}
-                                </span>
+                                <div className="min-w-[200px]">
+                                  <div className="grid grid-cols-4 gap-1 text-[10px] font-semibold text-gray-500 border-b border-gray-200 pb-0.5 mb-1">
+                                    <span>DC</span>
+                                    <span>Currency</span>
+                                    <span>Cost</span>
+                                    <span>Ext</span>
+                                  </div>
+                                  {sortRoleRates(role.role_rates).map((r) => (
+                                    <div key={`${r.delivery_center_code}-${r.default_currency}`} className="grid grid-cols-4 gap-1 text-[10px]">
+                                      <span className="truncate">{highlightText(r.delivery_center_code.replace("-", " "), searchQuery)}</span>
+                                      <span>{r.default_currency}</span>
+                                      <span>{r.internal_cost_rate.toFixed(2)}</span>
+                                      <span>{r.external_rate.toFixed(2)}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               ) : (
                                 <span className="text-gray-500">—</span>
                               )}
-                            </td>
-                            <td className="p-1.5 overflow-hidden min-w-0">
-                              <span
-                                className={`px-1.5 py-0.5 text-xs rounded ${
-                                  role.status === "active"
-                                    ? "bg-green-100 text-green-800"
-                                    : "bg-gray-100 text-gray-800"
-                                }`}
-                              >
-                                {highlightText(role.status, searchQuery)}
-                              </span>
                             </td>
                             <td className="p-1 overflow-hidden min-w-0">
                               <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
@@ -251,7 +252,7 @@ export default function RolesPage() {
                                   Rates
                                 </div>
                                 <div className="text-sm space-y-1">
-                                  {role.role_rates?.map((r) => (
+                                  {sortRoleRates(role.role_rates)?.map((r) => (
                                     <div key={`${r.delivery_center_code}-${r.default_currency}`}>
                                       <span className="font-semibold">
                                         {r.delivery_center_code.replace("-", " ")} ({r.default_currency})
@@ -260,28 +261,6 @@ export default function RolesPage() {
                                     </div>
                                   )) || "—"}
                                 </div>
-                              </div>
-                            </div>
-                            <div className="flex gap-2">
-                              <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Status
-                                </div>
-                                <span
-                                  className={`px-2 py-1 text-xs rounded ${
-                                    role.status === "active"
-                                      ? "bg-green-100 text-green-800"
-                                      : "bg-gray-100 text-gray-800"
-                                  }`}
-                                >
-                                  {role.status}
-                                </span>
-                              </div>
-                              <div>
-                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
-                                  Currency
-                                </div>
-                                <div className="text-sm">{role.default_currency}</div>
                               </div>
                             </div>
                             <div className="flex flex-nowrap gap-0.5 justify-start pt-2" onClick={(e) => e.stopPropagation()}>
@@ -408,43 +387,41 @@ export default function RolesPage() {
             <DialogTitle>Role Details</DialogTitle>
           </DialogHeader>
           <DialogContent className="space-y-3">
-            <div className="flex justify-between items-center">
-              <div>
-                <p className="text-sm font-semibold text-gray-800">Role</p>
-                <p className="text-sm text-gray-700">
-                  {data?.items.find((r) => r.id === viewingRole)?.role_name || "—"}
-                </p>
-              </div>
-              <div>
-                <span
-                  className={`px-2 py-1 text-xs rounded ${
-                    data?.items.find((r) => r.id === viewingRole)?.status === "active"
-                      ? "bg-green-100 text-green-800"
-                      : "bg-gray-100 text-gray-800"
-                  }`}
-                >
-                  {data?.items.find((r) => r.id === viewingRole)?.status || "—"}
-                </span>
-              </div>
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Role</p>
+              <p className="text-sm text-gray-700">
+                {data?.items.find((r) => r.id === viewingRole)?.role_name || "—"}
+              </p>
             </div>
             <div>
               <p className="text-sm font-semibold text-gray-800">Delivery Center Rates</p>
-              <div className="space-y-2">
-                {data?.items
-                  .find((r) => r.id === viewingRole)
-                  ?.role_rates?.map((rate) => (
-                    <div
-                      key={`${rate.delivery_center_code}-${rate.default_currency}`}
-                      className="flex justify-between text-sm"
-                    >
-                      <span className="font-medium">
-                        {rate.delivery_center_code.replace("-", " ")} ({rate.default_currency})
-                      </span>
-                      <span>
-                        ICR ${rate.internal_cost_rate.toFixed(2)} / Ext ${rate.external_rate.toFixed(2)}
-                      </span>
-                    </div>
-                  )) || <p className="text-xs text-gray-500">No rates available.</p>}
+              <div className="mt-2 overflow-x-auto">
+                <table className="w-full text-sm border-collapse min-w-[280px]">
+                  <thead>
+                    <tr className="border-b text-left text-xs font-semibold text-gray-500">
+                      <th className="py-1.5 pr-2">DC</th>
+                      <th className="py-1.5 pr-2">Currency</th>
+                      <th className="py-1.5 pr-2">Cost</th>
+                      <th className="py-1.5 pr-2">Ext</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortRoleRates(
+                      data?.items.find((r) => r.id === viewingRole)?.role_rates
+                    )?.map((rate) => (
+                        <tr key={`${rate.delivery_center_code}-${rate.default_currency}`} className="border-b">
+                          <td className="py-1.5 pr-2 font-medium">{rate.delivery_center_code.replace("-", " ")}</td>
+                          <td className="py-1.5 pr-2">{rate.default_currency}</td>
+                          <td className="py-1.5 pr-2">{rate.internal_cost_rate.toFixed(2)}</td>
+                          <td className="py-1.5 pr-2">{rate.external_rate.toFixed(2)}</td>
+                        </tr>
+                      )) || (
+                      <tr>
+                        <td colSpan={4} className="py-2 text-xs text-gray-500">No rates available.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
             <div className="flex justify-end">

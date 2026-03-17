@@ -12,31 +12,58 @@ from sqlalchemy.orm import selectinload
 
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.role_rate_repository import RoleRateRepository
+from app.db.repositories.delivery_center_repository import DeliveryCenterRepository
 from app.schemas.role import RoleCreate, RoleUpdate, RoleResponse
 from app.models.role_rate import RoleRate
 from app.models.delivery_center import DeliveryCenter
-from app.models.role import Role, RoleStatus
-import uuid
+from app.models.role import Role
 from sqlalchemy import func
-# TODO: Refactor to use ESTIMATE_LINE_ITEMS from active estimates instead of association models/tables
-from app.models.delivery_center import DeliveryCenter
 
 
 class RoleService(BaseService):
     """Service for role operations."""
-    
+
     def __init__(self, session: AsyncSession):
         self.session = session
         self.role_repo = RoleRepository(session)
         self.role_rate_repo = RoleRateRepository(session)
+        self.delivery_center_repo = DeliveryCenterRepository(session)
     
     async def create_role(self, role_data: RoleCreate) -> RoleResponse:
-        """Create a new role."""
+        """Create a new role with exactly one rate per delivery center."""
         role_dict = role_data.model_dump(exclude_unset=True)
-        rates = role_dict.pop("role_rates", [])
+        rates_payload = role_dict.pop("role_rates", [])
+
+        # Build map of delivery_center_code -> rate values from payload
+        rates_by_dc: dict[str, dict] = {
+            r["delivery_center_code"].lower(): r for r in rates_payload
+            if r.get("delivery_center_code")
+        }
 
         role = await self.role_repo.create(**role_dict)
-        await self._upsert_role_rates(role.id, rates)
+        all_dcs = await self.delivery_center_repo.list_all()
+
+        for dc in all_dcs:
+            dc_code = dc.code.lower()
+            override = rates_by_dc.get(dc_code)
+            if override:
+                currency = override.get("default_currency", dc.default_currency)
+                icr = override.get("internal_cost_rate", 0.0)
+                ext = override.get("external_rate", 0.0)
+            else:
+                currency = dc.default_currency
+                icr = 0.0
+                ext = 0.0
+
+            role_rate = RoleRate(
+                role_id=role.id,
+                delivery_center_id=dc.id,
+                default_currency=currency,
+                internal_cost_rate=float(icr),
+                external_rate=float(ext),
+            )
+            self.session.add(role_rate)
+
         await self.session.commit()
         await self.session.refresh(role)
         return await self._build_role_response(role.id)
@@ -54,26 +81,17 @@ class RoleService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None,
     ) -> tuple[List[RoleResponse], int]:
         """List roles with optional filters."""
-        if status:
-            try:
-                status_enum = RoleStatus(status)
-                roles = await self.role_repo.list_by_status(status_enum, skip, limit)
-            except ValueError:
-                roles = []
-        else:
-            result = await self.session.execute(
-                select(Role)
-                .options(
-                    selectinload(Role.role_rates).selectinload(RoleRate.delivery_center)
-                )
-                .offset(skip)
-                .limit(limit)
+        result = await self.session.execute(
+            select(Role)
+            .options(
+                selectinload(Role.role_rates).selectinload(RoleRate.delivery_center)
             )
-            roles = list(result.scalars().all())
-        
+            .offset(skip)
+            .limit(limit)
+        )
+        roles = list(result.scalars().all())
         total = len(roles)
         return [await self._build_role_response(role.id) for role in roles], total
     
@@ -90,14 +108,10 @@ class RoleService(BaseService):
         update_dict = role_data.model_dump(exclude_unset=True)
         rates = update_dict.pop("role_rates", None)
 
-        # If rates are being changed, enforce that all in-use delivery centers remain and currencies stay consistent
-        if rates is not None:
-            await self._validate_role_rates_update(role_id, rates)
-
         updated = await self.role_repo.update(role_id, **update_dict)
 
         if rates is not None:
-            await self._upsert_role_rates(role_id, rates, replace_existing=True)
+            await self._update_role_rates(role_id, rates)
 
         await self.session.commit()
         await self.session.refresh(updated)
@@ -113,97 +127,6 @@ class RoleService(BaseService):
         deleted = await self.role_repo.delete(role_id)
         await self.session.commit()
         return deleted
-
-    async def _validate_role_rates_update(self, role_id: UUID, new_rates: list[dict]) -> None:
-        """
-        Ensure that updating role rates does not orphan existing assignments:
-        - Only prevent deletion/currency changes for RoleRates that are actually in use by EstimateLineItems.
-        - Allow deletion of RoleRates that are not in use, even if the delivery center has other RoleRates in use.
-        """
-        # Query which SPECIFIC RoleRate IDs are in use by EstimateLineItems in active estimates
-        from app.models.estimate import EstimateLineItem, Estimate
-        from app.models.role_rate import RoleRate
-        
-        in_use_result = await self.session.execute(
-            select(RoleRate.id, DeliveryCenter.code, RoleRate.default_currency)
-            .join(DeliveryCenter, DeliveryCenter.id == RoleRate.delivery_center_id)
-            .join(EstimateLineItem, EstimateLineItem.role_rates_id == RoleRate.id)
-            .join(Estimate, Estimate.id == EstimateLineItem.estimate_id)
-            .where(
-                and_(
-                    RoleRate.role_id == role_id,
-                    Estimate.active_version == True
-                )
-            )
-            .distinct()
-        )
-        in_use_rates = {(row[0], row[1].lower(), row[2].upper()) for row in in_use_result.fetchall()}
-        # Create a map of (delivery_center_code, currency) -> RoleRate ID for rates in use
-        in_use_dc_currency: dict[tuple[str, str], UUID] = {
-            (dc_code.lower(), currency.upper()): role_rate_id
-            for role_rate_id, dc_code, currency in in_use_rates
-            if dc_code and currency
-        }
-
-        if not in_use_dc_currency:
-            # No rates are in use, allow any changes
-            return
-
-        # Build maps from current and proposed rates
-        current_role = await self.session.execute(
-            select(Role).options(selectinload(Role.role_rates).selectinload(RoleRate.delivery_center)).where(Role.id == role_id)
-        )
-        role_obj = current_role.scalar_one()
-        
-        # Map current rates by (delivery_center_code, currency) -> RoleRate ID
-        current_rate_map: dict[tuple[str, str], UUID] = {}
-        for r in role_obj.role_rates:
-            dc_code = getattr(r.delivery_center, "code", None)
-            if dc_code:
-                key = (dc_code.lower(), r.default_currency.upper())
-                current_rate_map[key] = r.id
-
-        # Map proposed rates by (delivery_center_code, currency)
-        proposed_rate_keys: set[tuple[str, str]] = {
-            (r["delivery_center_code"].lower(), r["default_currency"].upper())
-            for r in new_rates
-            if r.get("delivery_center_code") and r.get("default_currency")
-        }
-
-        # Check for missing rates (rates that are in use but not in proposed list)
-        missing_rates = []
-        for (dc_code, currency), role_rate_id in in_use_dc_currency.items():
-            if (dc_code, currency) not in proposed_rate_keys:
-                missing_rates.append(f"{dc_code} ({currency})")
-        
-        if missing_rates:
-            raise ValueError(
-                f"Cannot remove role rates that are in use by active estimates. Missing rates for: {', '.join(missing_rates)}"
-            )
-
-        # Check for currency changes (only for rates that are in use)
-        # A currency change occurs when an in-use rate (DC, Currency1) is removed
-        # but a different rate (DC, Currency2) is proposed for the same delivery center
-        currency_changes = []
-        for (dc_code, currency), role_rate_id in in_use_dc_currency.items():
-            # Check if this specific (dc_code, currency) combination is in proposed rates
-            if (dc_code, currency) not in proposed_rate_keys:
-                # The in-use rate is being removed - check if there's a different currency proposed for this DC
-                proposed_rate_for_dc = next(
-                    (r for r in new_rates 
-                     if r.get("delivery_center_code", "").lower() == dc_code),
-                    None
-                )
-                if proposed_rate_for_dc:
-                    proposed_currency = proposed_rate_for_dc.get("default_currency", "").upper()
-                    if proposed_currency != currency:
-                        currency_changes.append(f"{dc_code} ({currency} -> {proposed_currency})")
-        
-        if currency_changes:
-            raise ValueError(
-                "Cannot change currency for role rates already assigned to active estimates: "
-                + "; ".join(currency_changes)
-            )
 
     async def _role_in_use(self, role_id: UUID) -> bool:
         """Check if a role is referenced by projects, releases, or employee assignments."""
@@ -258,108 +181,31 @@ class RoleService(BaseService):
         role_payload = {
             "id": role.id,
             "role_name": role.role_name,
-            "status": role.status,
             "role_rates": rates_payload,
         }
 
         return RoleResponse.model_validate(role_payload)
 
-    async def _upsert_role_rates(
-        self,
-        role_id: UUID,
-        rates: List[dict],
-        replace_existing: bool = False,
-    ) -> None:
-        """Create or update role rates for a role."""
-        # Load existing rates for this role with delivery center relationship
+    async def _update_role_rates(self, role_id: UUID, rates: List[dict]) -> None:
+        """Update existing role rates only. No add/remove."""
+        rates_by_dc: dict[str, dict] = {
+            r["delivery_center_code"].lower(): r for r in rates
+            if r.get("delivery_center_code")
+        }
         existing_rates_result = await self.session.execute(
             select(RoleRate)
             .options(selectinload(RoleRate.delivery_center))
             .where(RoleRate.role_id == role_id)
         )
         existing_rates = list(existing_rates_result.scalars().all())
-        
-        # Create a map of existing rates by (delivery_center_code, default_currency)
-        existing_rate_map: dict[tuple[str, str], RoleRate] = {}
         for rate in existing_rates:
             dc_code = getattr(rate.delivery_center, "code", None) if rate.delivery_center else None
-            if dc_code:
-                key = (dc_code.lower(), rate.default_currency.upper())
-                existing_rate_map[key] = rate
-        
-        # Track which rates we've processed
-        processed_rate_ids: set[UUID] = set()
-        
-        # Process each new rate
-        for rate_data in rates:
-            delivery_center = await self._get_or_create_delivery_center(rate_data["delivery_center_code"])
-            dc_code = delivery_center.code.lower()
-            currency = rate_data["default_currency"].upper()
-            key = (dc_code, currency)
-            
-            if key in existing_rate_map:
-                # Update existing rate
-                existing_rate = existing_rate_map[key]
-                existing_rate.internal_cost_rate = rate_data["internal_cost_rate"]
-                existing_rate.external_rate = rate_data["external_rate"]
-                processed_rate_ids.add(existing_rate.id)
-            else:
-                # Create new rate
-                role_rate = RoleRate(
-                    role_id=role_id,
-                    delivery_center_id=delivery_center.id,
-                    default_currency=rate_data["default_currency"],
-                    internal_cost_rate=rate_data["internal_cost_rate"],
-                    external_rate=rate_data["external_rate"],
-                )
-                self.session.add(role_rate)
-        
-        # Delete rates that are not in the new list (only if replace_existing is True)
-        # Note: Validation should have prevented deletion of rates in use
-        if replace_existing:
-            rates_to_delete = [r for r in existing_rates if r.id not in processed_rate_ids]
-            if rates_to_delete:
-                # Check which rates are in use by estimate_line_items
-                from app.models.estimate import EstimateLineItem
-                rate_ids_to_delete = [r.id for r in rates_to_delete]
-                in_use_result = await self.session.execute(
-                    select(EstimateLineItem.role_rates_id)
-                    .where(EstimateLineItem.role_rates_id.in_(rate_ids_to_delete))
-                    .distinct()
-                )
-                in_use_ids = set(in_use_result.scalars().all())
-                
-                # Only delete rates that are not in use
-                for rate_to_delete in rates_to_delete:
-                    if rate_to_delete.id not in in_use_ids:
-                        await self.session.delete(rate_to_delete)
-                    # If it is in use, skip deletion (validation should have caught this)
-
+            if not dc_code:
+                continue
+            override = rates_by_dc.get(dc_code.lower())
+            if override:
+                rate.default_currency = override.get("default_currency", rate.default_currency)
+                rate.internal_cost_rate = float(override.get("internal_cost_rate", rate.internal_cost_rate))
+                rate.external_rate = float(override.get("external_rate", rate.external_rate))
         await self.session.flush()
-
-    async def _get_or_create_delivery_center(self, code: str) -> DeliveryCenter:
-        """Find or create a delivery center by code."""
-        normalized_code = code.strip().lower()
-        name_map = {
-            "north-america": "North America",
-            "thailand": "Thailand",
-            "philippines": "Philippines",
-            "australia": "Australia",
-        }
-
-        existing = await self.session.execute(
-            select(DeliveryCenter).where(DeliveryCenter.code == normalized_code)
-        )
-        delivery_center = existing.scalar_one_or_none()
-        if delivery_center:
-            return delivery_center
-
-        # Create if it doesn't exist yet
-        delivery_center = DeliveryCenter(
-            name=name_map.get(normalized_code, normalized_code.replace("-", " ").title()),
-            code=normalized_code,
-        )
-        self.session.add(delivery_center)
-        await self.session.flush()
-        return delivery_center
 

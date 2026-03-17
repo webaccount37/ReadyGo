@@ -4,7 +4,7 @@ Staffing forecast service - aggregates estimate and engagement data for the fore
 
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,11 +35,13 @@ class StaffingForecastService:
         employee_id: Optional[UUID] = None,
         billable: Optional[str] = "both",
         duration_months: int = 6,
+        period: str = "weekly",
     ) -> dict:
         """
         Build staffing forecast response. Always uses Resource + DC (granular) rollup.
         billable: "true" | "false" | "both"
         duration_months: 3, 6, or 12
+        period: "weekly" | "monthly" - weekly shows weeks, monthly aggregates by calendar month
         """
         if start_week is None:
             start_week = _get_week_start(date.today())
@@ -78,6 +80,24 @@ class StaffingForecastService:
             delivery_center_id=delivery_center_id,
             employee_id=employee_id,
             billable_filter=billable_filter,
+        )
+
+        # Fetch billable actuals, holiday/PTO, and utilization date ranges
+        billable_actuals = await self.repo.fetch_billable_actuals_weekly_data(
+            start_week=start_week,
+            end_week=end_week,
+            delivery_center_id=delivery_center_id,
+            employee_id=employee_id,
+        )
+        utilization_ranges = await self.repo.fetch_utilization_date_ranges(
+            delivery_center_id=delivery_center_id,
+            employee_id=employee_id,
+        )
+        holiday_by_dc_week, pto_by_emp_week = await self.repo.fetch_holiday_and_pto_hours(
+            start_week=start_week,
+            end_week=end_week,
+            delivery_center_id=delivery_center_id,
+            employee_id=employee_id,
         )
 
         # Merge engagement: actuals override plan per (engagement_line_item_id, week)
@@ -160,9 +180,12 @@ class StaffingForecastService:
                 row_key = f"emp|{emp_id}|{emp_name}|{dc_id}"
             else:
                 row_key = f"role|{role_id}|{role_name}|{dc_id}"
+            # For role rows, preserve role_name when merging (don't overwrite with empty)
+            existing_role_name = (row_defs.get(row_key) or {}).get("role_name") or ""
+            effective_role_name = role_name or existing_role_name
             row_def = {
                 "role_id": role_id,
-                "role_name": role_name,
+                "role_name": effective_role_name,
                 "employee_id": emp_id or None,
                 "employee_name": emp_name or None,
                 "delivery_center_id": dc_id or None,
@@ -209,6 +232,13 @@ class StaffingForecastService:
                 marg = (rev - c["cost"]) / rev * 100 if rev and rev > 0 else None
                 c["margin_pct"] = round(marg, 1) if marg is not None else None
 
+        # Build billable actuals lookup: (emp_id, dc_id, week_iso) -> hours
+        billable_lookup: dict[tuple[str, str, str], float] = {}
+        for r in billable_actuals:
+            week_iso = r["week_start"].isoformat() if hasattr(r["week_start"], "isoformat") else str(r["week_start"])
+            key = (r["employee_id"], r["delivery_center_id"], week_iso)
+            billable_lookup[key] = r["billable_hours"]
+
         # Add rows for active employees who have no estimate/engagement data (all 0 hours)
         dc_name_by_id = {str(k): v for k, v in dc_names.items()}
         for emp in active_employees:
@@ -228,19 +258,77 @@ class StaffingForecastService:
                     "opportunity_id": None,
                     "opportunity_name": None,
                 }
-                # Ensure cells exist for all weeks with 0
-                if row_key not in cells:
-                    cells[row_key] = {}
+            # Ensure cells exist for all weeks (Hours + Billable Utilization need full coverage
+            # regardless of timesheet/plan data, like the Hours metric fix)
+            if row_key not in cells:
+                cells[row_key] = {}
+            for w in weeks:
+                wk = w["week_start"]
+                if wk not in cells[row_key]:
+                    cells[row_key][wk] = {
+                        "hours": 0,
+                        "revenue": 0,
+                        "cost": 0,
+                        "sources": [],
+                        "margin_pct": None,
+                        "billable_utilization_pct": None,
+                    }
+
+        # Ensure ALL employee rows have cells for every week (like Hours metric).
+        # This allows Billable Utilization % to show 0% for in-scope weeks even when no timesheet exists.
+        for rk in list(cells.keys()):
+            if rk.startswith("emp|"):
                 for w in weeks:
                     wk = w["week_start"]
-                    if wk not in cells[row_key]:
-                        cells[row_key][wk] = {
+                    if wk not in cells[rk]:
+                        cells[rk][wk] = {
                             "hours": 0,
                             "revenue": 0,
                             "cost": 0,
                             "sources": [],
                             "margin_pct": None,
+                            "billable_utilization_pct": None,
                         }
+
+        # Compute billable_utilization_pct only for weeks in scope (employee or engagement/estimate date range)
+        def _week_in_utilization_scope(week_date: date, ranges: dict) -> bool:
+            emp_start = ranges.get("emp_start")
+            emp_end = ranges.get("emp_end")
+            line_ranges = ranges.get("line_item_ranges", [])
+            if emp_start and week_date >= emp_start and (emp_end is None or week_date <= emp_end):
+                return True
+            for (s, e) in line_ranges:
+                if week_date >= s and week_date <= e:
+                    return True
+            return False
+
+        AVAILABLE_PER_WEEK = 40.0
+        for rk, week_cells in cells.items():
+            if not rk.startswith("emp|"):
+                for c in week_cells.values():
+                    c["billable_utilization_pct"] = None
+                continue
+            parts = rk.split("|")
+            if len(parts) < 4:
+                for c in week_cells.values():
+                    c["billable_utilization_pct"] = None
+                continue
+            emp_id, dc_id = parts[1], parts[3]
+            ranges = utilization_ranges.get(emp_id, {})
+            for wk, c in week_cells.items():
+                week_date = date.fromisoformat(wk)
+                if not _week_in_utilization_scope(week_date, ranges):
+                    c["billable_utilization_pct"] = None
+                    continue
+                billable_hours = billable_lookup.get((emp_id, dc_id, wk), 0.0)
+                holiday_hours = holiday_by_dc_week.get((dc_id, wk), 0.0)
+                pto_hours = pto_by_emp_week.get((emp_id, wk), 0.0)
+                available = AVAILABLE_PER_WEEK - holiday_hours - pto_hours
+                if available > 0:
+                    pct = (billable_hours / available) * 100
+                    c["billable_utilization_pct"] = round(pct, 1)
+                else:
+                    c["billable_utilization_pct"] = None
 
         # Build rows list (ordered: by delivery_center_name, then employee/role name)
         def sort_key(rk: str) -> tuple:
@@ -253,7 +341,82 @@ class StaffingForecastService:
         for rk in sorted(row_defs.keys(), key=sort_key):
             rows_out.append({"row_key": rk, **row_defs[rk]})
 
+        # Monthly aggregation when period is "monthly"
+        if period == "monthly":
+            from calendar import monthrange
+
+            months: list[dict] = []
+            months_seen: set[tuple[int, int]] = set()
+            current = start_week
+            while current <= end_week:
+                ym = (current.year, current.month)
+                if ym not in months_seen:
+                    months_seen.add(ym)
+                    first_of_month = date(current.year, current.month, 1)
+                    last_day = monthrange(current.year, current.month)[1]
+                    last_of_month = date(current.year, current.month, last_day)
+                    months.append({
+                        "month_start": first_of_month.isoformat(),
+                        "year": current.year,
+                        "month": current.month,
+                    })
+                current += timedelta(days=7)
+
+            month_cells: dict = {}
+            for rk, week_cells in cells.items():
+                month_cells[rk] = {}
+                for wk, c in week_cells.items():
+                    d = date.fromisoformat(wk)
+                    month_key = f"{d.year}-{d.month:02d}"
+                    if month_key not in month_cells[rk]:
+                        month_cells[rk][month_key] = {
+                            "hours": 0,
+                            "revenue": 0,
+                            "cost": 0,
+                            "margin_pct": None,
+                            "billable_utilization_pct": None,
+                            "billable_hours_sum": 0.0,
+                            "available_hours_sum": 0.0,
+                        }
+                    mc = month_cells[rk][month_key]
+                    mc["hours"] += c["hours"]
+                    mc["revenue"] += c["revenue"]
+                    mc["cost"] += c["cost"]
+                    if c.get("margin_pct") is not None and mc["revenue"] > 0:
+                        mc["margin_pct"] = round((mc["revenue"] - mc["cost"]) / mc["revenue"] * 100, 1)
+
+                    if rk.startswith("emp|"):
+                        parts = rk.split("|")
+                        if len(parts) >= 4:
+                            emp_id, dc_id = parts[1], parts[3]
+                            ranges = utilization_ranges.get(emp_id, {})
+                            week_date = date.fromisoformat(wk)
+                            if _week_in_utilization_scope(week_date, ranges):
+                                billable_h = billable_lookup.get((emp_id, dc_id, wk), 0.0)
+                                holiday_h = holiday_by_dc_week.get((dc_id, wk), 0.0)
+                                pto_h = pto_by_emp_week.get((emp_id, wk), 0.0)
+                                available = 40.0 - holiday_h - pto_h
+                                mc["billable_hours_sum"] += billable_h
+                                mc["available_hours_sum"] += available
+
+                for mc in month_cells[rk].values():
+                    if mc["available_hours_sum"] > 0:
+                        mc["billable_utilization_pct"] = round(
+                            (mc["billable_hours_sum"] / mc["available_hours_sum"]) * 100, 1
+                        )
+                    del mc["billable_hours_sum"]
+                    del mc["available_hours_sum"]
+
+            return {
+                "period": "monthly",
+                "months": months,
+                "rows": rows_out,
+                "cells": month_cells,
+                "rollup_mode": "granular",
+            }
+
         return {
+            "period": "weekly",
             "weeks": weeks,
             "rows": rows_out,
             "cells": cells,

@@ -19,7 +19,14 @@ from app.models.role import Role
 from app.models.role_rate import RoleRate
 from app.models.delivery_center import DeliveryCenter
 from app.models.employee import Employee
-from app.models.timesheet import TimesheetApprovedSnapshot, TimesheetEntry, Timesheet, TimesheetStatus
+from app.models.timesheet import (
+    TimesheetApprovedSnapshot,
+    TimesheetEntry,
+    Timesheet,
+    TimesheetStatus,
+    TimesheetEntryType,
+)
+from app.db.repositories.calendar_repository import CalendarRepository
 
 
 def _get_week_start(d: date) -> date:
@@ -46,6 +53,243 @@ class StaffingForecastRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.calendar_repo = CalendarRepository(session)
+
+    async def fetch_billable_actuals_weekly_data(
+        self,
+        start_week: date,
+        end_week: date,
+        delivery_center_id: Optional[UUID] = None,
+        employee_id: Optional[UUID] = None,
+    ) -> list[dict]:
+        """
+        Fetch billable actuals hours per (employee_id, delivery_center_id, week_start).
+        Uses TimesheetApprovedSnapshot where billable=True, engagement entries only, approved/invoiced timesheets.
+        Returns list of dicts with: employee_id, delivery_center_id, week_start, billable_hours.
+        """
+        subq = (
+            select(
+                Timesheet.employee_id,
+                Timesheet.week_start_date,
+                func.sum(TimesheetApprovedSnapshot.hours).label("billable_hours"),
+            )
+            .select_from(TimesheetApprovedSnapshot)
+            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetApprovedSnapshot.billable == True,
+                TimesheetEntry.engagement_line_item_id.isnot(None),
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                Timesheet.week_start_date >= start_week,
+                Timesheet.week_start_date <= end_week,
+            )
+            .group_by(Timesheet.employee_id, Timesheet.week_start_date)
+        )
+        result = await self.session.execute(subq)
+        rows = result.all()
+
+        if not rows:
+            return []
+
+        emp_ids = list({r.employee_id for r in rows})
+        query = (
+            select(
+                Employee.id.label("employee_id"),
+                Employee.delivery_center_id,
+            )
+            .select_from(Employee)
+            .where(Employee.id.in_(emp_ids))
+        )
+        if delivery_center_id is not None:
+            query = query.where(Employee.delivery_center_id == delivery_center_id)
+        if employee_id is not None:
+            query = query.where(Employee.id == employee_id)
+
+        emp_result = await self.session.execute(query)
+        emp_dc = {str(r.employee_id): str(r.delivery_center_id) for r in emp_result.all() if r.delivery_center_id}
+
+        out = []
+        for row in rows:
+            dc_id = emp_dc.get(str(row.employee_id))
+            if not dc_id:
+                continue
+            out.append({
+                "employee_id": str(row.employee_id),
+                "delivery_center_id": dc_id,
+                "week_start": row.week_start_date,
+                "billable_hours": float(row.billable_hours or 0),
+            })
+        return out
+
+    async def fetch_holiday_and_pto_hours(
+        self,
+        start_week: date,
+        end_week: date,
+        delivery_center_id: Optional[UUID] = None,
+        employee_id: Optional[UUID] = None,
+    ) -> tuple[dict[tuple[str, str], float], dict[tuple[str, str], float]]:
+        """
+        Fetch holiday hours (from Calendar) and PTO hours (from HOLIDAY timesheet entries) per (dc, week) and (emp, week).
+        Returns (holiday_by_dc_week, pto_by_emp_week) where keys are (id_str, week_iso) tuples.
+        """
+        # Holiday hours from Calendar - per (delivery_center_id, week_start)
+        current = start_week
+        holiday_by_dc_week: dict[tuple[str, str], float] = {}
+        dc_ids_to_fetch: set[UUID] = set()
+
+        if delivery_center_id:
+            dc_ids_to_fetch.add(delivery_center_id)
+        else:
+            dc_result = await self.session.execute(select(DeliveryCenter.id))
+            dc_ids_to_fetch = set(dc_result.scalars().all())
+
+        while current <= end_week:
+            week_end = current + timedelta(days=6)
+            for dc_id in dc_ids_to_fetch:
+                events = await self.calendar_repo.list_by_delivery_center_and_date_range(dc_id, current, week_end)
+                total = sum(float(getattr(ev, "hours", 8) or 8) for ev in events)
+                holiday_by_dc_week[(str(dc_id), current.isoformat())] = total
+            current += timedelta(days=7)
+
+        # PTO hours from HOLIDAY timesheet entries - per (employee_id, week_start)
+        subq = (
+            select(
+                Timesheet.employee_id,
+                Timesheet.week_start_date,
+                func.sum(TimesheetApprovedSnapshot.hours).label("pto_hours"),
+            )
+            .select_from(TimesheetApprovedSnapshot)
+            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .where(
+                TimesheetEntry.entry_type == TimesheetEntryType.HOLIDAY,
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                Timesheet.week_start_date >= start_week,
+                Timesheet.week_start_date <= end_week,
+            )
+            .group_by(Timesheet.employee_id, Timesheet.week_start_date)
+        )
+        pto_result = await self.session.execute(subq)
+        pto_rows = pto_result.all()
+
+        emp_dc_map: dict[str, str] = {}
+        if pto_rows:
+            emp_ids = list({r.employee_id for r in pto_rows})
+            emp_query = (
+                select(Employee.id, Employee.delivery_center_id)
+                .where(Employee.id.in_(emp_ids))
+            )
+            if delivery_center_id:
+                emp_query = emp_query.where(Employee.delivery_center_id == delivery_center_id)
+            if employee_id:
+                emp_query = emp_query.where(Employee.id == employee_id)
+            emp_res = await self.session.execute(emp_query)
+            emp_dc_map = {
+                str(r.id): str(r.delivery_center_id)
+                for r in emp_res.all()
+                if r.delivery_center_id
+            }
+
+        pto_by_emp_week: dict[tuple[str, str], float] = {}
+        for row in pto_rows:
+            dc_id = emp_dc_map.get(str(row.employee_id))
+            if not dc_id:
+                continue
+            pto_by_emp_week[(str(row.employee_id), row.week_start_date.isoformat())] = float(row.pto_hours or 0)
+
+        return (holiday_by_dc_week, pto_by_emp_week)
+
+    async def fetch_utilization_date_ranges(
+        self,
+        delivery_center_id: Optional[UUID] = None,
+        employee_id: Optional[UUID] = None,
+    ) -> dict[str, dict]:
+        """
+        Fetch date ranges for billable utilization scope: employee start/end and engagement/estimate line item ranges.
+        Returns dict[emp_id_str, {"emp_start": date, "emp_end": date|None, "line_item_ranges": [(start, end), ...]}].
+        A week is in scope if it falls within employee dates OR within any line item (engagement/estimate) range.
+        """
+        from app.models.employee import EmployeeStatus
+        from app.models.quote import QuoteStatus
+
+        # Employee dates
+        emp_query = (
+            select(
+                Employee.id.label("employee_id"),
+                Employee.start_date.label("emp_start"),
+                Employee.end_date.label("emp_end"),
+            )
+            .select_from(Employee)
+            .where(Employee.status == EmployeeStatus.ACTIVE)
+        )
+        if delivery_center_id is not None:
+            emp_query = emp_query.where(Employee.delivery_center_id == delivery_center_id)
+        if employee_id is not None:
+            emp_query = emp_query.where(Employee.id == employee_id)
+        emp_result = await self.session.execute(emp_query)
+        emp_rows = emp_result.all()
+
+        out: dict[str, dict] = {}
+        for r in emp_rows:
+            out[str(r.employee_id)] = {
+                "emp_start": r.emp_start,
+                "emp_end": r.emp_end,
+                "line_item_ranges": [],
+            }
+
+        if not out:
+            return out
+
+        emp_ids = list(out.keys())
+
+        # Engagement line item date ranges (employee assigned)
+        eng_query = (
+            select(
+                EngagementLineItem.employee_id,
+                EngagementLineItem.start_date,
+                EngagementLineItem.end_date,
+            )
+            .select_from(EngagementLineItem)
+            .where(
+                EngagementLineItem.employee_id.isnot(None),
+                EngagementLineItem.employee_id.in_([UUID(e) for e in emp_ids]),
+            )
+        )
+        eng_result = await self.session.execute(eng_query)
+        for row in eng_result.all():
+            eid = str(row.employee_id)
+            if eid in out and row.start_date and row.end_date:
+                out[eid]["line_item_ranges"].append((row.start_date, row.end_date))
+
+        # Estimate line item date ranges (employee assigned) - only from estimates without accepted quote
+        no_accepted = ~exists(
+            select(1).where(
+                Quote.opportunity_id == Estimate.opportunity_id,
+                Quote.status == QuoteStatus.ACCEPTED,
+            )
+        )
+        est_query = (
+            select(
+                EstimateLineItem.employee_id,
+                EstimateLineItem.start_date,
+                EstimateLineItem.end_date,
+            )
+            .select_from(EstimateLineItem)
+            .join(Estimate, EstimateLineItem.estimate_id == Estimate.id)
+            .where(
+                Estimate.active_version == True,
+                no_accepted,
+                EstimateLineItem.employee_id.isnot(None),
+                EstimateLineItem.employee_id.in_([UUID(e) for e in emp_ids]),
+            )
+        )
+        est_result = await self.session.execute(est_query)
+        for row in est_result.all():
+            eid = str(row.employee_id)
+            if eid in out and row.start_date and row.end_date:
+                out[eid]["line_item_ranges"].append((row.start_date, row.end_date))
+
+        return out
 
     async def fetch_estimate_weekly_data(
         self,
@@ -429,4 +673,3 @@ class StaffingForecastRepository:
             }
             for r in rows
         ]
-

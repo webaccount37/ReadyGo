@@ -231,8 +231,9 @@ export function EngagementEmptyRow({
       newRate = parseFloat(baseRate.toFixed(2)).toString();
     } else {
       if (selectedRoleData) {
-        const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
-        const fallbackRate = selectedRoleData.role_external_rate || 0;
+        const firstRate = selectedRoleData.role_rates?.[0];
+        const fallbackCost = firstRate?.internal_cost_rate ?? 0;
+        const fallbackRate = firstRate?.external_rate ?? 0;
         newCost = parseFloat(fallbackCost.toFixed(2)).toString();
         newRate = parseFloat(fallbackRate.toFixed(2)).toString();
       } else {
@@ -313,7 +314,8 @@ export function EngagementEmptyRow({
           newCost = parseFloat(baseCost.toFixed(2)).toString();
         } else {
           if (selectedRoleData) {
-            const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+            const firstRate = selectedRoleData.role_rates?.[0];
+            const fallbackCost = selectedRoleData.role_rates?.[0]?.internal_cost_rate ?? 0;
             newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {
             prevEmployeeIdRef.current = currentEmployeeId;

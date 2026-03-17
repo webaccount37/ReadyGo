@@ -31,13 +31,11 @@ class RoleController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
-        status: Optional[str] = None,
     ) -> RoleListResponse:
         """List roles with optional filters."""
         roles, total = await self.role_service.list_roles(
             skip=skip,
             limit=limit,
-            status=status,
         )
         return RoleListResponse(items=roles, total=total)
     

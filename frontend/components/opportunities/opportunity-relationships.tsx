@@ -170,7 +170,8 @@ export function OpportunityRelationships({
     } else {
       // Fallback to role default rate if no matching rate found
       if (selectedRoleData) {
-        const fallbackRate = selectedRoleData.role_external_rate || 0;
+        const firstRate = selectedRoleData.role_rates?.[0];
+        const fallbackRate = firstRate?.external_rate ?? 0;
         newRate = parseFloat(fallbackRate.toFixed(2)).toString();
       } else {
         return;

@@ -21,11 +21,12 @@ class StaffingForecastSourceItem(BaseModel):
 
 
 class StaffingForecastCell(BaseModel):
-    """Cell value for a row/week intersection."""
+    """Cell value for a row/week or row/month intersection."""
     hours: float
     revenue: float
     cost: float
     margin_pct: Optional[float] = None
+    billable_utilization_pct: Optional[float] = None
     sources: list[StaffingForecastSourceItem] = Field(default_factory=list)
 
 
@@ -34,6 +35,13 @@ class StaffingForecastWeek(BaseModel):
     week_start: str
     year: int
     week_number: int
+
+
+class StaffingForecastMonth(BaseModel):
+    """Month definition (financial reporting / calendar month)."""
+    month_start: str
+    year: int
+    month: int
 
 
 class StaffingForecastRow(BaseModel):
@@ -51,7 +59,11 @@ class StaffingForecastRow(BaseModel):
 
 class StaffingForecastResponse(BaseModel):
     """Full staffing forecast response."""
-    weeks: list[StaffingForecastWeek]
+    period: str  # "weekly" | "monthly"
+    weeks: Optional[list[StaffingForecastWeek]] = None
+    months: Optional[list[StaffingForecastMonth]] = None
     rows: list[StaffingForecastRow]
-    cells: dict[str, dict[str, Any]]  # row_key -> week_key -> cell
+    cells: dict[str, dict[str, Any]]  # row_key -> week_key|month_key -> cell
     rollup_mode: str
+
+    model_config = {"extra": "allow"}  # Allow weeks/months from response

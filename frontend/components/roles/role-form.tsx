@@ -1,23 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import type { RoleCreate, RoleUpdate } from "@/types/role";
+import type { DeliveryCenter } from "@/types/delivery-center";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { CURRENCIES } from "@/types/currency";
 
-type RoleFormValues = {
-  role_name: string;
-  status: RoleCreate["status"];
-  role_rates: Array<{
-    delivery_center_code: string;
-    default_currency: string;
-    internal_cost_rate: string;
-    external_rate: string;
-  }>;
+type RateRow = {
+  delivery_center_code: string;
+  delivery_center_name: string;
+  default_currency: string;
+  internal_cost_rate: string;
+  external_rate: string;
 };
 
 interface RoleFormProps {
@@ -34,124 +32,86 @@ export function RoleForm({
   isLoading = false,
 }: RoleFormProps) {
   const { data: deliveryCentersData } = useDeliveryCenters();
-  
-  const [formData, setFormData] = useState<RoleFormValues>({
-    role_name: initialData?.role_name || "",
-    status: initialData?.status || "active",
-    role_rates:
-      initialData?.role_rates?.length
-        ? initialData.role_rates.map((rate) => ({
-            delivery_center_code: rate.delivery_center_code,
-            default_currency: rate.default_currency,
-            internal_cost_rate: String(rate.internal_cost_rate),
-            external_rate: String(rate.external_rate),
-          }))
-        : [
-            {
-              delivery_center_code: deliveryCentersData?.items[0]?.code || "",
-              default_currency: "USD",
-              internal_cost_rate: "",
-              external_rate: "",
-            },
-          ],
+
+  // Build fixed rate rows: one per Delivery Center, sorted by DC code for consistent display
+  const rateRows = useMemo((): RateRow[] => {
+    const dcs = [...(deliveryCentersData?.items ?? [])].sort(
+      (a, b) => (a.code || "").localeCompare(b.code || "")
+    );
+    const ratesByDc = new Map(
+      (initialData?.role_rates ?? []).map((r) => [r.delivery_center_code.toLowerCase(), r])
+    );
+    return dcs.map((dc: DeliveryCenter) => {
+      const existing = ratesByDc.get(dc.code.toLowerCase());
+      return {
+        delivery_center_code: dc.code,
+        delivery_center_name: dc.name,
+        default_currency: existing?.default_currency ?? dc.default_currency ?? "USD",
+        internal_cost_rate: existing != null ? String(existing.internal_cost_rate) : "0",
+        external_rate: existing != null ? String(existing.external_rate) : "0",
+      };
+    });
+  }, [deliveryCentersData?.items, initialData?.role_rates]);
+
+  const [formData, setFormData] = useState<{
+    role_name: string;
+    rateRows: RateRow[];
+  }>({
+    role_name: initialData?.role_name ?? "",
+    rateRows,
   });
 
-  // Update delivery center code when delivery centers load (for new roles only)
+  // Sync form when delivery centers or initialData load/change
   useEffect(() => {
-    if (!initialData && deliveryCentersData?.items?.length && formData.role_rates[0]?.delivery_center_code === "") {
-      setFormData((prev) => ({
-        ...prev,
-        role_rates: prev.role_rates.map((rate, index) =>
-          index === 0 && rate.delivery_center_code === ""
-            ? { ...rate, delivery_center_code: deliveryCentersData.items[0].code }
-            : rate
-        ),
-      }));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deliveryCentersData, initialData]);
+    setFormData((prev) => ({
+      ...prev,
+      role_name: initialData?.role_name ?? prev.role_name,
+      rateRows,
+    }));
+  }, [rateRows, initialData?.role_name]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    const parsedRates = formData.role_rates.map((rate) => ({
-      delivery_center_code: rate.delivery_center_code,
-      default_currency: rate.default_currency.trim(),
-      internal_cost_rate: parseFloat(rate.internal_cost_rate),
-      external_rate: parseFloat(rate.external_rate),
+    const parsedRates = formData.rateRows.map((row) => ({
+      delivery_center_code: row.delivery_center_code,
+      default_currency: row.default_currency.trim(),
+      internal_cost_rate: parseFloat(row.internal_cost_rate) || 0,
+      external_rate: parseFloat(row.external_rate) || 0,
     }));
 
-    if (parsedRates.length === 0) {
-      alert("At least one delivery center rate is required.");
-      return;
-    }
-
     for (const rate of parsedRates) {
-      if (!rate.delivery_center_code) {
-        alert("Delivery center is required for each rate.");
-        return;
-      }
-      if (!rate.default_currency) {
-        alert("Currency is required for each rate.");
+      if (!rate.delivery_center_code || !rate.default_currency) {
+        alert("Delivery center and currency are required for each rate.");
         return;
       }
       if (Number.isNaN(rate.internal_cost_rate) || Number.isNaN(rate.external_rate)) {
-        alert("Please enter valid numeric rates for each delivery center.");
+        alert("Please enter valid numeric rates.");
         return;
       }
     }
 
-    const primaryRate = parsedRates[0];
-
     await onSubmit({
       role_name: formData.role_name.trim(),
-      role_internal_cost_rate: primaryRate.internal_cost_rate,
-      role_external_rate: primaryRate.external_rate,
-      status: formData.status,
-      default_currency: primaryRate.default_currency,
       role_rates: parsedRates,
     });
   };
 
-  const updateRate = (index: number, key: keyof RoleFormValues["role_rates"][number], value: string) => {
+  const updateRate = (index: number, key: keyof RateRow, value: string) => {
     setFormData((prev) => {
-      const nextRates = [...prev.role_rates];
-      nextRates[index] = { ...nextRates[index], [key]: value };
-      return { ...prev, role_rates: nextRates };
+      const next = [...prev.rateRows];
+      next[index] = { ...next[index], [key]: value };
+      return { ...prev, rateRows: next };
     });
   };
 
-  const addRate = () => {
-    if (!deliveryCentersData?.items?.length) {
-      alert("Please wait for delivery centers to load before adding a rate.");
-      return;
-    }
-    setFormData((prev) => ({
-      ...prev,
-      role_rates: [
-        ...prev.role_rates,
-        {
-          delivery_center_code: deliveryCentersData.items[0].code,
-          default_currency: "USD",
-          internal_cost_rate: "",
-          external_rate: "",
-        },
-      ],
-    }));
-  };
-
-  const removeRate = (index: number) => {
-    setFormData((prev) => {
-      const nextRates = prev.role_rates.filter((_, i) => i !== index);
-      return { ...prev, role_rates: nextRates.length ? nextRates : prev.role_rates };
-    });
-  };
+  const hasDeliveryCenters = (deliveryCentersData?.items?.length ?? 0) > 0;
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       <div className="space-y-1">
         <p className="text-sm font-semibold text-gray-800">Basics</p>
-        <p className="text-xs text-gray-500">Name, status, and rate configuration.</p>
+        <p className="text-xs text-gray-500">Name and rate configuration by delivery center.</p>
       </div>
 
       <div>
@@ -159,129 +119,80 @@ export function RoleForm({
         <Input
           id="role_name"
           value={formData.role_name}
-          onChange={(e) =>
-            setFormData({ ...formData, role_name: e.target.value })
-          }
+          onChange={(e) => setFormData({ ...formData, role_name: e.target.value })}
           required
         />
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
-          <Label className="text-base">Delivery Center Rates *</Label>
-          <Button type="button" variant="outline" size="sm" onClick={addRate}>
-            Add Rate
-          </Button>
-        </div>
+        <Label className="text-base">Rates by Delivery Center</Label>
+        <p className="text-xs text-gray-500">
+          Each delivery center has one rate. Edit currency, internal cost, and external rate only.
+        </p>
 
-        {formData.role_rates.map((rate, index) => (
-          <div
-            key={index}
-            className="border rounded-md p-3 space-y-3 bg-gray-50"
-          >
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Delivery Center *</Label>
-                <Select
-                  value={rate.delivery_center_code}
-                  onChange={(e) => updateRate(index, "delivery_center_code", e.target.value)}
-                  required
-                >
-                  {deliveryCentersData?.items.map((dc) => (
-                    <option key={dc.code} value={dc.code}>
-                      {dc.name}
-                    </option>
-                  ))}
-                </Select>
+        {!hasDeliveryCenters ? (
+          <p className="text-sm text-amber-600">No delivery centers configured. Create delivery centers first.</p>
+        ) : (
+          <div className="space-y-2">
+            {formData.rateRows.map((row, index) => (
+              <div
+                key={row.delivery_center_code}
+                className="border rounded-md p-3 bg-gray-50 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-end"
+              >
+                <div>
+                  <Label className="text-xs text-gray-500">Delivery Center</Label>
+                  <div className="py-2 text-sm font-medium text-gray-700">
+                    {row.delivery_center_name}
+                  </div>
+                </div>
+                <div>
+                  <Label>Currency</Label>
+                  <Select
+                    value={row.default_currency}
+                    onChange={(e) => updateRate(index, "default_currency", e.target.value)}
+                    required
+                  >
+                    {CURRENCIES.map((c) => (
+                      <option key={c.value} value={c.value}>
+                        {c.label}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <div>
+                  <Label>Internal Cost Rate</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={row.internal_cost_rate}
+                    onChange={(e) => updateRate(index, "internal_cost_rate", e.target.value)}
+                  />
+                </div>
+                <div>
+                  <Label>External Rate</Label>
+                  <Input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    value={row.external_rate}
+                    onChange={(e) => updateRate(index, "external_rate", e.target.value)}
+                  />
+                </div>
               </div>
-
-              <div>
-                <Label>Currency *</Label>
-                <Select
-                  value={rate.default_currency}
-                  onChange={(e) => updateRate(index, "default_currency", e.target.value)}
-                  required
-                >
-                  {CURRENCIES.map((c) => (
-                    <option key={c.value} value={c.value}>
-                      {c.label}
-                    </option>
-                  ))}
-                </Select>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label>Internal Cost Rate *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  required
-                  value={rate.internal_cost_rate}
-                  onChange={(e) => updateRate(index, "internal_cost_rate", e.target.value)}
-                />
-              </div>
-              <div>
-                <Label>External Rate *</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  required
-                  value={rate.external_rate}
-                  onChange={(e) => updateRate(index, "external_rate", e.target.value)}
-                />
-              </div>
-            </div>
-
-            {formData.role_rates.length > 1 && (
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="text-red-600"
-                  onClick={() => removeRate(index)}
-                >
-                  Remove
-                </Button>
-              </div>
-            )}
+            ))}
           </div>
-        ))}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <div>
-          <Label htmlFor="status">Status</Label>
-          <Select
-            id="status"
-            value={formData.status}
-            onChange={(e) =>
-              setFormData({
-                ...formData,
-                status: e.target.value as RoleCreate["status"],
-              })
-            }
-          >
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </Select>
-        </div>
+        )}
       </div>
 
       <div className="flex justify-end gap-2 pt-4">
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading}>
+        <Button type="submit" disabled={isLoading || !hasDeliveryCenters}>
           {isLoading ? "Saving..." : initialData ? "Update" : "Create"}
         </Button>
       </div>
     </form>
   );
 }
-
-

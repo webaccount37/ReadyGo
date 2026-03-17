@@ -3,7 +3,7 @@ Staffing forecast API endpoints.
 """
 
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
@@ -23,6 +23,7 @@ async def get_staffing_forecast(
     employee_id: Optional[UUID] = Query(None, description="Filter by employee"),
     billable: str = Query("both", description="Filter billable: true | false | both"),
     duration_months: int = Query(6, ge=3, le=12, description="Duration: 3, 6, or 12 months"),
+    period: Literal["weekly", "monthly"] = Query("weekly", description="Weekly or monthly aggregation"),
     db: AsyncSession = Depends(get_db),
 ) -> StaffingForecastResponse:
     """Get staffing forecast data for the grid (Resource + DC view)."""
@@ -36,5 +37,6 @@ async def get_staffing_forecast(
         employee_id=employee_id,
         billable=billable,
         duration_months=duration_months,
+        period=period,
     )
     return StaffingForecastResponse(**result)

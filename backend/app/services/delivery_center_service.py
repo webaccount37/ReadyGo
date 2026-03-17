@@ -32,11 +32,35 @@ class DeliveryCenterService(BaseService):
         self.employee_repo = EmployeeRepository(session)
     
     async def create_delivery_center(self, delivery_center_data: DeliveryCenterCreate) -> DeliveryCenterResponse:
-        """Create a new delivery center."""
+        """Create a new delivery center and add it to all existing roles."""
         delivery_center_dict = delivery_center_data.model_dump()
         delivery_center = await self.delivery_center_repo.create(**delivery_center_dict)
         await self.session.commit()
         await self.session.refresh(delivery_center)
+
+        # Add RoleRate for this DC to every existing Role
+        from app.models.delivery_center import DeliveryCenter
+        from app.models.role import Role
+        from app.models.role_rate import RoleRate
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+
+        roles_result = await self.session.execute(
+            select(Role).options(selectinload(Role.role_rates))
+        )
+        roles = list(roles_result.scalars().all())
+        for role in roles:
+            role_rate = RoleRate(
+                role_id=role.id,
+                delivery_center_id=delivery_center.id,
+                default_currency=delivery_center.default_currency,
+                internal_cost_rate=0.0,
+                external_rate=0.0,
+            )
+            self.session.add(role_rate)
+        if roles:
+            await self.session.commit()
+
         return DeliveryCenterResponse(
             id=delivery_center.id,
             name=delivery_center.name,
@@ -211,11 +235,50 @@ class DeliveryCenterService(BaseService):
         )
     
     async def delete_delivery_center(self, delivery_center_id: UUID) -> bool:
-        """Delete a delivery center."""
+        """Delete a delivery center. Removes RoleRates for this DC from all Roles first (if not in use)."""
         delivery_center = await self.delivery_center_repo.get(delivery_center_id)
         if not delivery_center:
             return False
-        
+
+        # Check if any RoleRate for this DC is referenced by EstimateLineItem, EngagementLineItem, or QuoteLineItem
+        from app.models.role_rate import RoleRate
+        from app.models.estimate import EstimateLineItem
+        from app.models.engagement import EngagementLineItem
+        from app.models.quote import QuoteLineItem
+        from sqlalchemy import select, func, or_
+
+        # Count references: estimate_line_items, engagement_line_items, quote_line_items
+        est_count = await self.session.execute(
+            select(func.count())
+            .select_from(EstimateLineItem)
+            .join(RoleRate, RoleRate.id == EstimateLineItem.role_rates_id)
+            .where(RoleRate.delivery_center_id == delivery_center_id)
+        )
+        eng_count = await self.session.execute(
+            select(func.count())
+            .select_from(EngagementLineItem)
+            .join(RoleRate, RoleRate.id == EngagementLineItem.role_rates_id)
+            .where(RoleRate.delivery_center_id == delivery_center_id)
+        )
+        quote_count = await self.session.execute(
+            select(func.count())
+            .select_from(QuoteLineItem)
+            .join(RoleRate, RoleRate.id == QuoteLineItem.role_rates_id)
+            .where(RoleRate.delivery_center_id == delivery_center_id)
+        )
+        if (est_count.scalar() or 0) + (eng_count.scalar() or 0) + (quote_count.scalar() or 0) > 0:
+            raise ValueError(
+                "Cannot delete delivery center: one or more role rates for this center are in use "
+                "by estimates, engagements, or quotes."
+            )
+
+        # Delete all RoleRates for this delivery center
+        from sqlalchemy import delete
+        await self.session.execute(
+            delete(RoleRate).where(RoleRate.delivery_center_id == delivery_center_id)
+        )
+        await self.session.flush()
+
         await self.delivery_center_repo.delete(delivery_center_id)
         await self.session.commit()
         return True

@@ -178,8 +178,9 @@ export function EmployeeRelationships({
       // Round to 2 decimal places
       newRate = parseFloat(baseRate.toFixed(2)).toString();
     } else {
-      // Fallback to role default rate if no matching rate found
-      const fallbackRate = selectedRoleData.role_external_rate || 0;
+      // Fallback: use first role rate's external_rate, or 0 (every role has rates per DC, but edge case fallback)
+      const firstRate = selectedRoleData.role_rates?.[0];
+      const fallbackRate = firstRate?.external_rate ?? 0;
       newRate = parseFloat(fallbackRate.toFixed(2)).toString();
     }
 

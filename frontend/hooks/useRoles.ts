@@ -26,7 +26,6 @@ export function useRoles(
   params?: {
     skip?: number;
     limit?: number;
-    status?: string;
   },
   options?: Omit<UseQueryOptions<RoleListResponse>, "queryKey" | "queryFn">
 ) {

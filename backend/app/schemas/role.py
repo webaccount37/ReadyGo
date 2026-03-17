@@ -6,8 +6,6 @@ from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
 from uuid import UUID
 
-from app.models.role import RoleStatus
-
 
 class RoleRateBase(BaseModel):
     """Base schema for a role rate tied to delivery center + currency."""
@@ -43,26 +41,23 @@ class RoleRateResponse(RoleRateBase):
 class RoleBase(BaseModel):
     """Base role schema with common fields."""
     role_name: str = Field(..., min_length=1, max_length=100)
-    status: RoleStatus = RoleStatus.ACTIVE
-    role_rates: List[RoleRateCreate] = Field(..., min_length=1)
+    role_rates: List[RoleRateCreate] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def ensure_rates_present(self) -> "RoleBase":
-        if not self.role_rates or len(self.role_rates) == 0:
-            raise ValueError("At least one delivery center rate is required.")
+    def ensure_rates_present_for_update(self) -> "RoleBase":
+        # For updates, role_rates can be empty (optional). For create, backend generates from all DCs.
         return self
 
 
 class RoleCreate(RoleBase):
-    """Schema for creating a role."""
+    """Schema for creating a role. Backend creates one rate per Delivery Center; role_rates override defaults."""
     pass
 
 
 class RoleUpdate(BaseModel):
-    """Schema for updating a role."""
+    """Schema for updating a role. role_rates must contain one entry per Delivery Center (update-only, no add/remove)."""
     role_name: Optional[str] = Field(None, min_length=1, max_length=100)
-    status: Optional[RoleStatus] = None
-    role_rates: Optional[List[RoleRateCreate]] = Field(None, min_length=1)
+    role_rates: Optional[List[RoleRateCreate]] = Field(None)
 
 
 class RoleResponse(RoleBase):

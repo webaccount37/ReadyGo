@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
-from app.models.role import Role, RoleStatus
+from app.models.role import Role
 from app.models.role_rate import RoleRate
 
 
@@ -25,18 +25,6 @@ class RoleRepository(BaseRepository[Role]):
             select(Role).where(Role.role_name == role_name)
         )
         return result.scalar_one_or_none()
-    
-    async def list_by_status(
-        self,
-        status: RoleStatus,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> List[Role]:
-        """List roles by status."""
-        query = select(Role).where(Role.status == status)
-        query = query.offset(skip).limit(limit)
-        result = await self.session.execute(query)
-        return list(result.scalars().all())
     
     async def get_with_relationships(self, role_id: UUID) -> Optional[Role]:
         """Get role with related entities."""

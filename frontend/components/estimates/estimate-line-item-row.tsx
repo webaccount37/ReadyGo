@@ -673,8 +673,9 @@ export function EstimateLineItemRow({
       // Fallback to role default rates if no matching rate found
       // Use selectedRoleData which has full role info including defaults
       if (selectedRoleData) {
-        const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
-        const fallbackRate = selectedRoleData.role_external_rate || 0;
+        const firstRate = selectedRoleData.role_rates?.[0];
+        const fallbackCost = firstRate?.internal_cost_rate ?? 0;
+        const fallbackRate = firstRate?.external_rate ?? 0;
         // Round to 2 decimal places
         newCost = parseFloat(fallbackCost.toFixed(2)).toString();
         newRate = parseFloat(fallbackRate.toFixed(2)).toString();
@@ -767,7 +768,8 @@ export function EstimateLineItemRow({
           // Fallback to role default rates if no matching rate found
           // Use selectedRoleData which has full role info including defaults
           if (selectedRoleData) {
-            const fallbackCost = selectedRoleData.role_internal_cost_rate || 0;
+            const firstRate = selectedRoleData.role_rates?.[0];
+            const fallbackCost = selectedRoleData.role_rates?.[0]?.internal_cost_rate ?? 0;
             // Round to 2 decimal places
             newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {
