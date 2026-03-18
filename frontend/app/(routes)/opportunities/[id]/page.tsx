@@ -6,7 +6,9 @@ import Link from "next/link";
 import {
   useOpportunity,
   useUpdateOpportunity,
+  useOpportunityAverageDealValue,
 } from "@/hooks/useOpportunities";
+import { useEngagementDetail, useApprovedHoursByWeek } from "@/hooks/useEngagements";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
@@ -27,6 +29,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OpportunityForm } from "@/components/opportunities/opportunity-form";
 import { OpportunityRelationships } from "@/components/opportunities/opportunity-relationships";
+import { OpportunityAnalyticsTab } from "@/components/opportunities/opportunity-analytics-tab";
 import type { OpportunityCreate, OpportunityUpdate } from "@/types/opportunity";
 import {
   Calculator,
@@ -35,6 +38,7 @@ import {
   Trash2,
   Pencil,
   Lock,
+  BarChart3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +47,7 @@ export default function OpportunityDetailPage() {
   const router = useRouter();
   const opportunityId = params.id as string;
   const [isEditMode, setIsEditMode] = useState(false);
+  const [activeTab, setActiveTab] = useState<"general" | "analytics">("general");
 
   const { data: opportunity, isLoading, error, refetch } = useOpportunity(
     opportunityId,
@@ -65,6 +70,18 @@ export default function OpportunityDetailPage() {
   const { data: billingTermsData } = useBillingTerms();
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: allOpportunitiesData } = useOpportunities({ limit: 100 });
+
+  const { data: engagement } = useEngagementDetail(opportunity?.engagement_id ?? "", {
+    enabled: !!opportunity?.engagement_id,
+  });
+  const { data: approvedHoursByWeek } = useApprovedHoursByWeek(
+    opportunity?.engagement_id ?? "",
+    { enabled: !!opportunity?.engagement_id }
+  );
+  const { data: avgDealValue } = useOpportunityAverageDealValue(
+    opportunity?.default_currency ?? "USD",
+    { enabled: !!opportunity?.default_currency }
+  );
 
   const getAccountName = (id: string | undefined) =>
     getDisplayName(accountsData, id, "company_name" as keyof { id: string; company_name: string });
@@ -298,6 +315,36 @@ export default function OpportunityDetailPage() {
             </div>
           )}
 
+          <div className="flex gap-2 border-b border-gray-200 mb-6">
+            <button
+              type="button"
+              onClick={() => setActiveTab("general")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+                activeTab === "general"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300"
+              )}
+            >
+              General
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("analytics")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5",
+                activeTab === "analytics"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300"
+              )}
+            >
+              <BarChart3 className="w-4 h-4" />
+              Analytics
+            </button>
+          </div>
+
+          {activeTab === "general" && (
+            <>
           <Card className="bg-gradient-to-r from-slate-50 to-gray-50 border-gray-200">
             <CardHeader>
               <CardTitle>Basic Information</CardTitle>
@@ -518,36 +565,6 @@ export default function OpportunityDetailPage() {
                       : "—"}
                   </p>
                 </div>
-                <div>
-                  <p className="font-semibold text-gray-800">Deal Length (days)</p>
-                  <p className="text-gray-700">
-                    {opportunity.deal_length != null
-                      ? opportunity.deal_length
-                      : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800">Plan Revenue (USD)</p>
-                  <p className="text-gray-700">
-                    {opportunity.plan_amount != null &&
-                    opportunity.plan_amount !== undefined &&
-                    String(opportunity.plan_amount) !== ""
-                      ? formatCurrency(opportunity.plan_amount, "USD")
-                      : "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="font-semibold text-gray-800">
-                    Actuals from Approved Timesheets (USD)
-                  </p>
-                  <p className="text-gray-700">
-                    {opportunity.actuals_amount != null &&
-                    opportunity.actuals_amount !== undefined &&
-                    String(opportunity.actuals_amount) !== "0"
-                      ? formatCurrency(opportunity.actuals_amount, "USD")
-                      : "—"}
-                  </p>
-                </div>
               </div>
             </CardContent>
           </Card>
@@ -565,6 +582,16 @@ export default function OpportunityDetailPage() {
                 />
               </CardContent>
             </Card>
+          )}
+            </>
+          )}
+          {activeTab === "analytics" && (
+            <OpportunityAnalyticsTab
+              opportunity={opportunity}
+              engagement={engagement}
+              approvedHoursByWeek={approvedHoursByWeek}
+              avgDealValue={avgDealValue}
+            />
           )}
         </div>
       )}

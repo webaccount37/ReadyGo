@@ -9,6 +9,7 @@ import {
   useUpdateEmployee,
   useDeleteEmployee,
   useEmployee,
+  useEmployeeUtilization,
 } from "@/hooks/useEmployees";
 import { employeesApi } from "@/lib/api/employees";
 import { Button } from "@/components/ui/button";
@@ -63,6 +64,7 @@ function EmployeesPageContent() {
   const updateEmployee = useUpdateEmployee();
   const deleteEmployee = useDeleteEmployee();
   const { data: deliveryCentersData } = useDeliveryCenters();
+  const { data: utilizationData } = useEmployeeUtilization();
 
   const handleCreate = async (data: EmployeeCreate | EmployeeUpdate) => {
     try {
@@ -199,6 +201,20 @@ function EmployeesPageContent() {
     return employeeData?.opportunities || [];
   };
 
+  // Helper to get utilization for an employee
+  const getUtilization = (employeeId: string) => {
+    const u = utilizationData?.utilization?.[employeeId];
+    return {
+      mtd: u?.mtd_utilization_pct ?? null,
+      ytd: u?.ytd_utilization_pct ?? null,
+    };
+  };
+
+  const formatUtilization = (pct: number | null): string => {
+    if (pct === null || pct === undefined) return "—";
+    return `${pct.toFixed(1)}%`;
+  };
+
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
@@ -251,17 +267,19 @@ function EmployeesPageContent() {
                     <div className="hidden md:block w-full">
                       <table className="w-full text-xs table-fixed border-collapse">
                         <colgroup>
-                          <col style={{ width: "12%" }} />
-                          <col style={{ width: "14%" }} />
-                          <col style={{ width: "8%" }} />
-                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "11%" }} />
+                          <col style={{ width: "13%" }} />
                           <col style={{ width: "7%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "6%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "6%" }} />
                           <col style={{ width: "7%" }} />
                           <col style={{ width: "7%" }} />
                           <col style={{ width: "9%" }} />
-                          <col style={{ width: "8%" }} />
                           <col style={{ width: "10%" }} />
-                          <col style={{ width: "12%" }} />
                         </colgroup>
                         <thead>
                           <tr className="border-b">
@@ -274,6 +292,8 @@ function EmployeesPageContent() {
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="External Bill Rate">EBR</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Timezone">TZ</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="MTD Utilization %">MTD Util %</th>
+                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="YTD Utilization %">YTD Util %</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunities">Opps</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
@@ -321,6 +341,12 @@ function EmployeesPageContent() {
                             </td>
                             <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={employee.timezone || "—"}>
                               {employee.timezone || "—"}
+                            </td>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={`MTD Utilization: ${formatUtilization(getUtilization(employee.id).mtd)}`}>
+                              {formatUtilization(getUtilization(employee.id).mtd)}
+                            </td>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={`YTD Utilization: ${formatUtilization(getUtilization(employee.id).ytd)}`}>
+                              {formatUtilization(getUtilization(employee.id).ytd)}
                             </td>
                             <td className="p-1.5 min-w-0 text-xs overflow-visible" onClick={(e) => e.stopPropagation()}>
                               {(() => {
@@ -505,6 +531,20 @@ function EmployeesPageContent() {
                                 <div className="text-sm">{employee.timezone}</div>
                               </div>
                             )}
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                  MTD Util %
+                                </div>
+                                <div className="text-sm">{formatUtilization(getUtilization(employee.id).mtd)}</div>
+                              </div>
+                              <div>
+                                <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
+                                  YTD Util %
+                                </div>
+                                <div className="text-sm">{formatUtilization(getUtilization(employee.id).ytd)}</div>
+                              </div>
+                            </div>
                             {(() => {
                               const opportunities = getOpportunities(employee.id);
                               if (opportunities.length === 0) return null;

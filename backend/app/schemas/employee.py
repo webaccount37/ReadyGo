@@ -102,3 +102,14 @@ class EmployeeListResponse(BaseModel):
     total: int
 
 
+class EmployeeUtilizationItem(BaseModel):
+    """MTD and YTD utilization for a single employee."""
+    mtd_utilization_pct: Optional[float] = None
+    ytd_utilization_pct: Optional[float] = None
+
+
+class EmployeeUtilizationResponse(BaseModel):
+    """Utilization by employee ID. Keys are employee UUIDs."""
+    utilization: dict[str, EmployeeUtilizationItem]
+
+

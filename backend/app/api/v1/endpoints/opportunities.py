@@ -14,6 +14,7 @@ from app.schemas.opportunity import (
     OpportunityUpdate,
     OpportunityResponse,
     OpportunityListResponse,
+    OpportunityAverageDealValueResponse,
 )
 from app.schemas.relationships import LinkRolesToOpportunityRequest, UnlinkRequest
 
@@ -50,6 +51,26 @@ async def list_opportunities(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+@router.post("/sync-forecasts")
+async def sync_opportunity_forecasts(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Recompute deal_value_usd and forecast_value_usd for all opportunities. Fixes stale data."""
+    controller = OpportunityController(db)
+    updated = await controller.sync_forecast_values()
+    return {"updated": updated}
+
+
+@router.get("/stats/average-deal-value", response_model=OpportunityAverageDealValueResponse)
+async def get_average_deal_value(
+    currency: str = Query("USD", description="Currency code (e.g. USD)"),
+    db: AsyncSession = Depends(get_db),
+) -> OpportunityAverageDealValueResponse:
+    """Get average deal value for opportunities with the given currency."""
+    controller = OpportunityController(db)
+    return await controller.get_average_deal_value_by_currency(currency)
 
 
 @router.get("/{opportunity_id}", response_model=OpportunityResponse)

@@ -18,7 +18,7 @@ def _get_week_start(d: date) -> date:
     return d - timedelta(days=days_since_sunday)
 
 
-DURATION_WEEKS = {3: 13, 6: 26, 12: 52}
+DURATION_WEEKS = {1: 4, 3: 13, 6: 26, 12: 52, 13: 56}
 
 
 class StaffingForecastService:
@@ -324,6 +324,8 @@ class StaffingForecastService:
                 holiday_hours = holiday_by_dc_week.get((dc_id, wk), 0.0)
                 pto_hours = pto_by_emp_week.get((emp_id, wk), 0.0)
                 available = AVAILABLE_PER_WEEK - holiday_hours - pto_hours
+                c["billable_hours"] = round(billable_hours, 2)
+                c["available_hours"] = round(available, 2)
                 if available > 0:
                     pct = (billable_hours / available) * 100
                     c["billable_utilization_pct"] = round(pct, 1)
@@ -400,6 +402,8 @@ class StaffingForecastService:
                                 mc["available_hours_sum"] += available
 
                 for mc in month_cells[rk].values():
+                    mc["billable_hours"] = round(mc["billable_hours_sum"], 2)
+                    mc["available_hours"] = round(mc["available_hours_sum"], 2)
                     if mc["available_hours_sum"] > 0:
                         mc["billable_utilization_pct"] = round(
                             (mc["billable_hours_sum"] / mc["available_hours_sum"]) * 100, 1
@@ -422,3 +426,92 @@ class StaffingForecastService:
             "cells": cells,
             "rollup_mode": "granular",
         }
+
+    async def get_employee_utilization(
+        self,
+        delivery_center_id: Optional[UUID] = None,
+    ) -> dict[str, dict]:
+        """
+        Get MTD and YTD billable utilization % per employee, using the same logic as
+        the staffing forecast (billable_hours / available_hours, with holiday/PTO adjustments).
+        Returns: { employee_id: { "mtd_utilization_pct": float|None, "ytd_utilization_pct": float|None } }
+        """
+        today = date.today()
+        current_year, current_month = today.year, today.month
+
+        # MTD: current month only
+        first_of_month = date(current_year, current_month, 1)
+        mtd_start = _get_week_start(first_of_month)
+        mtd_forecast = await self.get_forecast(
+            start_week=mtd_start,
+            delivery_center_id=delivery_center_id,
+            employee_id=None,
+            billable="both",
+            duration_months=2,  # Cover current month (may start in prev month)
+            period="monthly",
+        )
+        mtd_month_key = f"{current_year}-{current_month:02d}"
+
+        # YTD: current month + previous 12 months (13 months total)
+        start_year = current_year
+        start_month = current_month - 12
+        while start_month <= 0:
+            start_month += 12
+            start_year -= 1
+        first_of_ytd = date(start_year, start_month, 1)
+        ytd_start = _get_week_start(first_of_ytd)
+        ytd_forecast = await self.get_forecast(
+            start_week=ytd_start,
+            delivery_center_id=delivery_center_id,
+            employee_id=None,
+            billable="both",
+            duration_months=13,
+            period="monthly",
+        )
+
+        def _aggregate_by_employee(forecast: dict, month_keys: list[str]) -> dict[str, tuple[float, float]]:
+            """Returns { emp_id: (billable_hours_sum, available_hours_sum) }"""
+            cells = forecast.get("cells", {})
+            out: dict[str, tuple[float, float]] = {}
+            for rk, period_cells in cells.items():
+                if not rk.startswith("emp|"):
+                    continue
+                parts = rk.split("|")
+                if len(parts) < 4:
+                    continue
+                emp_id = parts[1]
+                billable_sum = 0.0
+                available_sum = 0.0
+                for pk in month_keys:
+                    c = period_cells.get(pk)
+                    if not c:
+                        continue
+                    billable_sum += c.get("billable_hours") or 0.0
+                    available_sum += c.get("available_hours") or 0.0
+                if available_sum > 0 or billable_sum > 0:
+                    prev_b, prev_a = out.get(emp_id, (0.0, 0.0))
+                    out[emp_id] = (prev_b + billable_sum, prev_a + available_sum)
+            return out
+
+        mtd_month_keys = [mtd_month_key]
+
+        ytd_month_keys: list[str] = []
+        if ytd_forecast.get("months"):
+            ytd_month_keys = [f"{m['year']}-{m['month']:02d}" for m in ytd_forecast["months"]]
+
+        mtd_agg = _aggregate_by_employee(mtd_forecast, mtd_month_keys)
+        ytd_agg = _aggregate_by_employee(ytd_forecast, ytd_month_keys)
+
+        # Build result: all employee IDs from either aggregation
+        all_emp_ids = set(mtd_agg.keys()) | set(ytd_agg.keys())
+        result: dict[str, dict] = {}
+        for emp_id in all_emp_ids:
+            mtd_b, mtd_a = mtd_agg.get(emp_id, (0.0, 0.0))
+            ytd_b, ytd_a = ytd_agg.get(emp_id, (0.0, 0.0))
+            mtd_pct = round((mtd_b / mtd_a) * 100, 1) if mtd_a > 0 else None
+            ytd_pct = round((ytd_b / ytd_a) * 100, 1) if ytd_a > 0 else None
+            result[emp_id] = {
+                "mtd_utilization_pct": mtd_pct,
+                "ytd_utilization_pct": ytd_pct,
+            }
+        return result

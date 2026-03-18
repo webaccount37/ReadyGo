@@ -17,6 +17,7 @@ const QUERY_KEYS = {
   list: (filters?: Record<string, unknown>) => [...QUERY_KEYS.lists(), filters] as const,
   details: () => [...QUERY_KEYS.all, "detail"] as const,
   detail: (id: string, includeRelationships?: boolean) => [...QUERY_KEYS.details(), id, includeRelationships] as const,
+  utilization: (params?: Record<string, unknown>) => [...QUERY_KEYS.all, "utilization", params] as const,
 };
 
 /**
@@ -35,6 +36,20 @@ export function useEmployees(
   return useQuery<EmployeeListResponse>({
     queryKey: QUERY_KEYS.list(params),
     queryFn: () => employeesApi.getEmployees(params),
+    ...options,
+  });
+}
+
+/**
+ * Get MTD and YTD utilization % per employee.
+ */
+export function useEmployeeUtilization(
+  params?: { delivery_center_id?: string },
+  options?: Omit<UseQueryOptions<{ utilization: Record<string, { mtd_utilization_pct: number | null; ytd_utilization_pct: number | null }> }>, "queryKey" | "queryFn">
+) {
+  return useQuery({
+    queryKey: QUERY_KEYS.utilization(params),
+    queryFn: () => employeesApi.getEmployeeUtilization(params),
     ...options,
   });
 }

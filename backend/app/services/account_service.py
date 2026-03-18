@@ -13,6 +13,26 @@ from app.db.repositories.account_repository import AccountRepository
 from app.db.repositories.contact_repository import ContactRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.schemas.account import AccountCreate, AccountUpdate, AccountResponse
+from app.models.opportunity import OpportunityStatus
+
+# Must match frontend getProbabilityFromStatus() exactly for consistent Forecast $
+_PROBABILITY_FROM_STATUS = {
+    OpportunityStatus.QUALIFIED: 25.0,
+    OpportunityStatus.PROPOSAL: 50.0,
+    OpportunityStatus.NEGOTIATION: 80.0,
+    OpportunityStatus.WON: 100.0,
+}
+
+
+def _probability_from_status(status) -> float:
+    """Derive probability from status (enum or string). Matches frontend getForecastDisplayValue."""
+    if status is None:
+        return 0.0
+    if hasattr(status, "value"):
+        return _PROBABILITY_FROM_STATUS.get(status, 0.0)
+    return _PROBABILITY_FROM_STATUS.get(
+        getattr(OpportunityStatus, str(status).upper(), None), 0.0
+    ) or 0.0
 
 
 class AccountService(BaseService):
@@ -70,21 +90,29 @@ class AccountService(BaseService):
             account_dict["contact_count"] = contact_count
             account_dict["opportunities_count"] = opportunity_count
 
-            # Sum forecast_value_usd, plan_amount, actuals_amount from all opportunities
-            # Also check if any opportunity is locked or permanently locked (to disable account delete)
-            opportunities, _ = await self.opportunity_service.list_opportunities(
+            # Sum Forecast/Plan/Actuals from all opportunities (same formulas as Opportunities page)
+            # Forecast: use raw Opportunity model fields (avoids response serialization issues)
+            # Plan/Actuals: from engagement resource plan and approved timesheets via service
+            opportunities_raw = await self.opportunity_repo.list_by_account(
+                account.id, skip=0, limit=10000
+            )
+            raw_by_id = {str(o.id): o for o in opportunities_raw}
+            opportunities_with_plan, _ = await self.opportunity_service.list_opportunities(
                 account_id=account.id, skip=0, limit=10000
             )
             forecast_sum = Decimal("0")
             plan_sum = Decimal("0")
             actuals_sum = Decimal("0")
             has_locked_opportunities = False
-            for opp in opportunities:
-                if opp.forecast_value_usd is not None:
-                    try:
-                        forecast_sum += Decimal(str(opp.forecast_value_usd))
-                    except (ValueError, TypeError):
-                        pass
+            for opp in opportunities_with_plan:
+                opp_id = getattr(opp, "id", None)
+                raw = raw_by_id.get(str(opp_id) if opp_id else "")
+                if raw:
+                    fv = raw.forecast_value_usd
+                    if fv is not None and Decimal(str(fv)) > 0:
+                        forecast_sum += Decimal(str(fv))
+                    elif raw.deal_value_usd is not None and raw.probability is not None and raw.probability > 0:
+                        forecast_sum += Decimal(str(raw.deal_value_usd)) * (Decimal(str(raw.probability)) / 100)
                 if opp.plan_amount is not None and opp.plan_amount != "":
                     try:
                         plan_sum += Decimal(str(opp.plan_amount))

@@ -114,3 +114,9 @@ export interface OpportunityListResponse {
   total: number;
 }
 
+export interface OpportunityAverageDealValueResponse {
+  currency: string;
+  average_deal_value: string | null;
+  count: number;
+}
+

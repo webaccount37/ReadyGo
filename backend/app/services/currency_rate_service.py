@@ -10,6 +10,7 @@ from app.db.repositories.currency_rate_repository import CurrencyRateRepository
 from app.schemas.currency_rate import CurrencyRateCreate, CurrencyRateUpdate, CurrencyRateResponse
 from app.models.currency_rate import CurrencyRate
 from app.utils.currency_converter import clear_currency_rates_cache
+from app.services.opportunity_service import OpportunityService
 
 
 class CurrencyRateService:
@@ -36,6 +37,7 @@ class CurrencyRateService:
         await self.session.commit()
         await self.session.refresh(currency_rate)
         clear_currency_rates_cache()  # Clear cache when rates are updated
+        await self._sync_opportunity_forecasts()
         return CurrencyRateResponse.model_validate(currency_rate)
     
     async def get_currency_rate(self, currency_rate_id: UUID) -> Optional[CurrencyRateResponse]:
@@ -79,6 +81,7 @@ class CurrencyRateService:
         await self.session.commit()
         await self.session.refresh(updated)
         clear_currency_rates_cache()  # Clear cache when rates are updated
+        await self._sync_opportunity_forecasts()
         return CurrencyRateResponse.model_validate(updated)
     
     async def update_currency_rate_by_code(
@@ -98,6 +101,7 @@ class CurrencyRateService:
         await self.session.commit()
         await self.session.refresh(updated)
         clear_currency_rates_cache()  # Clear cache when rates are updated
+        await self._sync_opportunity_forecasts()
         return CurrencyRateResponse.model_validate(updated)
     
     async def delete_currency_rate(self, currency_rate_id: UUID) -> bool:
@@ -109,7 +113,14 @@ class CurrencyRateService:
         
         deleted = await self.currency_rate_repo.delete(currency_rate_id)
         await self.session.commit()
+        if deleted:
+            await self._sync_opportunity_forecasts()
         return deleted
+
+    async def _sync_opportunity_forecasts(self) -> None:
+        """Recompute deal_value_usd and forecast_value_usd for all opportunities after rate changes."""
+        opp_svc = OpportunityService(self.session)
+        await opp_svc.sync_forecast_values_for_all_opportunities()
     
     async def get_all_rates_dict(self) -> dict[str, float]:
         """Get all currency rates as a dictionary for use in currency converter."""

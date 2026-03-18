@@ -91,6 +91,7 @@ export function useCreateQuote(
       // Also invalidate opportunities and estimates since lock status changed
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["estimates"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -123,6 +124,7 @@ export function useUpdateQuoteStatus(
       // REJECTED/INVALID delete engagements - invalidate so lists stay in sync
       queryClient.invalidateQueries({ queryKey: ["engagements"] });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -147,6 +149,7 @@ export function useDeactivateQuote(
       // Engagements are deleted when quote is deactivated - invalidate so list refreshes
       queryClient.invalidateQueries({ queryKey: ["engagements"] });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });

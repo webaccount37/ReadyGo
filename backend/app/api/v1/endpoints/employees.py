@@ -8,11 +8,14 @@ from uuid import UUID
 
 from app.db.session import get_db
 from app.controllers.employee_controller import EmployeeController
+from app.services.staffing_forecast_service import StaffingForecastService
 from app.schemas.employee import (
     EmployeeCreate,
     EmployeeUpdate,
     EmployeeResponse,
     EmployeeListResponse,
+    EmployeeUtilizationResponse,
+    EmployeeUtilizationItem,
 )
 from app.schemas.relationships import (
     LinkEmployeesToOpportunityRequest,
@@ -57,6 +60,24 @@ async def list_employees(
         employee_type=employee_type,
         billable=billable,
     )
+
+
+@router.get("/utilization", response_model=EmployeeUtilizationResponse)
+async def get_employee_utilization(
+    delivery_center_id: UUID | None = Query(None, description="Filter by delivery center"),
+    db: AsyncSession = Depends(get_db),
+) -> EmployeeUtilizationResponse:
+    """Get MTD and YTD billable utilization % per employee (same logic as Staffing Forecasts)."""
+    service = StaffingForecastService(db)
+    result = await service.get_employee_utilization(delivery_center_id=delivery_center_id)
+    utilization = {
+        emp_id: EmployeeUtilizationItem(
+            mtd_utilization_pct=v["mtd_utilization_pct"],
+            ytd_utilization_pct=v["ytd_utilization_pct"],
+        )
+        for emp_id, v in result.items()
+    }
+    return EmployeeUtilizationResponse(utilization=utilization)
 
 
 @router.get("/{employee_id}", response_model=EmployeeResponse)

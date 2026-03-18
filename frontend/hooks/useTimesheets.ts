@@ -157,6 +157,7 @@ export function useSubmitTimesheet(
       // Submission creates permanent lock - invalidate so Quote Unlock button hides
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -177,6 +178,7 @@ export function useApproveTimesheet(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.pendingApprovals() });
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -198,6 +200,7 @@ export function useRejectTimesheet(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.pendingApprovals() });
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -224,6 +227,7 @@ export function useMassApproveTimesheets(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.pendingApprovals() });
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -250,6 +254,7 @@ export function useMassRejectTimesheets(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.pendingApprovals() });
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -269,6 +274,7 @@ export function useLoadDefaults(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });
@@ -288,6 +294,7 @@ export function useReopenTimesheet(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.all });
       queryClient.invalidateQueries({ queryKey: ["opportunities"] });
       queryClient.invalidateQueries({ queryKey: ["quotes"] });
+      queryClient.invalidateQueries({ queryKey: ["accounts"] });
     },
     ...options,
   });

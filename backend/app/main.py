@@ -35,6 +35,20 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     
+    # Sync opportunity forecast values (fixes stale deal_value_usd/forecast_value_usd)
+    try:
+        from app.db.session import async_session_maker
+        from app.services.opportunity_service import OpportunityService
+        async with async_session_maker() as session:
+            opp_svc = OpportunityService(session)
+            updated = await opp_svc.sync_forecast_values_for_all_opportunities()
+            if updated:
+                import logging
+                logging.getLogger(__name__).info(f"Synced forecast values for {updated} opportunities on startup")
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Startup forecast sync skipped: {e}")
+    
     # Initialize dependency injection container
     container = Container()
     container.config.from_dict({

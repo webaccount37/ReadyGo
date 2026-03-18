@@ -6,7 +6,7 @@ from typing import Optional, List
 from uuid import UUID
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
@@ -117,9 +117,26 @@ class OpportunityRepository(BaseRepository[Opportunity]):
     
     async def count_by_account(self, account_id: UUID) -> int:
         """Count opportunities for an account."""
-        from sqlalchemy import func
         result = await self.session.execute(
             select(func.count(Opportunity.id)).where(Opportunity.account_id == account_id)
         )
         return result.scalar() or 0
 
+    async def get_average_deal_value_by_currency(self, currency: str):
+        """Get average deal_value and count for opportunities with given default_currency and non-null deal_value."""
+        from decimal import Decimal
+
+        currency_upper = (currency or "USD").upper()
+        query = select(
+            func.avg(Opportunity.deal_value).label("avg_value"),
+            func.count(Opportunity.id).label("cnt"),
+        ).where(
+            Opportunity.default_currency == currency_upper,
+            Opportunity.deal_value.isnot(None),
+        )
+        result = await self.session.execute(query)
+        row = result.one_or_none()
+        if not row or (row.cnt or 0) == 0:
+            return None, 0
+        avg_val = Decimal(str(row.avg_value)) if row.avg_value is not None else None
+        return avg_val, int(row.cnt or 0)

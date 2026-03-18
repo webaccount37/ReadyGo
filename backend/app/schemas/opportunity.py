@@ -146,3 +146,10 @@ class OpportunityListResponse(BaseModel):
     items: List[OpportunityResponse]
     total: int
 
+
+class OpportunityAverageDealValueResponse(BaseModel):
+    """Schema for average deal value by currency."""
+    currency: str
+    average_deal_value: Optional[str] = None  # String for JSON; Decimal serialized
+    count: int = 0
+

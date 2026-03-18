@@ -9,7 +9,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.controllers.base_controller import BaseController
 from app.services.opportunity_service import OpportunityService
-from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate, OpportunityResponse, OpportunityListResponse
+from app.schemas.opportunity import (
+    OpportunityCreate,
+    OpportunityUpdate,
+    OpportunityResponse,
+    OpportunityListResponse,
+    OpportunityAverageDealValueResponse,
+)
 from app.schemas.relationships import LinkRolesToOpportunityRequest, UnlinkRequest
 
 
@@ -58,6 +64,19 @@ class OpportunityController(BaseController):
         """List child opportunities of a parent."""
         opportunities, total = await self.opportunity_service.list_child_opportunities(parent_id, skip, limit)
         return OpportunityListResponse(items=opportunities, total=total)
+
+    async def get_average_deal_value_by_currency(self, currency: str) -> OpportunityAverageDealValueResponse:
+        """Get average deal value for opportunities with given currency."""
+        avg_val, count = await self.opportunity_service.get_average_deal_value_by_currency(currency)
+        return OpportunityAverageDealValueResponse(
+            currency=(currency or "USD").upper(),
+            average_deal_value=str(avg_val) if avg_val is not None else None,
+            count=count,
+        )
+
+    async def sync_forecast_values(self) -> int:
+        """Recompute deal_value_usd and forecast_value_usd for all opportunities. Returns count updated."""
+        return await self.opportunity_service.sync_forecast_values_for_all_opportunities()
     
     async def update_opportunity(
         self,

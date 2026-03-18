@@ -27,6 +27,8 @@ class StaffingForecastCell(BaseModel):
     cost: float
     margin_pct: Optional[float] = None
     billable_utilization_pct: Optional[float] = None
+    billable_hours: Optional[float] = None  # For employee rows in utilization scope; enables correct aggregation
+    available_hours: Optional[float] = None  # 40 - holiday - PTO
     sources: list[StaffingForecastSourceItem] = Field(default_factory=list)
 
 

@@ -724,16 +724,6 @@ export function OpportunityForm({
               className="bg-gray-100 cursor-not-allowed"
             />
           </div>
-          <div>
-            <Label htmlFor="deal_length">Deal Length (days)</Label>
-            <Input
-              id="deal_length"
-              type="text"
-              value={initialData && 'deal_length' in initialData ? (initialData as Opportunity).deal_length?.toString() || "" : ""}
-              readOnly
-              className="bg-gray-100 cursor-not-allowed"
-            />
-          </div>
         </div>
       </div>
 

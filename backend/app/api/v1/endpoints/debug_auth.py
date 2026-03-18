@@ -3,9 +3,11 @@ Debug endpoint to check authentication configuration.
 REMOVE THIS IN PRODUCTION - it exposes configuration details.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from app.core.config import settings
 from app.core.integrations.entra_id import get_entra_id_auth
+from app.db.session import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
 
@@ -29,3 +31,15 @@ async def debug_auth_config():
         "scopes": settings.AZURE_SCOPES,
         "config_valid": entra_id.validate_config(),
     }
+
+
+@router.post("/sync-opportunity-forecasts")
+async def debug_sync_opportunity_forecasts(db: AsyncSession = Depends(get_db)):
+    """
+    Sync forecast_value_usd for all opportunities (fixes stale data).
+    No auth required - for maintenance. REMOVE IN PRODUCTION.
+    """
+    from app.services.opportunity_service import OpportunityService
+    svc = OpportunityService(db)
+    count = await svc.sync_forecast_values_for_all_opportunities()
+    return {"updated": count}

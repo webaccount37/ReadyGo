@@ -204,7 +204,45 @@ class OpportunityService(BaseService):
         for opp in opportunities:
             responses.append(await self._to_response(opp))
         return responses, total
-    
+
+    async def get_average_deal_value_by_currency(self, currency: str) -> tuple[Optional[Decimal], int]:
+        """Get average deal_value and count for opportunities with matching default_currency and non-null deal_value."""
+        return await self.opportunity_repo.get_average_deal_value_by_currency(currency)
+
+    async def sync_forecast_values_for_all_opportunities(self) -> int:
+        """
+        Recompute and persist deal_value_usd and forecast_value_usd for all opportunities.
+        Call when currency rates change or to fix stale data.
+        Returns count of opportunities updated.
+        """
+        opportunities = await self.opportunity_repo.list(skip=0, limit=100_000)
+        updated = 0
+        for opp in opportunities:
+            update_dict = {}
+            # Recompute deal_value_usd if deal_value exists (currency conversion may have changed)
+            if opp.deal_value is not None:
+                currency = opp.default_currency or "USD"
+                new_deal_usd = await self.calculate_deal_value_usd(opp.deal_value, currency)
+                if new_deal_usd is not None and new_deal_usd != opp.deal_value_usd:
+                    update_dict["deal_value_usd"] = new_deal_usd
+                deal_value_usd = update_dict.get("deal_value_usd", opp.deal_value_usd)
+            else:
+                deal_value_usd = opp.deal_value_usd
+            # Recompute forecast_value_usd from probability and deal_value_usd
+            probability = self.calculate_probability_from_status(opp.status)
+            if probability and probability > 0 and deal_value_usd is not None:
+                new_forecast = self.calculate_forecast_value(probability, deal_value_usd)
+                if new_forecast != opp.forecast_value_usd:
+                    update_dict["forecast_value_usd"] = new_forecast
+            elif opp.forecast_value_usd is not None:
+                update_dict["forecast_value_usd"] = None
+            if update_dict:
+                await self.opportunity_repo.update(opp.id, **update_dict)
+                updated += 1
+        if updated:
+            await self.session.commit()
+        return updated
+
     async def update_opportunity(
         self,
         opportunity_id: UUID,

@@ -261,6 +261,84 @@ export default function StaffingForecastsPage() {
       .filter(Boolean) as { id: string; name: string }[];
   }, [hiddenEmployeeIds, employeesData?.items]);
 
+  type AggregatedCell = {
+    hours: number;
+    revenue: number;
+    cost: number;
+    margin_pct: number | null;
+    billable_hours: number;
+    available_hours: number;
+    billable_utilization_pct: number | null;
+  };
+
+  const columnTotals = useMemo((): Record<string, AggregatedCell> => {
+    const out: Record<string, AggregatedCell> = {};
+    if (!data?.cells || !periods.length) return out;
+    for (const p of periods) {
+      let hours = 0, revenue = 0, cost = 0, billable_hours = 0, available_hours = 0;
+      for (const row of visibleRows) {
+        const cell = data.cells[row.row_key]?.[p.key];
+        if (!cell) continue;
+        hours += cell.hours;
+        revenue += cell.revenue;
+        cost += cell.cost;
+        billable_hours += cell.billable_hours ?? 0;
+        available_hours += cell.available_hours ?? 0;
+      }
+      const margin_pct = revenue > 0 ? (revenue - cost) / revenue * 100 : null;
+      const billable_utilization_pct = available_hours > 0 ? (billable_hours / available_hours) * 100 : null;
+      out[p.key] = { hours, revenue, cost, margin_pct, billable_hours, available_hours, billable_utilization_pct };
+    }
+    return out;
+  }, [data?.cells, periods, visibleRows]);
+
+  const rowTotals = useMemo((): Record<string, AggregatedCell> => {
+    const out: Record<string, AggregatedCell> = {};
+    if (!data?.cells || !periods.length) return out;
+    for (const row of visibleRows) {
+      let hours = 0, revenue = 0, cost = 0, billable_hours = 0, available_hours = 0;
+      for (const p of periods) {
+        const cell = data.cells[row.row_key]?.[p.key];
+        if (!cell) continue;
+        hours += cell.hours;
+        revenue += cell.revenue;
+        cost += cell.cost;
+        billable_hours += cell.billable_hours ?? 0;
+        available_hours += cell.available_hours ?? 0;
+      }
+      const margin_pct = revenue > 0 ? (revenue - cost) / revenue * 100 : null;
+      const billable_utilization_pct = available_hours > 0 ? (billable_hours / available_hours) * 100 : null;
+      out[row.row_key] = { hours, revenue, cost, margin_pct, billable_hours, available_hours, billable_utilization_pct };
+    }
+    return out;
+  }, [data?.cells, periods, visibleRows]);
+
+  const grandTotal = useMemo((): AggregatedCell => {
+    let hours = 0, revenue = 0, cost = 0, billable_hours = 0, available_hours = 0;
+    for (const row of visibleRows) {
+      const rt = rowTotals[row.row_key];
+      if (!rt) continue;
+      hours += rt.hours;
+      revenue += rt.revenue;
+      cost += rt.cost;
+      billable_hours += rt.billable_hours;
+      available_hours += rt.available_hours;
+    }
+    const margin_pct = revenue > 0 ? (revenue - cost) / revenue * 100 : null;
+    const billable_utilization_pct = available_hours > 0 ? (billable_hours / available_hours) * 100 : null;
+    return { hours, revenue, cost, margin_pct, billable_hours, available_hours, billable_utilization_pct };
+  }, [visibleRows, rowTotals]);
+
+  const formatAggregatedValue = (
+    agg: AggregatedCell,
+    metricType: "hours" | "margin" | "billable_utilization"
+  ): string => {
+    if (metricType === "hours") return agg.hours.toFixed(1);
+    if (metricType === "margin") return agg.margin_pct != null ? `${agg.margin_pct.toFixed(1)}%` : "—";
+    if (metricType === "billable_utilization") return agg.billable_utilization_pct != null ? `${agg.billable_utilization_pct.toFixed(1)}%` : "—";
+    return "—";
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -328,12 +406,12 @@ export default function StaffingForecastsPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 items-end pt-2 border-t border-gray-100">
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">Metric</Label>
-              <div className="flex gap-1 flex-wrap">
+              <div className="grid grid-cols-3 gap-1">
                 <Button
                   size="sm"
                   variant={metric === "hours" ? "default" : "outline"}
                   onClick={() => setMetric("hours")}
-                  className="h-9 text-xs"
+                  className="h-9 text-xs min-w-0"
                 >
                   Hours
                 </Button>
@@ -341,7 +419,7 @@ export default function StaffingForecastsPage() {
                   size="sm"
                   variant={metric === "margin" ? "default" : "outline"}
                   onClick={() => setMetric("margin")}
-                  className="h-9 text-xs"
+                  className="h-9 text-xs min-w-0"
                 >
                   Margin
                 </Button>
@@ -349,22 +427,22 @@ export default function StaffingForecastsPage() {
                   size="sm"
                   variant={metric === "billable_utilization" ? "default" : "outline"}
                   onClick={() => setMetric("billable_utilization")}
-                  className="h-9 text-xs"
+                  className="h-9 text-xs min-w-0"
                 >
-                  Billable Utilization %
+                  Utilization
                 </Button>
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">Billable</Label>
-              <div className="flex gap-1 flex-wrap">
+              <div className="grid grid-cols-3 gap-1">
                 {(["both", "true", "false"] as const).map((b) => (
                   <Button
                     key={b}
                     size="sm"
                     variant={billable === b ? "default" : "outline"}
                     onClick={() => setBillable(b)}
-                    className="h-9 text-xs capitalize"
+                    className="h-9 text-xs min-w-0 capitalize"
                   >
                     {b === "both" ? "Both" : b === "true" ? "Yes" : "No"}
                   </Button>
@@ -373,12 +451,12 @@ export default function StaffingForecastsPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">Period</Label>
-              <div className="flex gap-1 flex-wrap">
+              <div className="grid grid-cols-2 gap-1">
                 <Button
                   size="sm"
                   variant={period === "weekly" ? "default" : "outline"}
                   onClick={() => setPeriod("weekly")}
-                  className="h-9 text-xs"
+                  className="h-9 text-xs min-w-0"
                 >
                   Weekly
                 </Button>
@@ -386,7 +464,7 @@ export default function StaffingForecastsPage() {
                   size="sm"
                   variant={period === "monthly" ? "default" : "outline"}
                   onClick={() => setPeriod("monthly")}
-                  className="h-9 text-xs"
+                  className="h-9 text-xs min-w-0"
                 >
                   Monthly
                 </Button>
@@ -394,14 +472,14 @@ export default function StaffingForecastsPage() {
             </div>
             <div className="flex flex-col gap-1.5">
               <Label className="text-xs font-medium">Duration</Label>
-              <div className="flex gap-1 flex-wrap">
+              <div className="grid grid-cols-3 gap-1">
                 {([3, 6, 12] as const).map((d) => (
                   <Button
                     key={d}
                     size="sm"
                     variant={durationMonths === d ? "default" : "outline"}
                     onClick={() => setDurationMonths(d)}
-                    className="h-9 text-xs"
+                    className="h-9 text-xs min-w-0"
                   >
                     {d} Mo
                   </Button>
@@ -424,12 +502,12 @@ export default function StaffingForecastsPage() {
             </div>
           )}
           {!isLoading && !error && data && periods.length > 0 && (
-            <div className="overflow-y-auto overflow-x-hidden max-h-[70vh] w-full">
+            <div className="overflow-y-auto overflow-x-auto max-h-[70vh] w-full">
               <div
                 className="grid text-[9px] border-collapse w-full min-w-0"
                 style={{
-                  gridTemplateColumns: `minmax(100px, 1fr) minmax(120px, 1fr) repeat(${periods.length}, minmax(0, 1fr))`,
-                  gridTemplateRows: `auto auto ${hiddenEmployeesDetail.length > 0 ? "auto " : ""}repeat(${visibleRows.length}, auto)`,
+                  gridTemplateColumns: `minmax(100px, 1fr) minmax(120px, 1fr) repeat(${periods.length}, minmax(0, 1fr)) minmax(60px, 80px)`,
+                  gridTemplateRows: `auto auto ${hiddenEmployeesDetail.length > 0 ? "auto " : ""}repeat(${visibleRows.length + 1}, auto)`,
                 }}
               >
                 <div className="row-span-2 p-2 font-semibold border-b border-r bg-gray-100 sticky top-0 z-10 flex items-center">
@@ -455,6 +533,12 @@ export default function StaffingForecastsPage() {
                     </span>
                   </div>
                 ))}
+                <div
+                  className="row-span-2 p-2 font-semibold border-b border-l bg-gray-100 sticky top-0 right-0 z-20 flex items-center justify-center text-[8px]"
+                  style={{ gridColumn: periods.length + 3 }}
+                >
+                  Total
+                </div>
                 {hiddenEmployeesDetail.length > 0 && (
                   <div
                     className="px-2 py-1 border-b border-r bg-gray-50 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[9px]"
@@ -480,7 +564,15 @@ export default function StaffingForecastsPage() {
                     <div className="p-2 font-medium border-b border-r bg-white flex items-center hover:bg-gray-50/50">
                       {row.delivery_center_name || "—"}
                     </div>
-                    <div className="p-2 font-medium border-b border-r bg-white flex items-center justify-between gap-1 group hover:bg-gray-50/50 min-w-0">
+                    <div
+                      className={cn(
+                        "p-2 font-medium border-b border-r flex items-center justify-between gap-1 group min-w-0",
+                        row.employee_id
+                          ? "bg-white hover:bg-gray-50/50"
+                          : "bg-amber-50/80 hover:bg-amber-100/80 border-amber-200/50"
+                      )}
+                      title={!row.employee_id ? "Role — no employee assigned yet" : undefined}
+                    >
                       <span className="truncate">
                         {getResourceLabel(row)}
                       </span>
@@ -545,7 +637,7 @@ export default function StaffingForecastsPage() {
                                 ? (isHours
                                     ? `Hours: ${cell.hours.toFixed(1)}\n\n`
                                     : isUtilization
-                                      ? `Billable Utilization: ${cell.billable_utilization_pct?.toFixed(1) ?? "—"}%\n\n`
+                                      ? `Utilization: ${cell.billable_utilization_pct?.toFixed(1) ?? "—"}%\n\n`
                                       : `Margin: ${cell.margin_pct?.toFixed(1) ?? "—"}%\n\n`) +
                                   (cell.sources?.length && !isUtilization
                                     ? "Sources:\n" +
@@ -566,8 +658,59 @@ export default function StaffingForecastsPage() {
                         </div>
                       );
                     })}
+                    {/* Row total */}
+                    {(() => {
+                      const rt = rowTotals[row.row_key];
+                      const displayValue = rt ? formatAggregatedValue(rt, metric) : "—";
+                      return (
+                        <div
+                          className="p-1 text-center border-b border-l flex items-center justify-center min-w-0 sticky right-0 z-10 bg-gray-100"
+                          style={{ gridColumn: periods.length + 3 }}
+                          title={`Row total: ${displayValue}`}
+                        >
+                          <span className="font-medium block text-gray-800">
+                            {displayValue}
+                          </span>
+                        </div>
+                      );
+                    })()}
                   </React.Fragment>
                 ))}
+                {/* Totals row */}
+                <div
+                  className="p-2 font-semibold border-b border-r bg-gray-100 flex items-center col-span-2"
+                  style={{ gridColumn: "1 / 3" }}
+                >
+                  Total
+                </div>
+                {periods.map((p) => {
+                  const ct = columnTotals[p.key];
+                  const displayValue = ct ? formatAggregatedValue(ct, metric) : "—";
+                  return (
+                    <div
+                      key={p.key}
+                      className="p-1 text-center border-b border-r flex items-center justify-center min-w-0 font-semibold bg-gray-100"
+                    >
+                      <span className="block text-gray-800">
+                        {displayValue}
+                      </span>
+                    </div>
+                  );
+                })}
+                {/* Grand total cell */}
+                {(() => {
+                  const displayValue = formatAggregatedValue(grandTotal, metric);
+                  return (
+                    <div
+                      className="p-1 text-center border-b border-l flex items-center justify-center min-w-0 font-semibold sticky right-0 z-10 bg-gray-100"
+                      style={{ gridColumn: periods.length + 3 }}
+                    >
+                      <span className="block text-gray-800">
+                        {displayValue}
+                      </span>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}
@@ -586,7 +729,7 @@ export default function StaffingForecastsPage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              Forecast Trend — {metric === "hours" ? "Hours" : metric === "margin" ? "Margin %" : "Billable Utilization %"}{" "}
+              Forecast Trend — {metric === "hours" ? "Hours" : metric === "margin" ? "Margin %" : "Utilization"}{" "}
               (0–100, target {metric === "hours" ? "40" : metric === "margin" ? "35" : "80"})
             </CardTitle>
             <p className="text-sm text-gray-500 mt-0.5">

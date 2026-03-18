@@ -7,9 +7,17 @@ import { AlertTriangle, CheckCircle2 } from "lucide-react";
 
 interface ComparativeSummaryProps {
   summary: ComparativeSummary;
+  /** When quote/estimate data is missing, show this message instead of "-" */
+  quoteEmptyMessage?: string;
+  /** When actuals data is missing, show this message instead of "-" */
+  actualsEmptyMessage?: string;
 }
 
-export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
+export function ComparativeSummary({
+  summary,
+  quoteEmptyMessage,
+  actualsEmptyMessage,
+}: ComparativeSummaryProps) {
   const formatCurrency = (amount: string | undefined) => {
     if (!amount) return "-";
     const num = parseFloat(amount);
@@ -62,6 +70,17 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
     return "text-red-600";
   };
 
+  const hasNoQuoteData =
+    (summary.quote_amount === undefined || summary.quote_amount === null || String(summary.quote_amount).trim() === "") &&
+    (summary.estimate_cost === undefined || summary.estimate_cost === null);
+  const hasNoActualsData =
+    (!summary.actuals_revenue || parseFloat(String(summary.actuals_revenue)) === 0) &&
+    (!summary.actuals_cost || parseFloat(String(summary.actuals_cost)) === 0);
+  const hasResourcePlanData =
+    summary.resource_plan_revenue !== undefined &&
+    summary.resource_plan_revenue !== null &&
+    parseFloat(String(summary.resource_plan_revenue)) > 0;
+
   return (
     <Card className="mb-6">
       <CardHeader>
@@ -72,28 +91,34 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
           {/* Quote/Estimate Section */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-700">Quote/Estimate (Contract)</h3>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Revenue:</span>
-                <span className="text-sm font-semibold">{formatCurrency(summary.quote_amount)}</span>
+            {hasNoQuoteData && quoteEmptyMessage ? (
+              <p className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                {quoteEmptyMessage}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Revenue:</span>
+                  <span className="text-sm font-semibold">{formatCurrency(summary.quote_amount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Cost:</span>
+                  <span className="text-sm">{formatCurrency(summary.estimate_cost)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Margin Amount:</span>
+                  <span className="text-sm">{formatCurrency(summary.estimate_margin_amount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600">Margin %:</span>
+                  <span className="text-sm">
+                    {summary.estimate_margin_percentage
+                      ? `${parseFloat(summary.estimate_margin_percentage).toFixed(1)}%`
+                      : "-"}
+                  </span>
+                </div>
               </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Cost:</span>
-                <span className="text-sm">{formatCurrency(summary.estimate_cost)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Margin Amount:</span>
-                <span className="text-sm">{formatCurrency(summary.estimate_margin_amount)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Margin %:</span>
-                <span className="text-sm">
-                  {summary.estimate_margin_percentage
-                    ? `${parseFloat(summary.estimate_margin_percentage).toFixed(1)}%`
-                    : "-"}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Resource Plan Section */}
@@ -138,41 +163,49 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
           {/* Actuals Section */}
           <div className="space-y-4">
             <h3 className="text-lg font-semibold text-gray-700">Actuals (Invoice)</h3>
-            <div className="space-y-2">
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Revenue:</span>
-                <span
-                  className={`text-sm font-semibold ${
-                    hasSignificantPlanVsActualsRevenueDeviation ? "text-red-600" : "text-gray-900"
-                  }`}
-                >
-                  {formatCurrency(summary.actuals_revenue)}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Cost:</span>
-                <span className="text-sm">{formatCurrency(summary.actuals_cost)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Margin Amount:</span>
-                <span className="text-sm">{formatCurrency(summary.actuals_margin_amount)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-sm text-gray-600">Margin %:</span>
-                <span
-                  className={`text-sm ${
-                    hasSignificantPlanVsActualsMarginDeviation ? "text-red-600" : "text-gray-900"
-                  }`}
-                >
-                  {summary.actuals_margin_percentage
-                    ? `${parseFloat(summary.actuals_margin_percentage).toFixed(1)}%`
-                    : "-"}
-                </span>
-              </div>
-            </div>
-            <p className="text-xs text-gray-500">
-              From approved timesheet hours × invoice rate/cost
-            </p>
+            {hasNoActualsData && actualsEmptyMessage ? (
+              <p className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                {actualsEmptyMessage}
+              </p>
+            ) : (
+              <>
+                <div className="space-y-2">
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Revenue:</span>
+                    <span
+                      className={`text-sm font-semibold ${
+                        hasSignificantPlanVsActualsRevenueDeviation ? "text-red-600" : "text-gray-900"
+                      }`}
+                    >
+                      {formatCurrency(summary.actuals_revenue)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Cost:</span>
+                    <span className="text-sm">{formatCurrency(summary.actuals_cost)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Margin Amount:</span>
+                    <span className="text-sm">{formatCurrency(summary.actuals_margin_amount)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm text-gray-600">Margin %:</span>
+                    <span
+                      className={`text-sm ${
+                        hasSignificantPlanVsActualsMarginDeviation ? "text-red-600" : "text-gray-900"
+                      }`}
+                    >
+                      {summary.actuals_margin_percentage
+                        ? `${parseFloat(summary.actuals_margin_percentage).toFixed(1)}%`
+                        : "-"}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500">
+                  From approved timesheet hours × invoice rate/cost
+                </p>
+              </>
+            )}
           </div>
         </div>
 
@@ -186,7 +219,11 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
                 Quote/Estimate vs Resource Plan
               </h4>
               <div className="space-y-3">
-                {summary.revenue_deviation !== undefined && summary.revenue_deviation !== null && (
+                {hasNoQuoteData && quoteEmptyMessage ? (
+                  <p className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                    Deviation cannot be calculated without both Quote and Resource Plan data.
+                  </p>
+                ) : summary.revenue_deviation !== undefined && summary.revenue_deviation !== null ? (
                   <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
                     <div className="flex items-center gap-2">
                       {hasSignificantQuoteVsPlanRevenueDeviation ? (
@@ -211,7 +248,7 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
                       )}
                     </div>
                   </div>
-                )}
+                ) : null}
                 {summary.margin_deviation !== undefined && summary.margin_deviation !== null && (
                   <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
                     <div className="flex items-center gap-2">
@@ -238,7 +275,11 @@ export function ComparativeSummary({ summary }: ComparativeSummaryProps) {
                 Resource Plan vs Actuals
               </h4>
               <div className="space-y-3">
-                {summary.plan_vs_actuals_revenue_deviation !== undefined &&
+                {hasNoActualsData && actualsEmptyMessage ? (
+                  <p className="text-sm text-amber-700 bg-amber-50 px-3 py-2 rounded border border-amber-200">
+                    Deviation cannot be calculated without Resource Plan and Actuals data.
+                  </p>
+                ) : summary.plan_vs_actuals_revenue_deviation !== undefined &&
                   summary.plan_vs_actuals_revenue_deviation !== null && (
                     <div className="flex items-center justify-between p-3 rounded-lg bg-gray-50">
                       <div className="flex items-center gap-2">

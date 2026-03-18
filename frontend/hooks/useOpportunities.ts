@@ -9,6 +9,7 @@ import type {
   OpportunityCreate,
   OpportunityUpdate,
   OpportunityListResponse,
+  OpportunityAverageDealValueResponse,
 } from "@/types/opportunity";
 
 const QUERY_KEYS = {
@@ -17,6 +18,7 @@ const QUERY_KEYS = {
   list: (filters?: Record<string, unknown>) => [...QUERY_KEYS.lists(), filters] as const,
   details: () => [...QUERY_KEYS.all, "detail"] as const,
   detail: (id: string, includeRelationships?: boolean) => [...QUERY_KEYS.details(), id, includeRelationships] as const,
+  averageDealValue: (currency: string) => [...QUERY_KEYS.all, "average-deal-value", currency] as const,
 };
 
 /**
@@ -36,6 +38,21 @@ export function useOpportunities(
   return useQuery<OpportunityListResponse>({
     queryKey: QUERY_KEYS.list(params),
     queryFn: () => opportunitiesApi.getOpportunities(params),
+    ...options,
+  });
+}
+
+/**
+ * Get average deal value for opportunities with given currency.
+ */
+export function useOpportunityAverageDealValue(
+  currency: string,
+  options?: Omit<UseQueryOptions<OpportunityAverageDealValueResponse>, "queryKey" | "queryFn">
+) {
+  return useQuery<OpportunityAverageDealValueResponse>({
+    queryKey: QUERY_KEYS.averageDealValue(currency),
+    queryFn: () => opportunitiesApi.getAverageDealValue(currency),
+    enabled: !!currency,
     ...options,
   });
 }
