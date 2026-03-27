@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   useOpportunity,
@@ -30,6 +30,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { OpportunityForm } from "@/components/opportunities/opportunity-form";
 import { OpportunityRelationships } from "@/components/opportunities/opportunity-relationships";
 import { OpportunityAnalyticsTab } from "@/components/opportunities/opportunity-analytics-tab";
+import { OpportunityDocumentsTab } from "@/components/opportunities/opportunity-documents-tab";
 import type { OpportunityCreate, OpportunityUpdate } from "@/types/opportunity";
 import {
   Calculator,
@@ -39,15 +40,33 @@ import {
   Pencil,
   Lock,
   BarChart3,
+  FolderOpen,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export default function OpportunityDetailPage() {
+function OpportunityDetailPageInner() {
   const params = useParams();
   const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const opportunityId = params.id as string;
   const [isEditMode, setIsEditMode] = useState(false);
-  const [activeTab, setActiveTab] = useState<"general" | "analytics">("general");
+  const [activeTab, setActiveTab] = useState<"general" | "analytics" | "documents">("general");
+
+  const tabParam = searchParams.get("tab");
+  useEffect(() => {
+    if (tabParam === "documents") {
+      setActiveTab("documents");
+    } else if (tabParam === "analytics") {
+      setActiveTab("analytics");
+    }
+  }, [tabParam]);
+
+  const goToTab = (t: "general" | "analytics" | "documents") => {
+    setActiveTab(t);
+    const q = t === "general" ? "" : `?tab=${t}`;
+    router.replace(`${pathname}${q}`, { scroll: false });
+  };
 
   const { data: opportunity, isLoading, error, refetch } = useOpportunity(
     opportunityId,
@@ -318,7 +337,7 @@ export default function OpportunityDetailPage() {
           <div className="flex gap-2 border-b border-gray-200 mb-6">
             <button
               type="button"
-              onClick={() => setActiveTab("general")}
+              onClick={() => goToTab("general")}
               className={cn(
                 "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
                 activeTab === "general"
@@ -330,7 +349,7 @@ export default function OpportunityDetailPage() {
             </button>
             <button
               type="button"
-              onClick={() => setActiveTab("analytics")}
+              onClick={() => goToTab("analytics")}
               className={cn(
                 "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5",
                 activeTab === "analytics"
@@ -340,6 +359,19 @@ export default function OpportunityDetailPage() {
             >
               <BarChart3 className="w-4 h-4" />
               Analytics
+            </button>
+            <button
+              type="button"
+              onClick={() => goToTab("documents")}
+              className={cn(
+                "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors flex items-center gap-1.5",
+                activeTab === "documents"
+                  ? "border-blue-600 text-blue-600"
+                  : "border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300"
+              )}
+            >
+              <FolderOpen className="w-4 h-4" />
+              Documents
             </button>
           </div>
 
@@ -593,8 +625,28 @@ export default function OpportunityDetailPage() {
               avgDealValue={avgDealValue}
             />
           )}
+          {activeTab === "documents" && (
+            <OpportunityDocumentsTab
+              opportunity={opportunity}
+              onOpportunityUpdated={() => refetch()}
+            />
+          )}
         </div>
       )}
     </div>
+  );
+}
+
+export default function OpportunityDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="container mx-auto p-6">
+          <p>Loading opportunity...</p>
+        </div>
+      }
+    >
+      <OpportunityDetailPageInner />
+    </Suspense>
   );
 }

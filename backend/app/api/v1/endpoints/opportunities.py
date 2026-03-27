@@ -73,6 +73,19 @@ async def get_average_deal_value(
     return await controller.get_average_deal_value_by_currency(currency)
 
 
+@router.post("/sharepoint/provision-stale")
+async def provision_sharepoint_stale(
+    limit: int = Query(200, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Backfill: find or create SharePoint folders for opportunities with no linked folder."""
+    controller = OpportunityController(db)
+    try:
+        return await controller.provision_sharepoint_backfill(limit=limit)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
 @router.get("/{opportunity_id}", response_model=OpportunityResponse)
 async def get_opportunity(
     opportunity_id: UUID,
@@ -82,6 +95,25 @@ async def get_opportunity(
     """Get opportunity by ID."""
     controller = OpportunityController(db)
     opportunity = await controller.get_opportunity(opportunity_id, include_relationships)
+    if not opportunity:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Opportunity not found",
+        )
+    return opportunity
+
+
+@router.post("/{opportunity_id}/sharepoint/provision", response_model=OpportunityResponse)
+async def reprovision_sharepoint_for_opportunity(
+    opportunity_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> OpportunityResponse:
+    """Retry SharePoint folder link/create for this opportunity."""
+    controller = OpportunityController(db)
+    try:
+        opportunity = await controller.reprovision_sharepoint(opportunity_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

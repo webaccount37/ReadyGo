@@ -59,6 +59,11 @@ export interface Opportunity {
   plan_amount?: string;
   actuals_amount?: string;
   engagement_id?: string;
+  /** SharePoint project folder (server-provisioned) */
+  sharepoint_folder_web_url?: string | null;
+  sharepoint_drive_id?: string | null;
+  sharepoint_item_id?: string | null;
+  sharepoint_provisioning_error?: string | null;
 }
 
 export interface OpportunityCreate {

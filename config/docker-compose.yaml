@@ -48,6 +48,8 @@ services:
       # OTEL collector is optional - removed to avoid connection errors when not running
       # Override redirect URI for Docker (if needed)
       # AZURE_REDIRECT_URI: http://localhost:8000/api/v1/auth/callback
+      # PFX lives on host under backend/; volume maps that to /app (Windows paths in .env are invalid in Linux containers)
+      AZURE_SP_REST_CLIENT_CERTIFICATE_PATH: /app/app.pfx
     ports:
       - "8000:8000"
     depends_on:
@@ -59,6 +61,8 @@ services:
       - ../backend:/app
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # Frontend: put NEXT_PUBLIC_AZURE_* in ../frontend/.env.local — it is included in the build
+  # context (see frontend/.dockerignore). Rebuild after changing it: docker compose build --no-cache frontend
   frontend:
     build:
       context: ../frontend

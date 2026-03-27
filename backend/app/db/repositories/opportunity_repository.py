@@ -122,6 +122,21 @@ class OpportunityRepository(BaseRepository[Opportunity]):
         )
         return result.scalar() or 0
 
+    async def list_without_sharepoint_folder(
+        self,
+        skip: int = 0,
+        limit: int = 500,
+    ) -> List[Opportunity]:
+        """Opportunities with no linked SharePoint folder (for backfill)."""
+        query = (
+            self._base_query()
+            .where(Opportunity.sharepoint_folder_web_url.is_(None))
+            .offset(skip)
+            .limit(limit)
+        )
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def get_average_deal_value_by_currency(self, currency: str):
         """Get average deal_value and count for opportunities with given default_currency and non-null deal_value."""
         from decimal import Decimal

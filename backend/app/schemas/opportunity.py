@@ -136,6 +136,11 @@ class OpportunityResponse(OpportunityBase):
     plan_amount: Optional[Decimal] = None  # Revenue total of associated Engagement (USD)
     actuals_amount: Optional[Decimal] = None  # Sum of approved timesheet revenue (USD)
     engagement_id: Optional[UUID] = None  # First engagement ID if any (for Engagement button)
+
+    sharepoint_folder_web_url: Optional[str] = None
+    sharepoint_drive_id: Optional[str] = None
+    sharepoint_item_id: Optional[str] = None
+    sharepoint_provisioning_error: Optional[str] = None
     
     class Config:
         from_attributes = True

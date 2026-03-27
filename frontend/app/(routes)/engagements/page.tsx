@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { FileText, ExternalLink } from "lucide-react";
+import { FileText, ExternalLink, FolderOpen } from "lucide-react";
 import type { Engagement } from "@/types/engagement";
 
 function EngagementsPageContent() {
@@ -233,19 +233,30 @@ function EngagementsPageContent() {
                           )}
                         </td>
                         <td className="p-1 overflow-hidden min-w-0">
-                          <Link
-                            href={`/engagements/${engagement.id}`}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-5 w-5 p-0 shrink-0"
-                              title="View Details"
+                          <div className="flex flex-nowrap gap-0.5" onClick={(e) => e.stopPropagation()}>
+                            <Link href={`/opportunities/${engagement.opportunity_id}?tab=documents`}>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-5 w-5 p-0 shrink-0 text-slate-600 hover:text-slate-800"
+                                title="Opportunity documents (SharePoint)"
+                              >
+                                <FolderOpen className="w-3 h-3" />
+                              </Button>
+                            </Link>
+                            <Link
+                              href={`/engagements/${engagement.id}`}
                             >
-                              <ExternalLink className="w-3 h-3" />
-                            </Button>
-                          </Link>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-5 w-5 p-0 shrink-0"
+                                title="View Details"
+                              >
+                                <ExternalLink className="w-3 h-3" />
+                              </Button>
+                            </Link>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -353,7 +364,16 @@ function EngagementsPageContent() {
                             </span>
                           </div>
                         </div>
-                        <div className="pt-2">
+                        <div className="pt-2 flex flex-col gap-2">
+                          <Link
+                            href={`/opportunities/${engagement.opportunity_id}?tab=documents`}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Button variant="outline" size="sm" className="w-full justify-center gap-2">
+                              <FolderOpen className="w-4 h-4 shrink-0" />
+                              Opportunity documents
+                            </Button>
+                          </Link>
                           <Link
                             href={`/engagements/${engagement.id}`}
                             onClick={(e) => e.stopPropagation()}

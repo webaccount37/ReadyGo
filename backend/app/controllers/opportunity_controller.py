@@ -77,6 +77,14 @@ class OpportunityController(BaseController):
     async def sync_forecast_values(self) -> int:
         """Recompute deal_value_usd and forecast_value_usd for all opportunities. Returns count updated."""
         return await self.opportunity_service.sync_forecast_values_for_all_opportunities()
+
+    async def provision_sharepoint_backfill(self, limit: int = 200) -> dict:
+        """Backfill SharePoint links for opportunities missing a folder URL."""
+        return await self.opportunity_service.provision_sharepoint_backfill(limit=limit)
+
+    async def reprovision_sharepoint(self, opportunity_id: UUID) -> Optional[OpportunityResponse]:
+        """Retry SharePoint provisioning for one opportunity."""
+        return await self.opportunity_service.reprovision_sharepoint(opportunity_id)
     
     async def update_opportunity(
         self,

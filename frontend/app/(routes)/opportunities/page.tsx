@@ -8,7 +8,7 @@ import {
 } from "@/hooks/useOpportunities";
 import { useOpportunityActions } from "@/hooks/useOpportunityActions";
 import { Button } from "@/components/ui/button";
-import { Trash2, Calculator, FileCheck, Lock, Briefcase, Pencil } from "lucide-react";
+import { Trash2, Calculator, FileCheck, Lock, Briefcase, Pencil, FolderOpen } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -423,6 +423,18 @@ function OpportunitiesPageContent() {
                                 <Button
                                   size="sm"
                                   variant="outline"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    router.push(`/opportunities/${opportunity.id}?tab=documents`);
+                                  }}
+                                  className="h-5 w-5 p-0 shrink-0 text-slate-600 hover:text-slate-800"
+                                  title="Documents (SharePoint)"
+                                >
+                                  <FolderOpen className="w-3 h-3" />
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
                                   onClick={(e) => handleEstimatesClick(opportunity.id, e)}
                                   className="h-5 w-5 p-0 shrink-0 text-blue-600 hover:text-blue-700"
                                   title={getActiveEstimateId(opportunity.id) ? "View Active Estimate" : "View Estimates"}
@@ -598,6 +610,18 @@ function OpportunitiesPageContent() {
                                 className="flex-1"
                               >
                                 Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  router.push(`/opportunities/${opportunity.id}?tab=documents`);
+                                }}
+                                className="shrink-0 text-slate-600 hover:text-slate-800"
+                                title="Documents (SharePoint)"
+                              >
+                                <FolderOpen className="w-4 h-4" />
                               </Button>
                               <Button
                                 size="sm"

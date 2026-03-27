@@ -82,6 +82,24 @@ docker exec readygo-backend python -c "from app.core.config import settings; pri
    - Local: `http://localhost:8000/api/v1/auth/callback`
    - Production: `https://your-domain.com/api/v1/auth/callback`
 
+## Frontend (`frontend/.env.local`) with Docker
+
+Next.js **inlines** `NEXT_PUBLIC_*` variables when `npm run build` runs inside the Docker **builder** stage. The frontend image build copies your app with `COPY . .`, and **`frontend/.env.local` is included** in that context (it is not listed in `frontend/.dockerignore`).
+
+1. Create `frontend/.env.local` with at least:
+   ```env
+   NEXT_PUBLIC_AZURE_CLIENT_ID=...
+   NEXT_PUBLIC_AZURE_TENANT_ID=...
+   NEXT_PUBLIC_GRAPH_SCOPES=Files.ReadWrite.All
+   ```
+2. **Rebuild** the frontend image after any change to `.env.local`:
+   ```bash
+   cd config
+   docker compose build --no-cache frontend
+   docker compose up -d frontend
+   ```
+   A plain `up` without rebuild will keep the old client bundle without your new variables.
+
 ## Troubleshooting
 
 ### Variables not loading?

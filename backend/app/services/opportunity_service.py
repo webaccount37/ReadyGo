@@ -20,6 +20,11 @@ from app.models.opportunity import OpportunityStatus
 from app.utils.currency_converter import convert_to_usd
 from sqlalchemy import select, and_
 from app.models.estimate import Estimate, EstimateLineItem
+from app.core.config import settings
+from app.core.logging import get_logger
+from app.core.integrations.sharepoint_graph import SharePointProjectFolderService
+
+logger = get_logger(__name__)
 
 
 class OpportunityService(BaseService):
@@ -134,13 +139,109 @@ class OpportunityService(BaseService):
         )
         self.session.add(initial_estimate)
         await self.session.flush()
-        
+
+        if settings.SHAREPOINT_INTEGRATION_ENABLED:
+            await self._try_provision_sharepoint(opportunity)
+
         await self.session.commit()
         # Reload with account relationship
         opportunity = await self.opportunity_repo.get(opportunity.id)
         if not opportunity:
             raise ValueError("Failed to retrieve created opportunity")
         return await self._to_response(opportunity)
+
+    async def _try_provision_sharepoint(self, opportunity) -> None:
+        """Link or create SharePoint folder; never raises (records error on failure)."""
+        try:
+            old_drive = (getattr(opportunity, "sharepoint_drive_id", None) or "").strip() or None
+            old_item = (getattr(opportunity, "sharepoint_item_id", None) or "").strip() or None
+
+            svc = SharePointProjectFolderService()
+            link = await svc.ensure_project_folder(opportunity.name)
+            logger.info(
+                "SharePoint provisioning completed for opportunity",
+                extra={
+                    "opportunity_id": str(opportunity.id),
+                    "provisioning_mode": (settings.SHAREPOINT_PROVISIONING_MODE or "document_library").strip(),
+                    "sharepoint_folder_web_url": link.web_url,
+                },
+            )
+
+            migration_warning: str | None = None
+            if old_drive and old_item:
+                try:
+                    await svc.migrate_previous_folder_to_library(old_drive, old_item, link)
+                except Exception as mig_err:
+                    logger.exception(
+                        "SharePoint migration failed after new link was resolved",
+                        extra={"opportunity_id": str(opportunity.id)},
+                    )
+                    migration_warning = (
+                        f"Linked to new SharePoint location; "
+                        f"migration ({settings.SHAREPOINT_FOLDER_MIGRATION_MODE}) failed: "
+                        f"{str(mig_err)[:1400]}"
+                    )
+
+            await self.opportunity_repo.update(
+                opportunity.id,
+                sharepoint_folder_web_url=link.web_url,
+                sharepoint_drive_id=link.drive_id,
+                sharepoint_item_id=link.item_id,
+                sharepoint_provisioning_error=migration_warning,
+            )
+        except Exception as e:
+            logger.exception(
+                "SharePoint provisioning failed",
+                extra={"opportunity_id": str(opportunity.id)},
+            )
+            msg = str(e)[:1900]
+            await self.opportunity_repo.update(
+                opportunity.id,
+                sharepoint_provisioning_error=msg,
+            )
+
+    async def reprovision_sharepoint(self, opportunity_id: UUID) -> Optional[OpportunityResponse]:
+        """Retry SharePoint folder link/create for one opportunity."""
+        opportunity = await self.opportunity_repo.get(opportunity_id)
+        if not opportunity:
+            return None
+        if not settings.SHAREPOINT_INTEGRATION_ENABLED:
+            raise ValueError("SharePoint integration is disabled (SHAREPOINT_INTEGRATION_ENABLED=false)")
+        await self._try_provision_sharepoint(opportunity)
+        await self.session.commit()
+        opportunity = await self.opportunity_repo.get(opportunity_id)
+        if not opportunity:
+            return None
+        return await self._to_response(opportunity)
+
+    async def provision_sharepoint_backfill(self, limit: int = 200) -> dict:
+        """Find or create folders for opportunities missing sharepoint_folder_web_url."""
+        if not settings.SHAREPOINT_INTEGRATION_ENABLED:
+            raise ValueError("SharePoint integration is disabled (SHAREPOINT_INTEGRATION_ENABLED=false)")
+        rows = await self.opportunity_repo.list_without_sharepoint_folder(skip=0, limit=limit)
+        processed = 0
+        linked = 0
+        errors: list[dict] = []
+        for opp in rows:
+            processed += 1
+            try:
+                svc = SharePointProjectFolderService()
+                link = await svc.ensure_project_folder(opp.name)
+                await self.opportunity_repo.update(
+                    opp.id,
+                    sharepoint_folder_web_url=link.web_url,
+                    sharepoint_drive_id=link.drive_id,
+                    sharepoint_item_id=link.item_id,
+                    sharepoint_provisioning_error=None,
+                )
+                linked += 1
+            except Exception as e:
+                logger.exception("SharePoint backfill failed", extra={"opportunity_id": str(opp.id)})
+                msg = str(e)[:1900]
+                await self.opportunity_repo.update(opp.id, sharepoint_provisioning_error=msg)
+                errors.append({"opportunity_id": str(opp.id), "error": msg[:500]})
+        await self.session.commit()
+        return {"processed": processed, "linked": linked, "errors": errors}
     
     async def get_opportunity(self, opportunity_id: UUID, include_relationships: bool = False) -> Optional[OpportunityResponse]:
         """Get opportunity by ID."""
@@ -655,6 +756,10 @@ class OpportunityService(BaseService):
             "is_locked": is_locked,
             "locked_by_quote_id": str(locked_by_quote_id) if locked_by_quote_id else None,
             "is_permanently_locked": is_permanently_locked,
+            "sharepoint_folder_web_url": opportunity.sharepoint_folder_web_url,
+            "sharepoint_drive_id": opportunity.sharepoint_drive_id,
+            "sharepoint_item_id": opportunity.sharepoint_item_id,
+            "sharepoint_provisioning_error": opportunity.sharepoint_provisioning_error,
         }
         
         if include_relationships:

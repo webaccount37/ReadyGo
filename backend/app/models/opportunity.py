@@ -82,6 +82,12 @@ class Opportunity(Base):
     deal_length = Column(Integer, nullable=True)  # Calculated in days
     forecast_value = Column(Numeric(15, 2), nullable=True)  # Calculated: probability * deal_value
     forecast_value_usd = Column(Numeric(15, 2), nullable=True)  # Calculated: probability * deal_value_usd
+
+    # SharePoint project folder (document library under Active Projects site)
+    sharepoint_folder_web_url = Column(String(2000), nullable=True)
+    sharepoint_drive_id = Column(String(512), nullable=True)
+    sharepoint_item_id = Column(String(512), nullable=True)
+    sharepoint_provisioning_error = Column(String(2000), nullable=True)
     
     # Relationships
     parent_opportunity = relationship("Opportunity", remote_side=[id], backref="child_opportunities")
