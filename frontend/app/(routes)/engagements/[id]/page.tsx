@@ -12,6 +12,8 @@ import { EngagementGanttView } from "@/components/engagements/engagement-gantt-v
 import { BudgetBurndownChart } from "@/components/engagements/budget-burndown-chart";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { lucideManilaFolderOpen } from "@/lib/manilaFolder";
+import { FolderOpen } from "lucide-react";
 import Link from "next/link";
 
 export default function EngagementDetailPage() {
@@ -73,15 +75,53 @@ export default function EngagementDetailPage() {
             ← Back to Engagements
           </Link>
           <h1 className="text-3xl font-bold">Engagement - {engagement.opportunity_name || engagement.opportunity_id}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {(engagement.account_name || opportunity?.account_name) && (
-              <>Account: {engagement.account_name || opportunity?.account_name} • </>
+          <div className="text-sm text-gray-500 mt-1 space-y-1">
+            {((engagement.account_name || opportunity?.account_name) ||
+              engagement.quote_display_name ||
+              engagement.quote_number) && (
+              <p>
+                {(engagement.account_name || opportunity?.account_name) && (
+                  <>Account: {engagement.account_name || opportunity?.account_name}</>
+                )}
+                {(engagement.account_name || opportunity?.account_name) &&
+                  (engagement.quote_display_name || engagement.quote_number) &&
+                  " • "}
+                {(engagement.quote_display_name || engagement.quote_number) && (
+                  <>Quote: {engagement.quote_display_name || engagement.quote_number}</>
+                )}
+              </p>
             )}
-            Opportunity: {engagement.opportunity_name || engagement.opportunity_id}
-            {(engagement.quote_display_name || engagement.quote_number) && ` • Quote: ${engagement.quote_display_name || engagement.quote_number}`}
-          </p>
+            {engagement.opportunity_id ? (
+              <p>
+                Opportunity:{" "}
+                <Link
+                  href={`/opportunities/${engagement.opportunity_id}`}
+                  className="text-blue-600 hover:underline"
+                >
+                  {engagement.opportunity_name || engagement.opportunity_id}
+                </Link>
+              </p>
+            ) : (
+              <p>
+                Opportunity: {engagement.opportunity_name || "—"}
+              </p>
+            )}
+          </div>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 items-center">
+          {engagement.opportunity_id && (
+            <Link href={`/opportunities/${engagement.opportunity_id}?tab=documents`}>
+              <Button
+                variant="outline"
+                size="sm"
+                title="Open opportunity documents (SharePoint)"
+                className="gap-1.5"
+              >
+                <FolderOpen className="w-4 h-4 shrink-0" {...lucideManilaFolderOpen} />
+                Documents
+              </Button>
+            </Link>
+          )}
           {engagement.quote_id && (
             <Link href={`/quotes/${engagement.quote_id}`}>
               <Button variant="outline" size="sm">

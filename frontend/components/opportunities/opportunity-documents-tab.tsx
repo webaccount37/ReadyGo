@@ -15,6 +15,7 @@ import {
 import { getFileIconForName } from "@/lib/graphDriveFileIcon";
 import { graphCreateFolder, graphUploadFile } from "@/lib/graphDriveUpload";
 import { opportunitiesApi } from "@/lib/api/opportunities";
+import { lucideManilaFolderSolid } from "@/lib/manilaFolder";
 import type { Opportunity } from "@/types/opportunity";
 import {
   ArrowLeft,
@@ -353,7 +354,7 @@ export function OpportunityDocumentsTab({
                     className="flex items-center gap-2 min-w-0 text-left text-blue-700 hover:underline flex-1"
                     onClick={() => setStack((s) => [...s, { id: it.id, name: it.name }])}
                   >
-                    <Folder className="w-4 h-4 shrink-0 text-amber-600" />
+                    <Folder className="w-4 h-4 shrink-0" {...lucideManilaFolderSolid} />
                     <span className="truncate">{it.name}</span>
                   </button>
                 ) : (

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { FileText, ExternalLink, FolderOpen } from "lucide-react";
+import { lucideManilaFolderOpen } from "@/lib/manilaFolder";
 import type { Engagement } from "@/types/engagement";
 
 function EngagementsPageContent() {
@@ -238,10 +239,10 @@ function EngagementsPageContent() {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                className="h-5 w-5 p-0 shrink-0 text-slate-600 hover:text-slate-800"
+                                className="h-5 w-5 p-0 shrink-0"
                                 title="Opportunity documents (SharePoint)"
                               >
-                                <FolderOpen className="w-3 h-3" />
+                                <FolderOpen className="w-3 h-3" {...lucideManilaFolderOpen} />
                               </Button>
                             </Link>
                             <Link
@@ -370,7 +371,7 @@ function EngagementsPageContent() {
                             onClick={(e) => e.stopPropagation()}
                           >
                             <Button variant="outline" size="sm" className="w-full justify-center gap-2">
-                              <FolderOpen className="w-4 h-4 shrink-0" />
+                              <FolderOpen className="w-4 h-4 shrink-0" {...lucideManilaFolderOpen} />
                               Opportunity documents
                             </Button>
                           </Link>

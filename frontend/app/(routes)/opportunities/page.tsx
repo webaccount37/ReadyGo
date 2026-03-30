@@ -9,6 +9,7 @@ import {
 import { useOpportunityActions } from "@/hooks/useOpportunityActions";
 import { Button } from "@/components/ui/button";
 import { Trash2, Calculator, FileCheck, Lock, Briefcase, Pencil, FolderOpen } from "lucide-react";
+import { lucideManilaFolderOpen } from "@/lib/manilaFolder";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
@@ -427,10 +428,10 @@ function OpportunitiesPageContent() {
                                     e.stopPropagation();
                                     router.push(`/opportunities/${opportunity.id}?tab=documents`);
                                   }}
-                                  className="h-5 w-5 p-0 shrink-0 text-slate-600 hover:text-slate-800"
+                                  className="h-5 w-5 p-0 shrink-0"
                                   title="Documents (SharePoint)"
                                 >
-                                  <FolderOpen className="w-3 h-3" />
+                                  <FolderOpen className="w-3 h-3" {...lucideManilaFolderOpen} />
                                 </Button>
                                 <Button
                                   size="sm"
@@ -618,10 +619,10 @@ function OpportunitiesPageContent() {
                                   e.stopPropagation();
                                   router.push(`/opportunities/${opportunity.id}?tab=documents`);
                                 }}
-                                className="shrink-0 text-slate-600 hover:text-slate-800"
+                                className="shrink-0"
                                 title="Documents (SharePoint)"
                               >
-                                <FolderOpen className="w-4 h-4" />
+                                <FolderOpen className="w-4 h-4" {...lucideManilaFolderOpen} />
                               </Button>
                               <Button
                                 size="sm"
