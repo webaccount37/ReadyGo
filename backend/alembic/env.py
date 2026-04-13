@@ -33,6 +33,10 @@ from app.models import (
     TimesheetStatusHistory,
     EngagementTimesheetApprover,
     OpportunityPermanentLock,
+    FinancialForecastExpenseLine,
+    FinancialForecastExpenseCell,
+    FinancialForecastLineOverride,
+    FinancialForecastChangeEvent,
 )
 
 # this is the Alembic Config object, which provides

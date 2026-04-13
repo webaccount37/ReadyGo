@@ -77,7 +77,7 @@ const navGroups: NavGroup[] = [
   {
     title: "Intelligence",
     items: [
-      { title: "Financial Forecasts", href: "#", comingSoon: true, icon: TrendingUp },
+      { title: "Financial Forecasts", href: "/financial-forecasts", icon: TrendingUp },
       { title: "Staffing Forecasts", href: "/staffing-forecasts", icon: UserCog },
     ],
   },

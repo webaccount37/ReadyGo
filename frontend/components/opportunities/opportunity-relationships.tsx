@@ -18,7 +18,7 @@ import { useQuotes } from "@/hooks/useQuotes";
 import { normalizeDateForInput, cn } from "@/lib/utils";
 import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
 import { Lock } from "lucide-react";
-import type { Opportunity } from "@/types/opportunity";
+import type { Opportunity, OpportunityEmployee } from "@/types/opportunity";
 
 interface OpportunityRelationshipsProps {
   opportunity: Opportunity;
@@ -272,7 +272,7 @@ export function OpportunityRelationships({
         <CardContent className="space-y-4">
           {opportunityEmployees.length > 0 ? (
             <div className="space-y-4">
-              {opportunityEmployees.map((employee: any) => {
+              {opportunityEmployees.map((employee: OpportunityEmployee) => {
                 return (
                   <div
                     key={employee.id}

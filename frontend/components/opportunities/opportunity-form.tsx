@@ -161,46 +161,7 @@ export function OpportunityForm({
     }
   }, [formData.account_id, formData.parent_opportunity_id, opportunitiesData]);
 
-  // Sync formData when initialData changes (e.g., after an update)
-  useEffect(() => {
-    if (initialData && 'id' in initialData) {
-      // Only sync if we have an ID (editing existing opportunity)
-      const oppData = initialData as Opportunity;
-      setFormData((prev) => ({
-        ...prev,
-        default_currency: oppData.default_currency || prev.default_currency || "USD",
-        // Sync other fields that might have changed
-        name: oppData.name || prev.name,
-        account_id: oppData.account_id || prev.account_id,
-        delivery_center_id: oppData.delivery_center_id || prev.delivery_center_id,
-        billing_term_id: oppData.billing_term_id || prev.billing_term_id,
-        invoice_customer: oppData.invoice_customer !== undefined ? oppData.invoice_customer : prev.invoice_customer,
-        billable_expenses: oppData.billable_expenses !== undefined ? oppData.billable_expenses : prev.billable_expenses,
-        deal_value: oppData.deal_value ?? prev.deal_value,
-      }));
-
-      // Update calculated values if they exist in initialData
-      if ('deal_value_usd' in oppData) {
-        setDealValueUsd(oppData.deal_value_usd || "");
-      }
-      if ('forecast_value' in oppData) {
-        setForecastValue(oppData.forecast_value || "");
-      }
-      if ('forecast_value_usd' in oppData) {
-        setForecastValueUsd(oppData.forecast_value_usd || "");
-      }
-    }
-  }, [
-    initialData && 'id' in initialData ? (initialData as Opportunity).id : undefined,
-    initialData && 'id' in initialData ? (initialData as Opportunity).default_currency : initialData?.default_currency,
-    initialData?.name,
-    initialData?.account_id,
-    initialData?.delivery_center_id,
-    initialData?.billing_term_id,
-    initialData?.invoice_customer,
-    initialData?.billable_expenses,
-    initialData?.deal_value,
-  ]);
+  // Sync from initialData is handled by the effect above ([initialData]); no duplicate effect needed.
 
   // Auto-update default currency based on Account or Invoice Center
   // Only runs when account/delivery center changes, NOT when initialData changes

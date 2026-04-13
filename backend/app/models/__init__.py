@@ -28,6 +28,12 @@ from app.models.timesheet import (
 )
 from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
 from app.models.opportunity_permanent_lock import OpportunityPermanentLock
+from app.models.financial_forecast import (
+    FinancialForecastExpenseLine,
+    FinancialForecastExpenseCell,
+    FinancialForecastLineOverride,
+    FinancialForecastChangeEvent,
+)
 
 __all__ = [
     "Employee",
@@ -63,6 +69,10 @@ __all__ = [
     "TimesheetEntryType",
     "EngagementTimesheetApprover",
     "OpportunityPermanentLock",
+    "FinancialForecastExpenseLine",
+    "FinancialForecastExpenseCell",
+    "FinancialForecastLineOverride",
+    "FinancialForecastChangeEvent",
 ]
 
 

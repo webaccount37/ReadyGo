@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     engagements,
     timesheets,
     staffing_forecast,
+    financial_forecast,
 )
 
 api_router = APIRouter()
@@ -126,6 +127,12 @@ api_router.include_router(
     staffing_forecast.router,
     prefix="/staffing-forecast",
     tags=["staffing-forecast"],
+    dependencies=[Depends(require_authentication)],
+)
+api_router.include_router(
+    financial_forecast.router,
+    prefix="/financial-forecast",
+    tags=["financial-forecast"],
     dependencies=[Depends(require_authentication)],
 )
 
