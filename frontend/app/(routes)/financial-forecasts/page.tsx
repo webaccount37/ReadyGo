@@ -98,18 +98,41 @@ function insertParentForLineBelow(row: FinancialForecastRow): string {
   return "expense";
 }
 
+function sumRowAcrossMonths(
+  rowKey: string,
+  months: FinancialForecastMonth[],
+  cells: Record<string, Record<string, { value?: number }>>
+): number {
+  let sum = 0;
+  for (const mo of months) {
+    sum += Number(cells[rowKey]?.[mo.month_key]?.value ?? 0);
+  }
+  return sum;
+}
+
 function periodTotalDisplay(
   row: FinancialForecastRow,
   months: FinancialForecastMonth[],
   cells: Record<string, Record<string, { value?: number }>>
 ): string {
   if (row.kind === "group") return "—";
+  if (row.row_key === "gross_profit_pct") {
+    const gp = sumRowAcrossMonths("gross_profit", months, cells);
+    const ti = sumRowAcrossMonths("total_income", months, cells);
+    if (!ti) return "0";
+    const pct = Math.round((gp / ti) * 100);
+    return pct.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
+  if (row.row_key === "net_income_pct") {
+    const ni = sumRowAcrossMonths("net_income", months, cells);
+    const ti = sumRowAcrossMonths("total_income", months, cells);
+    if (!ti) return "0";
+    const pct = Math.round((ni / ti) * 100);
+    return pct.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  }
   if (row.kind === "percent") return "—";
   if (row.kind === "total" && (row.row_key.endsWith("_pct") || row.row_key.includes("pct"))) return "—";
-  let sum = 0;
-  for (const mo of months) {
-    sum += Number(cells[row.row_key]?.[mo.month_key]?.value ?? 0);
-  }
+  const sum = sumRowAcrossMonths(row.row_key, months, cells);
   return sum.toLocaleString(undefined, { maximumFractionDigits: 0 });
 }
 
@@ -493,33 +516,51 @@ export default function FinancialForecastsPage() {
   };
 
   return (
-    <div className="container mx-auto p-4 space-y-4">
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Financial Forecasts</h1>
+        <p className="text-gray-600 mt-1 text-sm sm:text-base">
+          Monthly P&amp;L view — compare forecast vs actuals and edit expense lines in context
+        </p>
+      </div>
+
       <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-lg">Financial Forecasts</CardTitle>
-          <div className="flex flex-wrap gap-3 items-end pt-2">
-            <div>
-              <Label className="text-xs">Starting week</Label>
+        <CardHeader>
+          <CardTitle className="text-base">Filters</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-end">
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ff-start-week" className="text-xs font-medium">
+                Starting Week
+              </Label>
               <input
+                id="ff-start-week"
                 type="date"
-                className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm block"
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm w-full"
                 value={startWeek}
                 onChange={(e) => setStartWeek(e.target.value)}
               />
             </div>
-            <div>
-              <Label className="text-xs">Ending week</Label>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ff-end-week" className="text-xs font-medium">
+                Ending Week
+              </Label>
               <input
+                id="ff-end-week"
                 type="date"
-                className="h-9 rounded-md border border-gray-300 bg-white px-2 text-sm block"
+                className="h-9 rounded-md border border-gray-300 bg-white px-3 text-sm w-full"
                 value={endWeek}
                 onChange={(e) => setEndWeek(e.target.value)}
               />
             </div>
-            <div>
-              <Label className="text-xs">Delivery Center</Label>
+            <div className="flex flex-col gap-1.5">
+              <Label htmlFor="ff-dc" className="text-xs font-medium">
+                Delivery Center
+              </Label>
               <select
-                className={cn(selectClassName, "min-w-[180px] block")}
+                id="ff-dc"
+                className={cn(selectClassName, "min-w-0 w-full px-3")}
                 value={deliveryCenterId}
                 onChange={(e) => setDeliveryCenterId(e.target.value)}
                 required
@@ -532,19 +573,34 @@ export default function FinancialForecastsPage() {
                 ))}
               </select>
             </div>
-            <div>
-              <Label className="text-xs">Metric</Label>
-              <select
-                className={cn(selectClassName, "block")}
-                value={metric}
-                onChange={(e) => setMetric(e.target.value as "forecast" | "actuals")}
-              >
-                <option value="forecast">Forecast</option>
-                <option value="actuals">Actuals</option>
-              </select>
+          </div>
+
+          <div className="flex flex-col gap-4 pt-2 border-t border-gray-100 lg:flex-row lg:flex-wrap lg:items-end">
+            <div className="flex flex-col gap-1.5 min-w-[200px]">
+              <Label className="text-xs font-medium">Metric</Label>
+              <div className="grid grid-cols-2 gap-1 max-w-xs">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={metric === "forecast" ? "default" : "outline"}
+                  onClick={() => setMetric("forecast")}
+                  className="h-9 text-xs"
+                >
+                  Forecast
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={metric === "actuals" ? "default" : "outline"}
+                  onClick={() => setMetric("actuals")}
+                  className="h-9 text-xs"
+                >
+                  Actuals
+                </Button>
+              </div>
             </div>
             <div
-              className="flex items-center gap-0.5 rounded-md border border-gray-200 bg-muted/40 p-0.5"
+              className="flex items-center gap-0.5 rounded-md border border-gray-200 bg-muted/40 p-0.5 self-start lg:self-end"
               role="toolbar"
               aria-label="Forecast edit history"
             >
@@ -552,7 +608,7 @@ export default function FinancialForecastsPage() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 shrink-0 px-0"
+                className="h-9 w-9 shrink-0 px-0"
                 onClick={() => setHistoryOpen((o) => !o)}
                 title="History"
                 aria-label="Toggle change history"
@@ -563,7 +619,7 @@ export default function FinancialForecastsPage() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 shrink-0 px-0"
+                className="h-9 w-9 shrink-0 px-0"
                 onClick={undo}
                 disabled={!undoStack.current.length}
                 key={`u-${undoRev}`}
@@ -576,7 +632,7 @@ export default function FinancialForecastsPage() {
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-8 w-8 shrink-0 px-0"
+                className="h-9 w-9 shrink-0 px-0"
                 onClick={redo}
                 disabled={!redoStack.current.length}
                 key={`r-${undoRev}`}
@@ -586,30 +642,30 @@ export default function FinancialForecastsPage() {
                 <Redo2 className="h-4 w-4" />
               </Button>
             </div>
-            <div className="w-px h-8 bg-border self-center hidden sm:block" aria-hidden />
-            <Button type="button" variant="outline" size="sm" onClick={downloadExport}>
-              Export Excel
-            </Button>
-            <label className="text-sm cursor-pointer">
-              <span className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3">
-                Import Excel
-              </span>
-              <input
-                type="file"
-                accept=".xlsx"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) uploadImport(f);
-                  e.target.value = "";
-                }}
-              />
-            </label>
+            <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={downloadExport}>
+                Export Excel
+              </Button>
+              <label className="text-sm cursor-pointer">
+                <span className="inline-flex h-9 items-center rounded-md border border-gray-300 bg-white px-3 text-sm">
+                  Import Excel
+                </span>
+                <input
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadImport(f);
+                    e.target.value = "";
+                  }}
+                />
+              </label>
+            </div>
           </div>
-        </CardHeader>
-        <CardContent>
+
           {historyOpen && (
-            <div className="mb-4 max-h-40 overflow-y-auto border rounded-md p-2 text-xs bg-muted/30">
+            <div className="max-h-40 overflow-y-auto border rounded-md p-2 text-xs bg-muted/30">
               {(hist?.items ?? []).map((h) => (
                 <div key={h.id} className="py-0.5 border-b border-gray-100">
                   <span className="text-gray-500">{h.created_at}</span> — {h.action}{" "}
@@ -618,51 +674,71 @@ export default function FinancialForecastsPage() {
               ))}
             </div>
           )}
-          {isLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {error && <p className="text-sm text-red-600">{(error as Error).message}</p>}
-          {data && (
-            <div className="overflow-auto max-h-[70vh]">
-              <p className="text-[11px] text-muted-foreground mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                <span className="font-medium text-foreground">Month colors:</span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block h-3 w-6 rounded-sm bg-sky-100/90 border border-gray-200" />
-                  Forecast only
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block h-3 w-6 rounded-sm bg-amber-100/90 border border-gray-200" />
-                  Mixed
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block h-3 w-6 rounded-sm bg-emerald-100/90 border border-gray-200" />
-                  Actuals only
-                </span>
-              </p>
-              <div
-                className="inline-grid gap-0 text-xs"
-                style={{ gridTemplateColumns: gridTemplateColumns, gridAutoRows: "minmax(0,auto)" }}
-              >
-                <div className="sticky top-0 z-20 bg-white font-semibold border p-1">Line</div>
-                {months.map((mo) => (
-                  <div
-                    key={mo.month_key}
-                    className={cn("sticky top-0 z-20 border p-1", monthHeaderClass(mo.composition))}
-                    title={COMPOSITION_LABEL[mo.composition] ?? mo.composition}
-                    aria-label={`${mo.year}-${String(mo.month).padStart(2, "0")}. ${COMPOSITION_LABEL[mo.composition] ?? ""}`}
-                  >
-                    {mo.year}-{String(mo.month).padStart(2, "0")}
-                  </div>
-                ))}
-                <div
-                  className="sticky top-0 z-20 bg-white font-semibold border p-1 text-right"
-                  title="Sum of amounts in the visible month columns for this row"
-                >
-                  Period total
-                </div>
+        </CardContent>
+      </Card>
 
-                {visibleRows.map((row, i) => renderRowBlock(row, i))}
+      <Card>
+        <CardContent className="p-0">
+          {isLoading && <p className="p-6 text-sm text-muted-foreground">Loading…</p>}
+          {error && <p className="p-6 text-sm text-red-600">{(error as Error).message}</p>}
+          {data && (
+            <>
+              <div className="flex flex-col gap-3 border-b border-gray-100 bg-gray-50/90 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-gray-700">
+                  <span className="font-semibold text-gray-900">Month colors</span>
+                  <span className="hidden sm:inline text-gray-300" aria-hidden>
+                    |
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-3.5 w-7 shrink-0 rounded-sm bg-sky-100/90 border border-gray-200" />
+                    Forecast only
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-3.5 w-7 shrink-0 rounded-sm bg-amber-100/90 border border-gray-200" />
+                    Mixed
+                  </span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="inline-block h-3.5 w-7 shrink-0 rounded-sm bg-emerald-100/90 border border-gray-200" />
+                    Actuals only
+                  </span>
+                </div>
+                <div className="flex shrink-0 flex-col items-start gap-0.5 sm:items-end">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Amounts in</span>
+                  <span
+                    className="rounded-md border border-gray-200 bg-white px-3 py-1.5 text-lg font-semibold tabular-nums text-gray-900 shadow-sm"
+                    title="All monetary values use this currency"
+                  >
+                    {currency}
+                  </span>
+                </div>
               </div>
-              <p className="text-[11px] text-muted-foreground mt-2">Currency: {currency}</p>
-            </div>
+              <div className="overflow-x-auto p-4">
+                <div
+                  className="inline-grid min-w-max gap-0 text-xs"
+                  style={{ gridTemplateColumns: gridTemplateColumns, gridAutoRows: "minmax(0,auto)" }}
+                >
+                  <div className="sticky top-0 z-20 bg-white font-semibold border p-1">Line</div>
+                  {months.map((mo) => (
+                    <div
+                      key={mo.month_key}
+                      className={cn("sticky top-0 z-20 border p-1", monthHeaderClass(mo.composition))}
+                      title={COMPOSITION_LABEL[mo.composition] ?? mo.composition}
+                      aria-label={`${mo.year}-${String(mo.month).padStart(2, "0")}. ${COMPOSITION_LABEL[mo.composition] ?? ""}`}
+                    >
+                      {mo.year}-{String(mo.month).padStart(2, "0")}
+                    </div>
+                  ))}
+                  <div
+                    className="sticky top-0 z-20 bg-white font-semibold border p-1 text-right"
+                    title="Sum of amounts in the visible month columns for this row; percentages use period-wide totals"
+                  >
+                    Period total
+                  </div>
+
+                  {visibleRows.map((row, i) => renderRowBlock(row, i))}
+                </div>
+              </div>
+            </>
           )}
         </CardContent>
       </Card>
