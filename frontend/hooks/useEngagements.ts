@@ -25,6 +25,7 @@ import type {
   EngagementPhaseCreate,
   EngagementPhaseUpdate,
   EngagementTimesheetApprover,
+  EngagementExpenseApprover,
   EngagementExcelImportResponse,
   AutoFillRequest,
   ApprovedHoursByWeekResponse,
@@ -385,6 +386,33 @@ export function useUpdateTimesheetApprovers(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+    },
+    ...options,
+  });
+}
+
+/**
+ * Update expense approvers for an engagement.
+ */
+export function useUpdateExpenseApprovers(
+  options?: UseMutationOptions<
+    EngagementExpenseApprover[],
+    Error,
+    { engagementId: string; employeeIds: string[] }
+  >
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation<
+    EngagementExpenseApprover[],
+    Error,
+    { engagementId: string; employeeIds: string[] }
+  >({
+    mutationFn: ({ engagementId, employeeIds }) =>
+      engagementsApi.updateExpenseApprovers(engagementId, employeeIds),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
     },
     ...options,
   });

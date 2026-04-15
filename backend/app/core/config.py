@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     # Azure credentials (placeholders)
     AZURE_STORAGE_ACCOUNT_NAME: str = ""
     AZURE_STORAGE_ACCOUNT_KEY: str = ""
+    AZURE_STORAGE_EXPENSE_RECEIPTS_CONTAINER: str = "expense-receipts"
     AZURE_KEY_VAULT_URL: str = ""
     
     # Entra ID (Azure AD) SSO Configuration

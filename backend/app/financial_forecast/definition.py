@@ -9,7 +9,29 @@ from enum import Enum
 from typing import Any, Literal, TypedDict
 
 
-FINANCIAL_FORECAST_DEFINITION_VERSION = 1
+FINANCIAL_FORECAST_DEFINITION_VERSION = 2
+
+
+def employee_expense_row_key(category_id: int) -> str:
+    return f"expense_employee_cat_{category_id}"
+
+
+def merge_expense_category_rows(
+    static_rows: list[RowDef],
+    categories: list[tuple[int, str]],
+) -> list[RowDef]:
+    """Insert auto expense lines under expense_employee from DB categories (after the group row)."""
+    cat_rows: list[RowDef] = []
+    for cid, name in categories:
+        cat_rows.append(
+            _a(employee_expense_row_key(cid), name, parent="expense_employee", parent_group_code="expense_employee")
+        )
+    out: list[RowDef] = []
+    for r in static_rows:
+        out.append(r)
+        if r.get("row_key") == "expense_employee" and r.get("kind") == "group":
+            out.extend(cat_rows)
+    return out
 
 
 class RowKind(str, Enum):
@@ -225,25 +247,13 @@ def build_static_row_definitions() -> list[RowDef]:
     rows.append(_m("expense_sales_marketing", "Sales & Marketing", parent="expense", parent_group_code="expense"))
 
     rows.append(_g("expense_employee", "Employee Expenses", parent="expense", parent_group_code="expense_employee"))
-    rows.append(_m("expense_airfare", "Airfare", parent="expense_employee", parent_group_code="expense_employee"))
-    rows.append(_m("expense_hotels", "Hotels", parent="expense_employee", parent_group_code="expense_employee"))
-    rows.append(_m("expense_taxis", "Taxis or Shared Rides", parent="expense_employee", parent_group_code="expense_employee"))
-    rows.append(_m("expense_meals", "Meals", parent="expense_employee", parent_group_code="expense_employee"))
-    rows.append(_m("expense_vehicle_gas", "Vehicle Gas & Fuel", parent="expense_employee", parent_group_code="expense_employee"))
-    rows.append(_m("expense_vehicle_rental", "Vehicle Rental", parent="expense_employee", parent_group_code="expense_employee"))
+    # Per-category lines are merged at runtime from expense_categories (see merge_expense_category_rows).
     rows.append(
         _t(
             "expense_total_employee",
             "Total Employee Expenses",
             "sum",
-            [
-                "expense_airfare",
-                "expense_hotels",
-                "expense_taxis",
-                "expense_meals",
-                "expense_vehicle_gas",
-                "expense_vehicle_rental",
-            ],
+            [],
             parent="expense_employee",
         )
     )

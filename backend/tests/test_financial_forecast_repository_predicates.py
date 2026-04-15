@@ -14,6 +14,8 @@ from app.db.repositories.financial_forecast_repository import (
     _timesheet_entry_opportunity_in,
 )
 from app.models.employee import Employee, EmployeeType
+from app.models.engagement import Engagement
+from app.models.expense import ExpenseLine, ExpenseSheet
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.models.timesheet import Timesheet, TimesheetApprovedSnapshot, TimesheetEntry, TimesheetStatus
 
@@ -100,3 +102,34 @@ def test_cogs_subcontract_actuals_query_shape_matches_repository():
     assert "employees" in sql.lower()
     assert "employee_type" in sql.lower()
     assert "engagement" in sql.lower()
+
+
+def test_consulting_fee_expenses_query_includes_engagement_coalesce_opportunity():
+    """Billable approved expense lines resolve opportunity via line or engagement (invoice DC filter)."""
+    forecast_dc_id = uuid4()
+    range_start = date(2026, 1, 1)
+    range_end = date(2026, 1, 31)
+    q = (
+        select(ExpenseLine, Opportunity)
+        .join(ExpenseSheet, ExpenseLine.expense_sheet_id == ExpenseSheet.id)
+        .outerjoin(Engagement, ExpenseLine.engagement_id == Engagement.id)
+        .join(
+            Opportunity,
+            Opportunity.id == func.coalesce(ExpenseLine.opportunity_id, Engagement.opportunity_id),
+        )
+        .where(
+            ExpenseSheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+            ExpenseLine.billable.is_(True),
+            Opportunity.delivery_center_id == forecast_dc_id,
+            ExpenseLine.date_incurred.isnot(None),
+            ExpenseLine.date_incurred >= range_start,
+            ExpenseLine.date_incurred <= range_end,
+            ExpenseLine.expense_category_id.isnot(None),
+        )
+    )
+    sql = str(q.compile(dialect=postgresql.dialect()))
+    low = sql.lower()
+    assert "coalesce" in low
+    assert "engagements" in low or "engagement" in low
+    assert "billable" in low
+    assert "expense_lines" in low

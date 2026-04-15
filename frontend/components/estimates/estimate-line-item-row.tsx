@@ -7,7 +7,7 @@ import { useUpdateLineItem } from "@/hooks/useEstimates";
 import { useDeleteLineItem } from "@/hooks/useEstimates";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { useRoles, useRole } from "@/hooks/useRoles";
+import { useRole } from "@/hooks/useRoles";
 import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
@@ -33,7 +33,7 @@ export function EstimateLineItemRow({
   currency,
   estimateId,
   opportunityDeliveryCenterId,
-  invoiceCustomer = true,
+  invoiceCustomer: _invoiceCustomer = true,
   billableExpenses = true,
   onContextMenu,
   readOnly = false,
@@ -302,10 +302,10 @@ export function EstimateLineItemRow({
       });
       return next;
     });
+    // Snapshot weekly_hours via JSON.stringify; listing lineItem.weekly_hours duplicates intent
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     lineItem.id,
-    // Use JSON.stringify to create a stable dependency that detects any changes
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     JSON.stringify(lineItem.weekly_hours?.map(wh => ({
       week_start_date: wh.week_start_date,
       hours: wh.hours
@@ -532,6 +532,8 @@ export function EstimateLineItemRow({
         else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");
       }
     }, 500); // 500ms debounce
+    // Intentionally narrow deps: debounced handler uses refs + latest closures from render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimateId, lineItem.id, updateLineItem, readOnly]);
   
   // Cleanup timeouts on unmount
@@ -769,7 +771,7 @@ export function EstimateLineItemRow({
           // Use selectedRoleData which has full role info including defaults
           if (selectedRoleData) {
             const firstRate = selectedRoleData.role_rates?.[0];
-            const fallbackCost = selectedRoleData.role_rates?.[0]?.internal_cost_rate ?? 0;
+            const fallbackCost = firstRate?.internal_cost_rate ?? 0;
             // Round to 2 decimal places
             newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {

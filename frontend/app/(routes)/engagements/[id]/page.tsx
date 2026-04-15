@@ -8,6 +8,7 @@ import { ResourcePlan } from "@/components/engagements/resource-plan";
 import { PhaseManagement } from "@/components/engagements/phase-management";
 import { ComparativeSummary } from "@/components/engagements/comparative-summary";
 import { EngagementTimesheetApprovers } from "@/components/engagements/engagement-timesheet-approvers";
+import { EngagementExpenseApprovers } from "@/components/engagements/engagement-expense-approvers";
 import { EngagementGanttView } from "@/components/engagements/engagement-gantt-view";
 import { BudgetBurndownChart } from "@/components/engagements/budget-burndown-chart";
 import { Button } from "@/components/ui/button";
@@ -198,6 +199,16 @@ export default function EngagementDetailPage() {
         </CardHeader>
         <CardContent>
           <EngagementTimesheetApprovers engagement={engagement} onRefetch={refetch} />
+        </CardContent>
+      </Card>
+
+      {/* Expense Approvers */}
+      <Card className="mb-6">
+        <CardHeader>
+          <CardTitle>Expense Approver(s)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <EngagementExpenseApprovers engagement={engagement} onRefetch={refetch} />
         </CardContent>
       </Card>
 

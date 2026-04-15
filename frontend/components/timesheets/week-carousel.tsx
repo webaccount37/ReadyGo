@@ -62,6 +62,13 @@ interface WeekCarouselProps {
   className?: string;
   /** When true, shows a static week label instead of interactive carousel (e.g. when approver views others' timesheets) */
   readOnly?: boolean;
+  /**
+   * When false, incomplete weeks are not highlighted (e.g. expense sheets have no incomplete-week workflow).
+   * @default true
+   */
+  trackIncomplete?: boolean;
+  /** Shown next to the week pill when readOnly (defaults to timesheet approvals hint). */
+  readOnlyHint?: string;
 }
 
 const WEEKS = generateWeekOptions();
@@ -74,6 +81,8 @@ export function WeekCarousel({
   visibleCount: _visibleCount = 5,
   className,
   readOnly = false,
+  trackIncomplete = true,
+  readOnlyHint = "Use Timesheet Approvals to switch weeks",
 }: WeekCarouselProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const weeks = WEEKS;
@@ -109,7 +118,7 @@ export function WeekCarousel({
         <div className="px-4 py-2.5 rounded-xl text-sm font-medium bg-slate-100 dark:bg-slate-800 border-2 border-slate-200 dark:border-slate-700">
           {formatWeekLabel(selectedWeek)}
         </div>
-        <span className="text-xs text-muted-foreground">Use Timesheet Approvals to switch weeks</span>
+        <span className="text-xs text-muted-foreground">{readOnlyHint}</span>
       </div>
     );
   }
@@ -139,12 +148,20 @@ export function WeekCarousel({
         <div className="flex gap-2 px-2 justify-start min-w-min">
           {weeks.map((w) => {
             const isSelected = w === selectedWeek;
-            const isIncomplete = incompleteWeeks.includes(w);
+            const isIncomplete = trackIncomplete && incompleteWeeks.includes(w);
             const status = weekStatuses[w];
             const isSubmitted = status === "SUBMITTED";
             const isApproved = status === "APPROVED";
             const isInvoiced = status === "INVOICED";
-            const statusLabel = isInvoiced ? "Invoiced" : isApproved ? "Approved" : isSubmitted ? "Submitted" : isIncomplete ? "Incomplete" : null;
+            const statusLabel = isInvoiced
+              ? "Invoiced"
+              : isApproved
+                ? "Approved"
+                : isSubmitted
+                  ? "Submitted"
+                  : isIncomplete
+                    ? "Incomplete"
+                    : null;
             return (
               <button
                 key={w}

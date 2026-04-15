@@ -10,12 +10,12 @@ import { useAccounts } from "@/hooks/useAccounts";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEngagements } from "@/hooks/useEngagements";
 import { useTimesheetPendingApprovals } from "@/hooks/useTimesheets";
+import { useExpensePendingApprovals } from "@/hooks/useExpenses";
 import {
   LayoutDashboard,
   Briefcase,
   Building2,
   ContactRound,
-  Package,
   Calculator,
   FileCheck,
   TrendingUp,
@@ -26,6 +26,7 @@ import {
   MapPin,
   Clock,
   Receipt,
+  Tags,
   UserCog,
   LogOut,
   User,
@@ -37,7 +38,7 @@ interface NavItem {
   href: string;
   icon?: React.ComponentType<{ className?: string }>;
   comingSoon?: boolean;
-  badgeKey?: "timesheet-incomplete" | "timesheet-pending";
+  badgeKey?: "timesheet-incomplete" | "timesheet-pending" | "expense-pending";
 }
 
 interface NavGroup {
@@ -71,7 +72,8 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Timesheet Management", href: "/timesheets", icon: Clock, badgeKey: "timesheet-incomplete" },
       { title: "Timesheet Approvals", href: "/timesheet-approvals", icon: CheckCircle2, badgeKey: "timesheet-pending" },
-      { title: "Expense Management", href: "#", comingSoon: true, icon: Receipt },
+      { title: "Expense Management", href: "/expenses", icon: Receipt },
+      { title: "Expense Approvals", href: "/expense-approvals", icon: CheckCircle2, badgeKey: "expense-pending" },
     ],
   },
   {
@@ -86,6 +88,7 @@ const navGroups: NavGroup[] = [
     items: [
       { title: "Calendars", href: "/calendars", icon: Calendar },
       { title: "Currency Rates", href: "/currency-rates", icon: DollarSign },
+      { title: "Expense Categories", href: "/expense-categories", icon: Tags },
       { title: "Delivery Centers", href: "/delivery-centers", icon: MapPin },
       { title: "Employees", href: "/employees", icon: Users },
       { title: "Roles", href: "/roles", icon: Shield },
@@ -102,12 +105,14 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
   const { isAuthenticated } = useAuth();
   const { data: incompleteData } = useTimesheetIncompleteCount();
   const { data: pendingData } = useTimesheetPendingApprovals({ limit: 1 });
+  const { data: expensePendingData } = useExpensePendingApprovals({ limit: 1 });
   useAccounts({ limit: 500 }, { enabled: isAuthenticated });
   useOpportunities({ limit: 500 }, { enabled: isAuthenticated });
   useEngagements({ limit: 500 }, { enabled: isAuthenticated });
   const badgeCounts = {
     "timesheet-incomplete": incompleteData?.count ?? 0,
     "timesheet-pending": pendingData?.total ?? 0,
+    "expense-pending": expensePendingData?.total ?? 0,
   };
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => {
     const initial = new Set<number>();

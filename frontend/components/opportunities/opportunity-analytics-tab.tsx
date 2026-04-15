@@ -5,7 +5,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ComparativeSummary } from "@/components/engagements/comparative-summary";
 import { BudgetBurndownChart } from "@/components/engagements/budget-burndown-chart";
 import { formatDurationDays } from "@/lib/duration-utils";
-import { formatCurrency } from "@/lib/opportunity-utils";
 import type { Opportunity } from "@/types/opportunity";
 import type { EngagementDetailResponse } from "@/types/engagement";
 import type { ApprovedHoursByWeekResponse } from "@/types/engagement";

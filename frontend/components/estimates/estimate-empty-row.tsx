@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { useRoles, useRole } from "@/hooks/useRoles";
+import { useRole } from "@/hooks/useRoles";
 import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
@@ -390,7 +390,6 @@ export function EstimateEmptyRow({
     new Map()
   );
 
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const hoursSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isCreatingRef = useRef(false);
   const lastSavedDataRef = useRef<Partial<EstimateLineItemCreate>>({});
@@ -485,7 +484,7 @@ export function EstimateEmptyRow({
         await updateLineItem.mutateAsync({
           estimateId,
           lineItemId,
-          data: updateData as any,
+          data: updateData as EstimateLineItemUpdate,
         });
         
         // Update saved data reference - DON'T invalidate queries to prevent refetch loop
@@ -512,9 +511,9 @@ export function EstimateEmptyRow({
       setIsSaving(true);
       
       try {
-        const createData: any = {
+        const createData: EstimateLineItemCreate = {
           role_id: formData.role_id,
-          delivery_center_id: opportunityDeliveryCenterId,
+          delivery_center_id: opportunityDeliveryCenterId!,
           employee_id: formData.employee_id || undefined,
           rate: formData.rate || "0",
           cost: formData.cost || "0",
@@ -559,6 +558,8 @@ export function EstimateEmptyRow({
       }
       return;
     }
+    // Narrow deps: full formData would retrigger save loop; isSaving checked inside callback
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lineItemId, formData.role_id, formData.delivery_center_id, formData.employee_id, formData.rate, formData.cost, formData.start_date, formData.end_date, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, opportunityDeliveryCenterId, currency, invoiceCustomer, billableExpenses]);
 
   // SIMPLE: Save to database immediately when ANY field in formData changes
@@ -580,6 +581,8 @@ export function EstimateEmptyRow({
       });
       saveToDatabase();
     }
+    // isSaving intentionally omitted — effect gates on it internally via saveToDatabase
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.role_id, formData.delivery_center_id, formData.employee_id, formData.cost, formData.rate, formData.start_date, formData.end_date, lineItemId, saveToDatabase]);
 
   // REMOVED: Separate cost/rate handler - now handled by main auto-save useEffect
@@ -728,6 +731,8 @@ export function EstimateEmptyRow({
     
     prevRoleIdRef.current = formData.role_id || "";
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
+    // formData.cost / formData.rate updated via setFormData in this effect; listing them retriggers unnecessarily
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.role_id, formData.employee_id, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef, isLoadingRole, isFetchingRole]);
 
   // When Employee is selected or cleared, update Cost accordingly
@@ -807,7 +812,7 @@ export function EstimateEmptyRow({
           // Use selectedRoleData which has full role info including defaults
           if (selectedRoleData) {
             const firstRate = selectedRoleData.role_rates?.[0];
-            const fallbackCost = selectedRoleData.role_rates?.[0]?.internal_cost_rate ?? 0;
+            const fallbackCost = firstRate?.internal_cost_rate ?? 0;
             // Round to 2 decimal places
             newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {
@@ -969,6 +974,8 @@ export function EstimateEmptyRow({
     lastCalculationSignatureRef.current = `${currentEmployeeId}|${currency}|${opportunityDeliveryCenterId}|${!!deliveryCentersData}`;
 
     prevEmployeeIdRef.current = currentEmployeeId;
+    // formData.cost / formData.rate read for logging and setFormData; not stable effect deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole, isLoadingDeliveryCenters, isFetchingDeliveryCenters]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
@@ -1384,9 +1391,9 @@ export function EstimateEmptyRow({
                   if (!lineItemToUse && !effectiveLineItemId) {
                     try {
                       // delivery_center_id always comes from opportunityDeliveryCenterId (required)
-                      const createData: any = {
+                      const createData: EstimateLineItemCreate = {
                         role_id: formData.role_id,
-                        delivery_center_id: opportunityDeliveryCenterId, // Always use Opportunity Invoice Center (required)
+                        delivery_center_id: opportunityDeliveryCenterId!,
                         employee_id: formData.employee_id || undefined,
                         rate: formData.rate || "0",
                         cost: formData.cost || "0",
@@ -1450,17 +1457,27 @@ export function EstimateEmptyRow({
                       localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
                       localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
                     }
-                  } catch (err: any) {
+                  } catch (err: unknown) {
                     console.error("Failed to delete line item:", err);
+                    const status =
+                      err &&
+                      typeof err === "object" &&
+                      "response" in err &&
+                      err.response &&
+                      typeof err.response === "object" &&
+                      "status" in err.response
+                        ? (err.response as { status?: number }).status
+                        : undefined;
+                    const message = err instanceof Error ? err.message : String(err);
                     // If the line item doesn't exist (404), clear the stale lineItemId
-                    if (err?.response?.status === 404 || err?.message?.includes("not found")) {
+                    if (status === 404 || message.includes("not found")) {
                       console.log("Line item not found, clearing stale lineItemId");
                       setLineItemId(null);
                       if (typeof window !== "undefined") {
                         localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
                       }
                     } else {
-                      alert(`Failed to delete line item: ${err instanceof Error ? err.message : String(err)}`);
+                      alert(`Failed to delete line item: ${message}`);
                     }
                   }
                 }

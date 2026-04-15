@@ -51,9 +51,10 @@ htmlcov/
 *.db
 *.sqlite
 
-# Alembic
+# Alembic (track explicit revisions; other local autogen files stay untracked)
 alembic/versions/*.py
 !alembic/versions/.gitkeep
+!alembic/versions/expense_management_001.py
 
 
 

@@ -9,6 +9,7 @@ from typing import Any, Iterable
 from uuid import UUID
 
 from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.financial_forecast_repository import FinancialForecastRepository, MonthBucket
@@ -17,7 +18,10 @@ from app.financial_forecast.definition import (
     build_static_row_definitions,
     definition_response,
     get_formula_sum_keys_for_total_expenses,
+    merge_expense_category_rows,
+    employee_expense_row_key,
 )
+from app.models.expense_category import ExpenseCategory
 from app.models.financial_forecast import (
     FinancialForecastChangeEvent,
     FinancialForecastExpenseCell,
@@ -52,7 +56,16 @@ class FinancialForecastService:
         self.repo = FinancialForecastRepository(session)
 
     async def get_definition(self) -> dict[str, Any]:
-        return definition_response()
+        r = await self.session.execute(select(ExpenseCategory).order_by(ExpenseCategory.id))
+        cats = list(r.scalars().all())
+        static = build_static_row_definitions()
+        merged = merge_expense_category_rows(static, [(c.id, c.name) for c in cats])
+        base = definition_response()
+        return {
+            **base,
+            "version": FINANCIAL_FORECAST_DEFINITION_VERSION,
+            "rows": merged,
+        }
 
     async def get_forecast(
         self,
@@ -70,7 +83,13 @@ class FinancialForecastService:
         range_start = start_week
         range_end = end_week + timedelta(days=6)
 
-        static_defs = build_static_row_definitions()
+        r_cat = await self.session.execute(select(ExpenseCategory).order_by(ExpenseCategory.id))
+        cats = list(r_cat.scalars().all())
+        static_defs = merge_expense_category_rows(
+            build_static_row_definitions(),
+            [(c.id, c.name) for c in cats],
+        )
+        employee_expense_row_keys = [employee_expense_row_key(c.id) for c in cats]
         auto_row_keys = {r["row_key"] for r in static_defs if r.get("auto_row")}
         manual_static_keys = {r["row_key"] for r in static_defs if r.get("manual_expense")}
 
@@ -205,7 +224,7 @@ class FinancialForecastService:
                 }
 
         # Formulas
-        self._apply_formulas(cells, month_keys, expense_lines)
+        self._apply_formulas(cells, month_keys, expense_lines, employee_expense_row_keys)
 
         return {
             "definition_version": FINANCIAL_FORECAST_DEFINITION_VERSION,
@@ -227,9 +246,11 @@ class FinancialForecastService:
         cells: dict[str, dict[str, dict[str, Any]]],
         month_keys: list[str],
         expense_lines: list[FinancialForecastExpenseLine],
+        employee_expense_row_keys: list[str] | None = None,
     ) -> None:
         static_defs = build_static_row_definitions()
         te_keys = list(get_formula_sum_keys_for_total_expenses(static_defs))
+        employee_expense_row_keys = employee_expense_row_keys or []
         custom_expense_rks = [f"expense:{ln.id}" for ln in expense_lines if not ln.name.startswith("__static__:")]
         total_expense_keys = te_keys + custom_expense_rks
 
@@ -304,16 +325,7 @@ class FinancialForecastService:
                 "source": "auto",
             }
             cells["expense_total_employee"][mk] = {
-                "value": s(
-                    [
-                        "expense_airfare",
-                        "expense_hotels",
-                        "expense_taxis",
-                        "expense_meals",
-                        "expense_vehicle_gas",
-                        "expense_vehicle_rental",
-                    ]
-                ),
+                "value": s(employee_expense_row_keys),
                 "auto_value": None,
                 "is_manual": False,
                 "source": "auto",

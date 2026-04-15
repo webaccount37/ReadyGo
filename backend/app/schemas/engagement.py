@@ -240,11 +240,26 @@ class EngagementTimesheetApproversUpdate(BaseModel):
     employee_ids: List[UUID] = Field(default_factory=list)
 
 
+class EngagementExpenseApproverResponse(BaseModel):
+    """Response schema for engagement expense approver."""
+    employee_id: UUID
+    employee_name: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class EngagementExpenseApproversUpdate(BaseModel):
+    """Request to update expense approvers."""
+    employee_ids: List[UUID] = Field(default_factory=list)
+
+
 class EngagementDetailResponse(EngagementResponse):
     """Detailed engagement response with all relationships and comparative summary."""
     line_items: List[EngagementLineItemResponse]
     comparative_summary: Optional[ComparativeSummary] = None
     timesheet_approvers: Optional[List[EngagementTimesheetApproverResponse]] = None
+    expense_approvers: Optional[List[EngagementExpenseApproverResponse]] = None
 
 
 class EngagementListResponse(BaseModel):

@@ -29,6 +29,8 @@ from app.schemas.engagement import (
     EngagementPhaseResponse,
     EngagementTimesheetApproversUpdate,
     EngagementTimesheetApproverResponse,
+    EngagementExpenseApproversUpdate,
+    EngagementExpenseApproverResponse,
     EngagementExcelImportResponse,
     AutoFillRequest,
     ApprovedHoursByWeekResponse,
@@ -188,6 +190,23 @@ async def update_timesheet_approvers(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(e),
         )
+
+
+@router.put(
+    "/{engagement_id}/expense-approvers",
+    response_model=List[EngagementExpenseApproverResponse],
+)
+async def update_expense_approvers(
+    engagement_id: UUID,
+    data: EngagementExpenseApproversUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> List[EngagementExpenseApproverResponse]:
+    """Update expense approvers for an engagement."""
+    controller = EngagementController(db)
+    try:
+        return await controller.update_expense_approvers(engagement_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 # Line item endpoints

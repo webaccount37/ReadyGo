@@ -1,44 +1,72 @@
-"""
-Azure Blob Storage client stub.
-Placeholder for blob storage operations.
-"""
+"""Azure Blob Storage client for expense receipts and other binary assets."""
 
-from typing import Optional, List, BinaryIO
+from __future__ import annotations
+
+import asyncio
 import logging
+from io import BytesIO
+from typing import BinaryIO, List, Optional
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+try:
+    from azure.core.exceptions import ResourceExistsError
+    from azure.storage.blob import BlobServiceClient, ContentSettings
+except ImportError:  # pragma: no cover
+    BlobServiceClient = None  # type: ignore
+    ContentSettings = None  # type: ignore
+    ResourceExistsError = Exception  # type: ignore
+
+try:
+    from azure.identity import DefaultAzureCredential
+except ImportError:  # pragma: no cover
+    DefaultAzureCredential = None  # type: ignore
+
+
+def _build_blob_service_client():
+    if not BlobServiceClient:
+        raise RuntimeError("azure-storage-blob is not installed")
+    name = (settings.AZURE_STORAGE_ACCOUNT_NAME or "").strip()
+    if not name:
+        raise ValueError("AZURE_STORAGE_ACCOUNT_NAME is not configured")
+    key = (settings.AZURE_STORAGE_ACCOUNT_KEY or "").strip()
+    if key:
+        conn = (
+            f"DefaultEndpointsProtocol=https;AccountName={name};"
+            f"AccountKey={key};EndpointSuffix=core.windows.net"
+        )
+        return BlobServiceClient.from_connection_string(conn)
+    if DefaultAzureCredential is None:
+        raise ValueError("AZURE_STORAGE_ACCOUNT_KEY is empty and DefaultAzureCredential is unavailable")
+    account_url = f"https://{name}.blob.core.windows.net"
+    return BlobServiceClient(account_url, credential=DefaultAzureCredential())
+
 
 class AzureBlobClient:
-    """
-    Azure Blob Storage client wrapper.
-    Stub implementation - actual Azure SDK integration to be implemented.
-    """
-    
-    def __init__(
-        self,
-        account_name: Optional[str] = None,
-        account_key: Optional[str] = None,
-    ):
-        """
-        Initialize Azure Blob Storage client.
-        
-        Args:
-            account_name: Azure storage account name (defaults to config)
-            account_key: Azure storage account key (defaults to config)
-        """
-        self.account_name = account_name or settings.AZURE_STORAGE_ACCOUNT_NAME
-        self.account_key = account_key or settings.AZURE_STORAGE_ACCOUNT_KEY
-        
-        # TODO: Initialize Azure BlobServiceClient
-        # from azure.storage.blob import BlobServiceClient
-        # connection_string = f"DefaultEndpointsProtocol=https;AccountName={self.account_name};AccountKey={self.account_key};EndpointSuffix=core.windows.net"
-        # self.client = BlobServiceClient.from_connection_string(connection_string)
-        
-        logger.info(f"AzureBlobClient initialized for account: {self.account_name}")
-    
+    """Upload/download/delete blobs in Azure Storage."""
+
+    def __init__(self):
+        self._client: Optional[BlobServiceClient] = None
+
+    def _get_client(self) -> BlobServiceClient:
+        if self._client is None:
+            self._client = _build_blob_service_client()
+        return self._client
+
+    async def ensure_container(self, container_name: str) -> None:
+        """Create container if missing (idempotent)."""
+
+        def _run():
+            svc = self._get_client()
+            try:
+                svc.create_container(container_name)
+            except ResourceExistsError:
+                pass
+
+        await asyncio.to_thread(_run)
+
     async def upload_blob(
         self,
         container_name: str,
@@ -46,101 +74,43 @@ class AzureBlobClient:
         data: BinaryIO | bytes,
         content_type: Optional[str] = None,
     ) -> str:
-        """
-        Upload a blob to Azure Storage.
-        
-        Args:
-            container_name: Name of the container
-            blob_name: Name of the blob
-            data: Binary data to upload
-            content_type: Optional content type
-            
-        Returns:
-            URL of the uploaded blob
-        """
-        # TODO: Implement blob upload
-        # container_client = self.client.get_container_client(container_name)
-        # blob_client = container_client.get_blob_client(blob_name)
-        # await blob_client.upload_blob(data, content_settings=ContentSettings(content_type=content_type))
-        # return blob_client.url
-        
-        logger.info(f"Upload blob placeholder: {container_name}/{blob_name}")
-        return f"https://{self.account_name}.blob.core.windows.net/{container_name}/{blob_name}"
-    
-    async def download_blob(
-        self,
-        container_name: str,
-        blob_name: str,
-    ) -> bytes:
-        """
-        Download a blob from Azure Storage.
-        
-        Args:
-            container_name: Name of the container
-            blob_name: Name of the blob
-            
-        Returns:
-            Blob content as bytes
-        """
-        # TODO: Implement blob download
-        # container_client = self.client.get_container_client(container_name)
-        # blob_client = container_client.get_blob_client(blob_name)
-        # download_stream = await blob_client.download_blob()
-        # return await download_stream.readall()
-        
-        logger.info(f"Download blob placeholder: {container_name}/{blob_name}")
-        return b""
-    
-    async def list_blobs(
-        self,
-        container_name: str,
-        prefix: Optional[str] = None,
-    ) -> List[str]:
-        """
-        List blobs in a container.
-        
-        Args:
-            container_name: Name of the container
-            prefix: Optional prefix to filter blobs
-            
-        Returns:
-            List of blob names
-        """
-        # TODO: Implement blob listing
-        # container_client = self.client.get_container_client(container_name)
-        # blobs = container_client.list_blobs(name_starts_with=prefix)
-        # return [blob.name for blob in blobs]
-        
-        logger.info(f"List blobs placeholder: {container_name} (prefix: {prefix})")
-        return []
-    
-    async def delete_blob(
-        self,
-        container_name: str,
-        blob_name: str,
-    ) -> None:
-        """
-        Delete a blob from Azure Storage.
-        
-        Args:
-            container_name: Name of the container
-            blob_name: Name of the blob
-        """
-        # TODO: Implement blob deletion
-        # container_client = self.client.get_container_client(container_name)
-        # blob_client = container_client.get_blob_client(blob_name)
-        # await blob_client.delete_blob()
-        
-        logger.info(f"Delete blob placeholder: {container_name}/{blob_name}")
+        raw = data.read() if hasattr(data, "read") else data
 
+        def _run():
+            svc = self._get_client()
+            cc = svc.get_container_client(container_name)
+            blob = cc.get_blob_client(blob_name)
+            kwargs = {}
+            if content_type and ContentSettings:
+                kwargs["content_settings"] = ContentSettings(content_type=content_type)
+            blob.upload_blob(raw, overwrite=True, **kwargs)
+            return blob.url
 
+        return await asyncio.to_thread(_run)
 
+    async def download_blob(self, container_name: str, blob_name: str) -> bytes:
 
+        def _run():
+            svc = self._get_client()
+            blob = svc.get_container_client(container_name).get_blob_client(blob_name)
+            return blob.download_blob().readall()
 
+        return await asyncio.to_thread(_run)
 
+    async def delete_blob(self, container_name: str, blob_name: str) -> None:
 
+        def _run():
+            svc = self._get_client()
+            blob = svc.get_container_client(container_name).get_blob_client(blob_name)
+            blob.delete_blob()
 
+        await asyncio.to_thread(_run)
 
+    async def list_blobs(self, container_name: str, prefix: Optional[str] = None) -> List[str]:
 
+        def _run():
+            svc = self._get_client()
+            cc = svc.get_container_client(container_name)
+            return [b.name for b in cc.list_blobs(name_starts_with=prefix)]
 
-
+        return await asyncio.to_thread(_run)

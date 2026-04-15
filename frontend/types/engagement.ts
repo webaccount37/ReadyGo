@@ -92,10 +92,16 @@ export interface EngagementTimesheetApprover {
   employee_name?: string;
 }
 
+export interface EngagementExpenseApprover {
+  employee_id: string;
+  employee_name?: string;
+}
+
 export interface EngagementDetailResponse extends Engagement {
   line_items: EngagementLineItem[];
   comparative_summary?: ComparativeSummary;
   timesheet_approvers?: EngagementTimesheetApprover[];
+  expense_approvers?: EngagementExpenseApprover[];
 }
 
 export interface EngagementCreate {

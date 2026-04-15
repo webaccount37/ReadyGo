@@ -27,6 +27,8 @@ from app.api.v1.endpoints import (
     timesheets,
     staffing_forecast,
     financial_forecast,
+    expense_categories,
+    expenses,
 )
 
 api_router = APIRouter()
@@ -133,6 +135,18 @@ api_router.include_router(
     financial_forecast.router,
     prefix="/financial-forecast",
     tags=["financial-forecast"],
+    dependencies=[Depends(require_authentication)],
+)
+api_router.include_router(
+    expense_categories.router,
+    prefix="/expense-categories",
+    tags=["expense-categories"],
+    dependencies=[Depends(require_authentication)],
+)
+api_router.include_router(
+    expenses.router,
+    prefix="/expenses",
+    tags=["expenses"],
     dependencies=[Depends(require_authentication)],
 )
 

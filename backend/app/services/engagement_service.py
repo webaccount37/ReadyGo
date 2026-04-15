@@ -784,7 +784,28 @@ class EngagementService(BaseService):
             }
             for a in approvers
         ]
-    
+
+    async def update_expense_approvers(
+        self, engagement_id: UUID, employee_ids: List[UUID]
+    ) -> List[dict]:
+        """Update expense approvers for an engagement."""
+        engagement = await self.engagement_repo.get(engagement_id)
+        if not engagement:
+            raise ValueError("Engagement not found")
+        from app.db.repositories.engagement_expense_approver_repository import EngagementExpenseApproverRepository
+
+        repo = EngagementExpenseApproverRepository(self.session)
+        await repo.set_approvers(engagement_id, employee_ids)
+        await self.session.commit()
+        approvers = await repo.list_by_engagement(engagement_id)
+        return [
+            {
+                "employee_id": a.employee_id,
+                "employee_name": f"{a.employee.first_name} {a.employee.last_name}".strip() if a.employee else None,
+            }
+            for a in approvers
+        ]
+
     # Phase CRUD operations
     async def create_phase(
         self,
@@ -1423,8 +1444,12 @@ class EngagementService(BaseService):
     
     async def _to_detail_response(self, engagement: Engagement) -> EngagementDetailResponse:
         """Convert Engagement model to detail response schema."""
-        from app.schemas.engagement import EngagementTimesheetApproverResponse
+        from app.schemas.engagement import (
+            EngagementTimesheetApproverResponse,
+            EngagementExpenseApproverResponse,
+        )
         from app.db.repositories.engagement_timesheet_approver_repository import EngagementTimesheetApproverRepository
+        from app.db.repositories.engagement_expense_approver_repository import EngagementExpenseApproverRepository
 
         base_response = await self._to_response(engagement, include_line_items=True)
         detail_dict = base_response.model_dump()
@@ -1434,7 +1459,17 @@ class EngagementService(BaseService):
             EngagementTimesheetApproverResponse(
                 employee_id=a.employee_id,
                 employee_name=f"{a.employee.first_name} {a.employee.last_name}".strip() if a.employee else None,
-            ) for a in approvers
+            )
+            for a in approvers
+        ]
+        exp_repo = EngagementExpenseApproverRepository(self.session)
+        exp_approvers = await exp_repo.list_by_engagement(engagement.id)
+        detail_dict["expense_approvers"] = [
+            EngagementExpenseApproverResponse(
+                employee_id=a.employee_id,
+                employee_name=f"{a.employee.first_name} {a.employee.last_name}".strip() if a.employee else None,
+            )
+            for a in exp_approvers
         ]
         return EngagementDetailResponse(**detail_dict)
     

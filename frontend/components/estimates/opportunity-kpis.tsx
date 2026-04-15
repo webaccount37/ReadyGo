@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useEstimateDetail } from "@/hooks/useEstimates";
 import { useOpportunity } from "@/hooks/useOpportunities";
 import { Card } from "@/components/ui/card";
-import type { Estimate, EstimateDetailResponse } from "@/types/estimate";
+import type { Estimate } from "@/types/estimate";
 
 interface OpportunityKPIsProps {
   estimates: Estimate[];

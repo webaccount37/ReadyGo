@@ -199,6 +199,97 @@ class FinancialForecastRepository:
             )
         )
 
+    async def _add_consulting_fee_expenses(
+        self,
+        buckets: dict[str, dict[str, MonthBucket]],
+        forecast_dc_id: UUID,
+        range_start: date,
+        range_end: date,
+        dc_currency: str,
+    ) -> None:
+        """Income from billable approved expense lines tied to opps whose invoice DC is the forecast DC.
+
+        Uses finalized Expense Management sheets (APPROVED or INVOICED). Resolves opportunity from the line or
+        from the engagement. Amounts are grouped by expense category when rolling up (each line carries
+        its category); totals land on ``consulting_fee_expenses`` by month of date_incurred.
+
+        Currency: line amounts are converted to the opportunity's currency when it differs from the line
+        currency, then to the forecast delivery center currency when opportunity currency differs from DC.
+        """
+        from app.models.expense import ExpenseLine, ExpenseSheet
+
+        q = (
+            select(ExpenseLine, Opportunity)
+            .join(ExpenseSheet, ExpenseLine.expense_sheet_id == ExpenseSheet.id)
+            .outerjoin(Engagement, ExpenseLine.engagement_id == Engagement.id)
+            .join(
+                Opportunity,
+                Opportunity.id == func.coalesce(ExpenseLine.opportunity_id, Engagement.opportunity_id),
+            )
+            .where(
+                ExpenseSheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                ExpenseLine.billable.is_(True),
+                Opportunity.delivery_center_id == forecast_dc_id,
+                ExpenseLine.date_incurred.isnot(None),
+                ExpenseLine.date_incurred >= range_start,
+                ExpenseLine.date_incurred <= range_end,
+                ExpenseLine.expense_category_id.isnot(None),
+            )
+        )
+        res = await self.session.execute(q)
+        dc_curr = (dc_currency or "USD").upper()
+        for line, opp in res.all():
+            mk = _month_key(line.date_incurred)
+            amt = Decimal(str(line.amount or 0))
+            if amt == 0:
+                continue
+            line_curr = (line.line_currency or "USD").upper()
+            opp_curr = (opp.default_currency or "USD").upper()
+            if line_curr != opp_curr:
+                amt = Decimal(str(await convert_currency(float(amt), line_curr, opp_curr, self.session)))
+            if opp_curr != dc_curr:
+                amt = Decimal(str(await convert_currency(float(amt), opp_curr, dc_curr, self.session)))
+            buckets["consulting_fee_expenses"][mk].amount += amt
+            buckets["consulting_fee_expenses"][mk].actuals_weight += amt
+
+    async def _add_approved_employee_expense_lines(
+        self,
+        buckets: dict[str, dict[str, MonthBucket]],
+        forecast_dc_id: UUID,
+        range_start: date,
+        range_end: date,
+        dc_currency: str,
+    ) -> None:
+        """Roll up approved expense lines into expense_employee_cat_{id} month buckets (forecast DC currency)."""
+        from app.models.expense import ExpenseLine, ExpenseSheet
+        from app.financial_forecast.definition import employee_expense_row_key
+
+        q = (
+            select(ExpenseLine, ExpenseSheet, Engagement, Opportunity)
+            .join(ExpenseSheet, ExpenseLine.expense_sheet_id == ExpenseSheet.id)
+            .outerjoin(Engagement, ExpenseLine.engagement_id == Engagement.id)
+            .join(Opportunity, Opportunity.id == func.coalesce(ExpenseLine.opportunity_id, Engagement.opportunity_id))
+            .where(
+                ExpenseSheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                Opportunity.delivery_center_id == forecast_dc_id,
+                ExpenseLine.date_incurred.isnot(None),
+                ExpenseLine.date_incurred >= range_start,
+                ExpenseLine.date_incurred <= range_end,
+                ExpenseLine.expense_category_id.isnot(None),
+            )
+        )
+        res = await self.session.execute(q)
+        for line, _sheet, _eng, _opp in res.all():
+            rk = employee_expense_row_key(line.expense_category_id)
+            mk = _month_key(line.date_incurred)
+            amt = Decimal(str(line.amount or 0))
+            if amt == 0:
+                continue
+            lc = (line.line_currency or "USD").upper()
+            amt_dc = Decimal(str(await convert_currency(float(amt), lc, dc_currency, self.session)))
+            buckets[rk][mk].amount += amt_dc
+            buckets[rk][mk].actuals_weight += amt_dc
+
     async def fetch_auto_grid(
         self,
         forecast_dc_id: UUID,
@@ -220,9 +311,13 @@ class FinancialForecastRepository:
         await self._add_cogs_intercompany_labor(buckets, forecast_dc_id, range_start, range_end, metric, dc_curr)
         await self._add_cogs_subcontract(buckets, forecast_dc_id, range_start, range_end, metric, dc_curr)
 
-        # Static zeros
-        for mk in self._months_in_range(range_start, range_end):
-            buckets["consulting_fee_expenses"][mk].amount += Decimal("0")
+        await self._add_consulting_fee_expenses(
+            buckets, forecast_dc_id, range_start, range_end, dc_curr
+        )
+
+        await self._add_approved_employee_expense_lines(
+            buckets, forecast_dc_id, range_start, range_end, dc_curr
+        )
 
         return buckets
 

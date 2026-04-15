@@ -14,6 +14,7 @@ from app.schemas.engagement import (
     EngagementWeeklyHoursCreate, EngagementWeeklyHoursResponse,
     EngagementPhaseCreate, EngagementPhaseUpdate, EngagementPhaseResponse,
     EngagementTimesheetApproversUpdate, EngagementTimesheetApproverResponse,
+    EngagementExpenseApproversUpdate, EngagementExpenseApproverResponse,
     AutoFillRequest,
     ApprovedHoursByWeekResponse,
 )
@@ -86,7 +87,15 @@ class EngagementController(BaseController):
                 engagement_id, data.employee_ids
             )
         ]
-    
+
+    async def update_expense_approvers(
+        self, engagement_id: UUID, data: EngagementExpenseApproversUpdate
+    ) -> list[EngagementExpenseApproverResponse]:
+        return [
+            EngagementExpenseApproverResponse(**a)
+            for a in await self.engagement_service.update_expense_approvers(engagement_id, data.employee_ids)
+        ]
+
     async def create_phase(
         self,
         engagement_id: UUID,

@@ -37,6 +37,12 @@ from app.models import (
     FinancialForecastExpenseCell,
     FinancialForecastLineOverride,
     FinancialForecastChangeEvent,
+    ExpenseCategory,
+    ExpenseSheet,
+    ExpenseLine,
+    ExpenseStatusHistory,
+    ExpenseReceipt,
+    EngagementExpenseApprover,
 )
 
 # this is the Alembic Config object, which provides

@@ -34,6 +34,9 @@ from app.models.financial_forecast import (
     FinancialForecastLineOverride,
     FinancialForecastChangeEvent,
 )
+from app.models.expense_category import ExpenseCategory
+from app.models.expense import ExpenseSheet, ExpenseLine, ExpenseStatusHistory, ExpenseReceipt
+from app.models.engagement_expense_approver import EngagementExpenseApprover
 
 __all__ = [
     "Employee",
@@ -73,6 +76,12 @@ __all__ = [
     "FinancialForecastExpenseCell",
     "FinancialForecastLineOverride",
     "FinancialForecastChangeEvent",
+    "ExpenseCategory",
+    "ExpenseSheet",
+    "ExpenseLine",
+    "ExpenseStatusHistory",
+    "ExpenseReceipt",
+    "EngagementExpenseApprover",
 ]
 
 

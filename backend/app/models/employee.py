@@ -51,5 +51,6 @@ class Employee(Base):
     delivery_center = relationship("DeliveryCenter")
     owned_opportunities = relationship("Opportunity", foreign_keys="Opportunity.opportunity_owner_id", back_populates="opportunity_owner")
     timesheets = relationship("Timesheet", back_populates="employee", foreign_keys="Timesheet.employee_id")
+    expense_sheets = relationship("ExpenseSheet", back_populates="employee", foreign_keys="ExpenseSheet.employee_id")
 
 
