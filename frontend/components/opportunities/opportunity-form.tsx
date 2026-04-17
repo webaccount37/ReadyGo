@@ -63,7 +63,7 @@ export function OpportunityForm({
     account_id: initialData?.account_id || "",
     start_date: initialData?.start_date || "",
     end_date: initialData?.end_date || "",
-    status: initialData?.status || "qualified",
+    status: initialData?.status || "discovery",
     billing_term_id: initialData?.billing_term_id || "",
     description: initialData?.description || "",
     utilization: initialData?.utilization,
@@ -211,15 +211,18 @@ export function OpportunityForm({
   // Calculate probability from status
   const calculateProbability = (status: string): number => {
     const probabilityMap: Record<string, number> = {
+      discovery: 10,
       qualified: 25,
       proposal: 50,
       negotiation: 80,
       won: 100,
+      lost: 0,
+      cancelled: 0,
     };
     return probabilityMap[status] || 0;
   };
   
-  const probability = useMemo(() => calculateProbability(formData.status || "qualified"), [formData.status]);
+  const probability = useMemo(() => calculateProbability(formData.status || "discovery"), [formData.status]);
 
   // Auto-calculate Forecast Values when Status, Default Currency, Probability, or Deal Value changes
   useEffect(() => {
@@ -395,8 +398,9 @@ export function OpportunityForm({
               status: e.target.value as OpportunityCreate["status"],
             })
           }
-          className="[&>option[value='qualified']]:bg-cyan-100 [&>option[value='qualified']]:text-cyan-800 [&>option[value='proposal']]:bg-yellow-100 [&>option[value='proposal']]:text-yellow-800 [&>option[value='negotiation']]:bg-orange-100 [&>option[value='negotiation']]:text-orange-800 [&>option[value='won']]:bg-green-100 [&>option[value='won']]:text-green-800 [&>option[value='lost']]:bg-red-100 [&>option[value='lost']]:text-red-800 [&>option[value='cancelled']]:bg-gray-100 [&>option[value='cancelled']]:text-gray-800"
+          className="[&>option[value='discovery']]:bg-blue-100 [&>option[value='discovery']]:text-blue-800 [&>option[value='qualified']]:bg-cyan-100 [&>option[value='qualified']]:text-cyan-800 [&>option[value='proposal']]:bg-yellow-100 [&>option[value='proposal']]:text-yellow-800 [&>option[value='negotiation']]:bg-orange-100 [&>option[value='negotiation']]:text-orange-800 [&>option[value='won']]:bg-green-100 [&>option[value='won']]:text-green-800 [&>option[value='lost']]:bg-red-100 [&>option[value='lost']]:text-red-800 [&>option[value='cancelled']]:bg-gray-100 [&>option[value='cancelled']]:text-gray-800"
         >
+          <option value="discovery">Discovery</option>
           <option value="qualified">Qualified</option>
           <option value="proposal">Proposal</option>
           <option value="negotiation">Negotiation</option>

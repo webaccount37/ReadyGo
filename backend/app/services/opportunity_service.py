@@ -43,6 +43,7 @@ class OpportunityService(BaseService):
     def calculate_probability_from_status(status: OpportunityStatus) -> float:
         """Calculate probability percentage based on status."""
         probability_map = {
+            OpportunityStatus.DISCOVERY: 10.0,
             OpportunityStatus.QUALIFIED: 25.0,
             OpportunityStatus.PROPOSAL: 50.0,
             OpportunityStatus.NEGOTIATION: 80.0,
@@ -99,7 +100,7 @@ class OpportunityService(BaseService):
         opportunity_dict['deal_creation_date'] = date.today()
         
         # Calculate probability from status
-        status = opportunity_dict.get('status', OpportunityStatus.QUALIFIED)
+        status = opportunity_dict.get('status', OpportunityStatus.DISCOVERY)
         opportunity_dict['probability'] = self.calculate_probability_from_status(status)
         
         # Calculate deal_value_usd if deal_value is provided

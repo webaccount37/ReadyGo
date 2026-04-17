@@ -38,6 +38,7 @@ const DC_COLORS = ["#2563eb", "#16a34a", "#ca8a04", "#dc2626", "#9333ea", "#0891
 
 /** Pipeline mix pie: all statuses, fixed colors per status. */
 const PIPELINE_MIX_PIE_COLORS: Record<string, string> = {
+  discovery: "#2563eb",
   qualified: "#0284c7",
   proposal: "#0d9488",
   negotiation: "#d97706",

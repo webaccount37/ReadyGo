@@ -37,6 +37,7 @@ def _get_week_start(d: date) -> date:
 
 # Probability map matching OpportunityService
 PROBABILITY_MAP = {
+    OpportunityStatus.DISCOVERY: 10.0,
     OpportunityStatus.QUALIFIED: 25.0,
     OpportunityStatus.PROPOSAL: 50.0,
     OpportunityStatus.NEGOTIATION: 80.0,

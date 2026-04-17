@@ -13,6 +13,7 @@ from app.db.base import Base
 
 class OpportunityStatus(str, enum.Enum):
     """Opportunity status enumeration."""
+    DISCOVERY = "discovery"
     QUALIFIED = "qualified"
     PROPOSAL = "proposal"
     NEGOTIATION = "negotiation"
@@ -58,7 +59,7 @@ class Opportunity(Base):
     status = Column(
         SQLEnum(OpportunityStatus, values_callable=lambda x: [e.value for e in OpportunityStatus]),
         nullable=False,
-        default=OpportunityStatus.QUALIFIED
+        default=OpportunityStatus.DISCOVERY
     )
     billing_term_id = Column(UUID(as_uuid=True), ForeignKey("billing_terms.id"), nullable=False, index=True)
     description = Column(String(2000), nullable=True)

@@ -188,42 +188,6 @@ function OpportunitiesPageContent() {
     return new Date(dateStr).toLocaleDateString();
   };
 
-  // Compute probability from status (matches form logic); used for Forecast $ display
-  const getProbabilityFromStatus = (status: string | undefined): number => {
-    const map: Record<string, number> = {
-      qualified: 25,
-      proposal: 50,
-      negotiation: 80,
-      won: 100,
-    };
-    return status ? (map[status] ?? 0) : 0;
-  };
-
-  // Compute Forecast $ from status + deal_value_usd (matches Edit form; avoids stale stored value)
-  const getForecastDisplayValue = (
-    opportunity: { status?: string; deal_value_usd?: string | number }
-  ): string | number | undefined => {
-    const prob = getProbabilityFromStatus(opportunity.status);
-    const dealUsd = opportunity.deal_value_usd;
-    if (prob <= 0 || dealUsd == null || dealUsd === "") return undefined;
-    const num = typeof dealUsd === "string" ? parseFloat(dealUsd) : dealUsd;
-    if (isNaN(num) || num <= 0) return undefined;
-    return (num * prob / 100).toFixed(2);
-  };
-
-  // Compute Forecast Value in default currency (matches Edit form; avoids stale stored value)
-  const getForecastDisplayValueInCurrency = (
-    opportunity: { status?: string; deal_value?: string | number }
-  ): string | number | undefined => {
-    const prob = getProbabilityFromStatus(opportunity.status);
-    const dealVal = opportunity.deal_value;
-    if (prob <= 0 || dealVal == null || dealVal === "") return undefined;
-    const num = typeof dealVal === "string" ? parseFloat(dealVal) : dealVal;
-    if (isNaN(num) || num <= 0) return undefined;
-    return (num * prob / 100).toFixed(2);
-  };
-
-
   return (
     <div>
       <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4 mb-6">
@@ -366,9 +330,15 @@ function OpportunitiesPageContent() {
                                     ? "bg-yellow-500"
                                     : opportunity.status === "qualified"
                                     ? "bg-cyan-500"
-                                    : "bg-blue-500" // discovery
+                                    : opportunity.status === "discovery"
+                                    ? "bg-blue-500"
+                                    : "bg-slate-400"
                                 )}
-                                title={opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1)}
+                                title={
+                                  opportunity.status
+                                    ? opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1)
+                                    : "—"
+                                }
                               />
                             </td>
                             <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
@@ -552,10 +522,17 @@ function OpportunitiesPageContent() {
                                       ? "bg-yellow-100 text-yellow-800"
                                       : opportunity.status === "qualified"
                                       ? "bg-cyan-100 text-cyan-800"
-                                      : "bg-blue-100 text-blue-800" // discovery
+                                      : opportunity.status === "discovery"
+                                      ? "bg-blue-100 text-blue-800"
+                                      : "bg-slate-100 text-slate-800"
                                   }`}
                                 >
-                                  {highlightText(opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1), searchQuery)}
+                                  {highlightText(
+                                    opportunity.status
+                                      ? opportunity.status.charAt(0).toUpperCase() + opportunity.status.slice(1)
+                                      : "—",
+                                    searchQuery
+                                  )}
                                 </span>
                               </div>
                             </div>

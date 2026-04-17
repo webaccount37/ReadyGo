@@ -23,7 +23,7 @@ class OpportunityBase(BaseModel):
     account_id: UUID
     start_date: date
     end_date: date
-    status: OpportunityStatus = OpportunityStatus.QUALIFIED
+    status: OpportunityStatus = OpportunityStatus.DISCOVERY
     billing_term_id: UUID
     description: Optional[str] = Field(None, max_length=2000)
     utilization: Optional[float] = Field(None, ge=0, le=100)
@@ -56,6 +56,8 @@ class OpportunityCreate(OpportunityBase):
     def normalize_enum_values(cls, data):
         """Normalize enum values to lowercase strings before validation."""
         if isinstance(data, dict):
+            if 'status' in data and isinstance(data['status'], str):
+                data['status'] = data['status'].lower()
             # Normalize win_probability
             if 'win_probability' in data and isinstance(data['win_probability'], str):
                 data['win_probability'] = data['win_probability'].lower()
@@ -105,6 +107,8 @@ class OpportunityUpdate(BaseModel):
     def normalize_enum_values(cls, data):
         """Normalize enum values to lowercase strings before validation."""
         if isinstance(data, dict):
+            if 'status' in data and isinstance(data['status'], str):
+                data['status'] = data['status'].lower()
             # Normalize win_probability
             if 'win_probability' in data and isinstance(data['win_probability'], str):
                 data['win_probability'] = data['win_probability'].lower()

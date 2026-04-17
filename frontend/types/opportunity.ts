@@ -2,7 +2,14 @@
  * Opportunity types matching backend schemas.
  */
 
-export type OpportunityStatus = "qualified" | "proposal" | "negotiation" | "won" | "lost" | "cancelled";
+export type OpportunityStatus =
+  | "discovery"
+  | "qualified"
+  | "proposal"
+  | "negotiation"
+  | "won"
+  | "lost"
+  | "cancelled";
 export type Accountability = "full_ownership" | "mgmt_accountable" | "mgmt_advisory" | "staff_aug_limited";
 export type StrategicImportance = "critical" | "high" | "medium" | "low";
 

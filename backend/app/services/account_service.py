@@ -17,6 +17,7 @@ from app.models.opportunity import OpportunityStatus
 
 # Must match frontend getProbabilityFromStatus() exactly for consistent Forecast $
 _PROBABILITY_FROM_STATUS = {
+    OpportunityStatus.DISCOVERY: 10.0,
     OpportunityStatus.QUALIFIED: 25.0,
     OpportunityStatus.PROPOSAL: 50.0,
     OpportunityStatus.NEGOTIATION: 80.0,
