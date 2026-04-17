@@ -276,18 +276,21 @@ class OpportunityService(BaseService):
         
         if account_id:
             opportunities = await self.opportunity_repo.list_by_account(account_id, skip, limit)
+            total = await self.opportunity_repo.count_by_account(account_id)
         elif status:
             try:
                 status_enum = OpportunityStatus(status)
                 opportunities = await self.opportunity_repo.list_by_status(status_enum, skip, limit)
+                total = await self.opportunity_repo.count_by_status(status_enum)
             except ValueError:
                 opportunities = []
+                total = 0
         elif start_date or end_date:
             opportunities = await self.opportunity_repo.list_by_date_range(start_date, end_date, skip, limit)
+            total = await self.opportunity_repo.count_by_date_range(start_date, end_date)
         else:
             opportunities = await self.opportunity_repo.list(skip=skip, limit=limit)
-        
-        total = len(opportunities)
+            total = await self.opportunity_repo.count()
         responses = []
         for opp in opportunities:
             responses.append(await self._to_response(opp, include_plan_actuals=True))
@@ -301,7 +304,7 @@ class OpportunityService(BaseService):
     ) -> tuple[List[OpportunityResponse], int]:
         """List child opportunities of a parent."""
         opportunities = await self.opportunity_repo.list_child_opportunities(parent_id, skip, limit)
-        total = len(opportunities)
+        total = await self.opportunity_repo.count_child_opportunities(parent_id)
         responses = []
         for opp in opportunities:
             responses.append(await self._to_response(opp))

@@ -5,7 +5,7 @@ Employee repository for database operations.
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, or_
+from sqlalchemy import select, and_, or_, func
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
@@ -63,6 +63,33 @@ class EmployeeRepository(BaseRepository[Employee]):
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def count(self, **filters) -> int:
+        """Count employees matching optional column filters (same keys as list())."""
+        query = select(func.count(Employee.id))
+        for key, value in filters.items():
+            if hasattr(self.model, key):
+                query = query.where(getattr(self.model, key) == value)
+        result = await self.session.execute(query)
+        return int(result.scalar_one() or 0)
+
+    async def count_by_status(self, status: EmployeeStatus) -> int:
+        result = await self.session.execute(
+            select(func.count(Employee.id)).where(Employee.status == status)
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_by_type(self, employee_type: EmployeeType) -> int:
+        result = await self.session.execute(
+            select(func.count(Employee.id)).where(Employee.employee_type == employee_type)
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_billable(self) -> int:
+        result = await self.session.execute(
+            select(func.count(Employee.id)).where(Employee.billable == True)
+        )
+        return int(result.scalar_one() or 0)
     
     async def list_by_status(
         self,

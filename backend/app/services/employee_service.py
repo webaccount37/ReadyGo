@@ -86,20 +86,24 @@ class EmployeeService(BaseService):
             try:
                 status_enum = EmployeeStatus(status)
                 employees = await self.employee_repo.list_by_status(status_enum, skip, limit)
+                total = await self.employee_repo.count_by_status(status_enum)
             except ValueError:
                 employees = []
+                total = 0
         elif employee_type:
             try:
                 type_enum = EmployeeType(employee_type)
                 employees = await self.employee_repo.list_by_type(type_enum, skip, limit)
+                total = await self.employee_repo.count_by_type(type_enum)
             except ValueError:
                 employees = []
+                total = 0
         elif billable is True:
             employees = await self.employee_repo.list_billable(skip, limit)
+            total = await self.employee_repo.count_billable()
         else:
             employees = await self.employee_repo.list(skip=skip, limit=limit)
-        
-        total = len(employees)
+            total = await self.employee_repo.count()
         # Build responses without relationships (set to empty lists to avoid lazy loading issues)
         responses = []
         for emp in employees:

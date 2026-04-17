@@ -40,6 +40,48 @@ class OpportunityRepository(BaseRepository[Opportunity]):
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
+
+    async def count(self, **filters) -> int:
+        """Count opportunities matching optional column filters (same keys as list())."""
+        query = select(func.count(Opportunity.id))
+        for key, value in filters.items():
+            if hasattr(Opportunity, key):
+                query = query.where(getattr(Opportunity, key) == value)
+        result = await self.session.execute(query)
+        return int(result.scalar_one() or 0)
+
+    async def count_by_account(self, account_id: UUID) -> int:
+        result = await self.session.execute(
+            select(func.count(Opportunity.id)).where(Opportunity.account_id == account_id)
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_by_status(self, status: OpportunityStatus) -> int:
+        result = await self.session.execute(
+            select(func.count(Opportunity.id)).where(Opportunity.status == status)
+        )
+        return int(result.scalar_one() or 0)
+
+    async def count_by_date_range(
+        self,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> int:
+        query = select(func.count(Opportunity.id))
+        if start_date:
+            query = query.where(Opportunity.start_date >= start_date)
+        if end_date:
+            query = query.where(Opportunity.end_date <= end_date)
+        result = await self.session.execute(query)
+        return int(result.scalar_one() or 0)
+
+    async def count_child_opportunities(self, parent_id: UUID) -> int:
+        result = await self.session.execute(
+            select(func.count(Opportunity.id)).where(
+                Opportunity.parent_opportunity_id == parent_id
+            )
+        )
+        return int(result.scalar_one() or 0)
     
     async def get(self, id: UUID) -> Optional[Opportunity]:
         """Get opportunity by ID with account relationship loaded."""

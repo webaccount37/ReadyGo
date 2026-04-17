@@ -74,8 +74,14 @@ class Opportunity(Base):
     
     # New deal/forecast fields
     probability = Column(Float, nullable=True)  # Read-only, calculated from status
-    accountability = Column(SQLEnum(Accountability), nullable=True)
-    strategic_importance = Column(SQLEnum(StrategicImportance), nullable=True)
+    accountability = Column(
+        SQLEnum(Accountability, values_callable=lambda x: [e.value for e in Accountability]),
+        nullable=True,
+    )
+    strategic_importance = Column(
+        SQLEnum(StrategicImportance, values_callable=lambda x: [e.value for e in StrategicImportance]),
+        nullable=True,
+    )
     deal_creation_date = Column(Date, nullable=True)  # Read-only, set on creation
     deal_value = Column(Numeric(15, 2), nullable=True)  # Generic currency field
     deal_value_usd = Column(Numeric(15, 2), nullable=True)  # Calculated field

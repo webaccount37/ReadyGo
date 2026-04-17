@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, Suspense } from "react";
+import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueries } from "@tanstack/react-query";
 import {
@@ -72,6 +72,13 @@ function OpportunitiesPageContent() {
 
   // Fetch related data for display names
   const { data: accountsData } = useAccounts({ limit: 100 });
+
+  /** Prefer API account_name; client account list is capped and would show raw UUIDs for missing rows. */
+  const accountLabel = useCallback(
+    (opportunity: { account_name?: string | null; account_id?: string }) =>
+      opportunity.account_name?.trim() || getAccountName(accountsData, opportunity.account_id),
+    [accountsData]
+  );
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: billingTermsData } = useBillingTerms();
   const { data: employeesData } = useEmployees({ limit: 1000 });
@@ -123,7 +130,7 @@ function OpportunitiesPageContent() {
       const description = (opportunity.description || "").toLowerCase();
       
       // Get display names for searchable fields
-      const accountName = getAccountName(accountsData, opportunity.account_id).toLowerCase();
+      const accountName = accountLabel(opportunity).toLowerCase();
       const parentName = getParentOpportunityName(allOpportunitiesData, opportunity.parent_opportunity_id).toLowerCase();
       const deliveryCenterName = getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id).toLowerCase();
       const ownerName = getEmployeeName(employeesData, opportunity.opportunity_owner_id).toLowerCase();
@@ -167,7 +174,7 @@ function OpportunitiesPageContent() {
         employeeCount.includes(query)
       );
     });
-  }, [data, searchQuery, accountsData, deliveryCentersData, employeesData, allOpportunitiesData, employeeCounts]);
+  }, [data, searchQuery, accountLabel, deliveryCentersData, employeesData, allOpportunitiesData, employeeCounts]);
 
   // Helper functions for formatting display values
   const formatEnumValue = (value: string | undefined): string => {
@@ -292,13 +299,13 @@ function OpportunitiesPageContent() {
                                 )}
                               </div>
                             </td>
-                            <td className="p-1.5 truncate text-xs overflow-hidden" title={getAccountName(accountsData, opportunity.account_id)}>
+                            <td className="p-1.5 truncate text-xs overflow-hidden" title={accountLabel(opportunity)}>
                               <Link
-                                href={`/accounts?search=${encodeURIComponent(getAccountName(accountsData, opportunity.account_id))}`}
+                                href={`/accounts?search=${encodeURIComponent(accountLabel(opportunity))}`}
                                 onClick={(e) => e.stopPropagation()}
                                 className="text-blue-600 hover:text-blue-800 hover:underline"
                               >
-                                {highlightText(getAccountName(accountsData, opportunity.account_id), searchQuery)}
+                                {highlightText(accountLabel(opportunity), searchQuery)}
                               </Link>
                             </td>
                             <td className="p-1.5 truncate text-xs overflow-hidden" title={getParentOpportunityName(allOpportunitiesData, opportunity.parent_opportunity_id)}>
@@ -501,7 +508,7 @@ function OpportunitiesPageContent() {
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">
                                   Account
                                 </div>
-                                <div className="text-sm">{highlightText(opportunity.account_name || opportunity.account_id, searchQuery)}</div>
+                                <div className="text-sm">{highlightText(accountLabel(opportunity), searchQuery)}</div>
                               </div>
                             <div className="flex gap-2">
                               <div>
