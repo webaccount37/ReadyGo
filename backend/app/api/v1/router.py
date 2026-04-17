@@ -11,6 +11,7 @@ from app.api.v1.endpoints import (
     auth,
     auth_refresh,
     debug_auth,
+    dashboard,
     users,
     employees,
     opportunities,
@@ -57,6 +58,12 @@ api_router.include_router(
     opportunities.router,
     prefix="/opportunities",
     tags=["opportunities"],
+    dependencies=[Depends(require_authentication)],
+)
+api_router.include_router(
+    dashboard.router,
+    prefix="/dashboard",
+    tags=["dashboard"],
     dependencies=[Depends(require_authentication)],
 )
 api_router.include_router(

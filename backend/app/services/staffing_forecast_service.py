@@ -4,7 +4,7 @@ Staffing forecast service - aggregates estimate and engagement data for the fore
 
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Literal, Optional
+from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -430,6 +430,7 @@ class StaffingForecastService:
     async def get_employee_utilization(
         self,
         delivery_center_id: Optional[UUID] = None,
+        ytd_mode: Optional[str] = None,
     ) -> dict[str, dict]:
         """
         Get MTD and YTD billable utilization % per employee, using the same logic as
@@ -452,22 +453,35 @@ class StaffingForecastService:
         )
         mtd_month_key = f"{current_year}-{current_month:02d}"
 
-        # YTD: current month + previous 12 months (13 months total)
-        start_year = current_year
-        start_month = current_month - 12
-        while start_month <= 0:
-            start_month += 12
-            start_year -= 1
-        first_of_ytd = date(start_year, start_month, 1)
-        ytd_start = _get_week_start(first_of_ytd)
-        ytd_forecast = await self.get_forecast(
-            start_week=ytd_start,
-            delivery_center_id=delivery_center_id,
-            employee_id=None,
-            billable="both",
-            duration_months=13,
-            period="monthly",
-        )
+        # YTD: rolling (current month + previous 12) unless ytd_mode == "calendar" (Jan–current month, this year)
+        mode = ytd_mode or "rolling"
+        if mode == "calendar":
+            first_of_year = date(current_year, 1, 1)
+            ytd_start = _get_week_start(first_of_year)
+            ytd_forecast = await self.get_forecast(
+                start_week=ytd_start,
+                delivery_center_id=delivery_center_id,
+                employee_id=None,
+                billable="both",
+                duration_months=12,
+                period="monthly",
+            )
+        else:
+            start_year = current_year
+            start_month = current_month - 12
+            while start_month <= 0:
+                start_month += 12
+                start_year -= 1
+            first_of_ytd = date(start_year, start_month, 1)
+            ytd_start = _get_week_start(first_of_ytd)
+            ytd_forecast = await self.get_forecast(
+                start_week=ytd_start,
+                delivery_center_id=delivery_center_id,
+                employee_id=None,
+                billable="both",
+                duration_months=13,
+                period="monthly",
+            )
 
         def _aggregate_by_employee(forecast: dict, month_keys: list[str]) -> dict[str, tuple[float, float]]:
             """Returns { emp_id: (billable_hours_sum, available_hours_sum) }"""
@@ -497,7 +511,14 @@ class StaffingForecastService:
 
         ytd_month_keys: list[str] = []
         if ytd_forecast.get("months"):
-            ytd_month_keys = [f"{m['year']}-{m['month']:02d}" for m in ytd_forecast["months"]]
+            if mode == "calendar":
+                ytd_month_keys = [
+                    f"{m['year']}-{m['month']:02d}"
+                    for m in ytd_forecast["months"]
+                    if m["year"] == current_year and 1 <= m["month"] <= current_month
+                ]
+            else:
+                ytd_month_keys = [f"{m['year']}-{m['month']:02d}" for m in ytd_forecast["months"]]
 
         mtd_agg = _aggregate_by_employee(mtd_forecast, mtd_month_keys)
         ytd_agg = _aggregate_by_employee(ytd_forecast, ytd_month_keys)

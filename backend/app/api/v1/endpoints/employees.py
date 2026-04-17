@@ -65,11 +65,19 @@ async def list_employees(
 @router.get("/utilization", response_model=EmployeeUtilizationResponse)
 async def get_employee_utilization(
     delivery_center_id: UUID | None = Query(None, description="Filter by delivery center"),
+    ytd_mode: str | None = Query(
+        None,
+        description="YTD window: omit or 'rolling' (13-month rolling); 'calendar' = Jan 1 through current month (this year).",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeUtilizationResponse:
     """Get MTD and YTD billable utilization % per employee (same logic as Staffing Forecasts)."""
     service = StaffingForecastService(db)
-    result = await service.get_employee_utilization(delivery_center_id=delivery_center_id)
+    mode = ytd_mode if ytd_mode in (None, "rolling", "calendar") else None
+    result = await service.get_employee_utilization(
+        delivery_center_id=delivery_center_id,
+        ytd_mode=mode,
+    )
     utilization = {
         emp_id: EmployeeUtilizationItem(
             mtd_utilization_pct=v["mtd_utilization_pct"],

@@ -44,7 +44,7 @@ export function useEmployees(
  * Get MTD and YTD utilization % per employee.
  */
 export function useEmployeeUtilization(
-  params?: { delivery_center_id?: string },
+  params?: { delivery_center_id?: string; ytd_mode?: "rolling" | "calendar" },
   options?: Omit<UseQueryOptions<{ utilization: Record<string, { mtd_utilization_pct: number | null; ytd_utilization_pct: number | null }> }>, "queryKey" | "queryFn">
 ) {
   return useQuery({
