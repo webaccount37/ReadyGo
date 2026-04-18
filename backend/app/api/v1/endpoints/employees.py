@@ -49,6 +49,12 @@ async def list_employees(
     status: str = Query(None),
     employee_type: str = Query(None),
     billable: bool = Query(None),
+    search: str = Query(None),
+    sort_by: str = Query(
+        None,
+        description="first_name, last_name, email, role_title, status, employee_type, start_date, end_date, billable, delivery_center",
+    ),
+    sort_order: str = Query("asc"),
     db: AsyncSession = Depends(get_db),
 ) -> EmployeeListResponse:
     """List employees with optional filters."""
@@ -59,6 +65,9 @@ async def list_employees(
         status=status,
         employee_type=employee_type,
         billable=billable,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
 

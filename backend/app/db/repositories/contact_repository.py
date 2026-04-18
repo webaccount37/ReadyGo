@@ -5,15 +5,26 @@ Contact repository for database operations.
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func, or_
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
+from app.db.search_helpers import ilike_pattern, normalize_sort_order
 from app.models.contact import Contact
+from app.models.account import Account
 
 
 class ContactRepository(BaseRepository[Contact]):
     """Repository for contact operations."""
+
+    _SORT_COLUMNS = {
+        "first_name": Contact.first_name,
+        "last_name": Contact.last_name,
+        "email": Contact.email,
+        "phone": Contact.phone,
+        "job_title": Contact.job_title,
+        "account": Account.company_name,
+    }
     
     def __init__(self, session: AsyncSession):
         super().__init__(Contact, session)
@@ -71,18 +82,56 @@ class ContactRepository(BaseRepository[Contact]):
         self,
         skip: int = 0,
         limit: int = 100,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> List[Contact]:
         """List all contacts with pagination."""
-        query = select(Contact).options(selectinload(Contact.account)).offset(skip).limit(limit)
+        query = (
+            select(Contact)
+            .options(selectinload(Contact.account))
+            .join(Account, Contact.account_id == Account.id)
+        )
+        pattern = ilike_pattern(search)
+        if pattern:
+            query = query.where(
+                or_(
+                    Contact.first_name.ilike(pattern, escape="\\"),
+                    Contact.last_name.ilike(pattern, escape="\\"),
+                    Contact.email.ilike(pattern, escape="\\"),
+                    Contact.phone.ilike(pattern, escape="\\"),
+                    Contact.job_title.ilike(pattern, escape="\\"),
+                    Account.company_name.ilike(pattern, escape="\\"),
+                )
+            )
+        sk = sort_by or "last_name"
+        sort_col = Account.company_name if sk == "account" else self._SORT_COLUMNS.get(sk, Contact.last_name)
+        if normalize_sort_order(sort_order) == "desc":
+            query = query.order_by(sort_col.desc().nulls_last(), Contact.first_name.desc())
+        else:
+            query = query.order_by(sort_col.asc().nulls_last(), Contact.first_name.asc())
+        query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def count_all(self) -> int:
+    async def count_all(self, search: Optional[str] = None) -> int:
         """Count all contacts."""
-        from sqlalchemy import func
-        result = await self.session.execute(
-            select(func.count(Contact.id))
+        query = select(func.count(Contact.id)).select_from(Contact).join(
+            Account, Contact.account_id == Account.id
         )
+        pattern = ilike_pattern(search)
+        if pattern:
+            query = query.where(
+                or_(
+                    Contact.first_name.ilike(pattern, escape="\\"),
+                    Contact.last_name.ilike(pattern, escape="\\"),
+                    Contact.email.ilike(pattern, escape="\\"),
+                    Contact.phone.ilike(pattern, escape="\\"),
+                    Contact.job_title.ilike(pattern, escape="\\"),
+                    Account.company_name.ilike(pattern, escape="\\"),
+                )
+            )
+        result = await self.session.execute(query)
         return result.scalar() or 0
     
     async def get(self, id: UUID) -> Optional[Contact]:

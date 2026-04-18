@@ -705,6 +705,9 @@ class EngagementService(BaseService):
         quote_id: Optional[UUID] = None,
         employee_id: Optional[UUID] = None,
         week_start_date: Optional["date"] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> Tuple[List[EngagementResponse], int]:
         """List engagements with pagination.
         When employee_id and week_start_date are both set, only return engagements where
@@ -730,9 +733,15 @@ class EngagementService(BaseService):
             if quote_id:
                 filters["quote_id"] = quote_id
             engagements = await self.engagement_repo.list(
-                skip=skip, limit=limit, include_line_items=True, **filters
+                skip=skip,
+                limit=limit,
+                include_line_items=True,
+                search=search,
+                sort_by=sort_by,
+                sort_order=sort_order,
+                **filters,
             )
-            total = await self.engagement_repo.count(**filters)
+            total = await self.engagement_repo.count(search=search, **filters)
 
         responses = []
         for e in engagements:

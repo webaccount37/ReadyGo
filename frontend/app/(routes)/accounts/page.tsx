@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   useAccounts,
@@ -21,6 +21,8 @@ import { highlightText } from "@/lib/utils/highlight";
 import { getAccountTypeColor, getAccountTypeLabel } from "@/lib/utils/account-type";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh, type SortState } from "@/components/ui/sortable-th";
 
 function AccountsPageContent() {
   const searchParams = useSearchParams();
@@ -32,6 +34,8 @@ function AccountsPageContent() {
   const [editingAccount, setEditingAccount] = useState<string | null>(null);
   const [viewingAccount, setViewingAccount] = useState<Account | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ column: "company_name", direction: "asc" });
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
 
   // Initialize search query from URL parameter
   useEffect(() => {
@@ -40,6 +44,18 @@ function AccountsPageContent() {
       setSearchQuery(searchParam);
     }
   }, [searchParams]);
+
+  useEffect(() => {
+    setSkip(0);
+  }, [debouncedSearch, sort.column, sort.direction]);
+
+  const handleSort = (column: string) => {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
 
   const { data: accountData } = useAccount(accountIdParam || "", false, {
     enabled: !!accountIdParam,
@@ -51,33 +67,18 @@ function AccountsPageContent() {
     }
   }, [accountIdParam, accountData]);
 
-  const { data, isLoading, error, refetch } = useAccounts({ skip, limit });
+  const { data, isLoading, error, refetch } = useAccounts({
+    skip,
+    limit,
+    search: debouncedSearch.trim() || undefined,
+    sort_by: sort.column || undefined,
+    sort_order: sort.direction,
+  });
   const createAccount = useCreateAccount();
   const updateAccount = useUpdateAccount();
   const deleteAccount = useDeleteAccount();
 
-  const filteredItems = useMemo(() => {
-    if (!data?.items || !searchQuery.trim()) {
-      return data?.items || [];
-    }
-    const query = searchQuery.toLowerCase();
-    return data.items.filter((account) => {
-      const company = (account.company_name || "").toLowerCase();
-      const industry = (account.industry || "").toLowerCase();
-      const city = (account.city || "").toLowerCase();
-      const region = (account.region || "").toLowerCase();
-      const country = (account.country || "").toLowerCase();
-      const type = (account.type || "").toLowerCase();
-      return (
-        company.includes(query) ||
-        industry.includes(query) ||
-        city.includes(query) ||
-        region.includes(query) ||
-        country.includes(query) ||
-        type.includes(query)
-      );
-    });
-  }, [data, searchQuery]);
+  const rows = data?.items ?? [];
 
   const handleCreate = async (data: AccountCreate | AccountUpdate) => {
     try {
@@ -177,7 +178,7 @@ function AccountsPageContent() {
               </div>
             </CardHeader>
             <CardContent className="px-2">
-              {filteredItems.length > 0 ? (
+              {rows.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
                     <div className="hidden md:block w-full overflow-hidden">
@@ -195,9 +196,9 @@ function AccountsPageContent() {
                         </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Company Name">Company</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account Type">Type</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Location">Location</th>
+                            <SortableTh label="Company" column="company_name" sort={sort} onSort={handleSort} title="Company Name" />
+                            <SortableTh label="Type" column="type" sort={sort} onSort={handleSort} title="Account Type" />
+                            <SortableTh label="Location" column="city" sort={sort} onSort={handleSort} title="City" />
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Contact Count">Contacts</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Count">Opps</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Forecast Value (USD)">Forecast $</th>
@@ -207,7 +208,7 @@ function AccountsPageContent() {
                           </tr>
                         </thead>
                         <tbody>
-                          {filteredItems.map((account) => (
+                          {rows.map((account) => (
                             <tr
                               key={account.id}
                               className="border-b hover:bg-gray-50 cursor-pointer"
@@ -321,7 +322,7 @@ function AccountsPageContent() {
 
                     {/* Mobile Card View */}
                     <div className="md:hidden space-y-4">
-                      {filteredItems.map((account) => (
+                      {rows.map((account) => (
                         <Card
                           key={account.id}
                           className="cursor-pointer"
@@ -436,11 +437,11 @@ function AccountsPageContent() {
                 ) : (
                   <div className="text-center py-12 text-gray-500">
                     <p>
-                      {searchQuery.trim() 
-                        ? `No accounts found matching "${searchQuery}"` 
+                      {debouncedSearch.trim()
+                        ? `No accounts found matching "${debouncedSearch}"`
                         : "No accounts found."}
                     </p>
-                    {!searchQuery.trim() && (
+                    {!debouncedSearch.trim() && (
                       <Button
                         className="mt-4"
                         onClick={() => setIsCreateOpen(true)}
@@ -453,7 +454,7 @@ function AccountsPageContent() {
             </CardContent>
           </Card>
 
-          {data && data.total > limit && !searchQuery.trim() && (
+          {data && data.total > limit && (
             <div className="flex justify-center items-center gap-4 mt-4">
               <Button
                 variant="outline"

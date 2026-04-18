@@ -26,6 +26,9 @@ export function useRoles(
   params?: {
     skip?: number;
     limit?: number;
+    search?: string;
+    sort_by?: string;
+    sort_order?: "asc" | "desc";
   },
   options?: Omit<UseQueryOptions<RoleListResponse>, "queryKey" | "queryFn">
 ) {

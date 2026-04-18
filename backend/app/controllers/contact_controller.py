@@ -43,11 +43,17 @@ class ContactController(BaseController):
         self,
         skip: int = 0,
         limit: int = 100,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> ContactListResponse:
         """List all contacts with pagination."""
         contacts, total = await self.contact_service.list_contacts(
             skip=skip,
             limit=limit,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
         return ContactListResponse(items=contacts, total=total)
     

@@ -11,7 +11,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import and_, case, exists, func, or_, select
+from sqlalchemy import and_, case, exists, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
@@ -618,17 +618,6 @@ class FinancialForecastRepository:
     ) -> None:
         """Invoice DC != forecast DC; staffing + actuals rules from brief."""
         has_eng = exists(select(1).where(Engagement.opportunity_id == Opportunity.id))
-        has_ts = exists(
-            select(1)
-            .select_from(TimesheetApprovedSnapshot)
-            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
-            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
-            .where(
-                _timesheet_entry_belongs_to_opportunity(Opportunity.id),
-                TimesheetEntry.engagement_line_item_id.isnot(None),
-                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
-            )
-        )
         q_opps = select(Opportunity.id).where(
             Opportunity.delivery_center_id != forecast_dc_id,
             Opportunity.status.notin_([OpportunityStatus.LOST, OpportunityStatus.CANCELLED]),
@@ -636,7 +625,6 @@ class FinancialForecastRepository:
             Opportunity.start_date <= range_end,
             _opportunity_has_quotable_quote(),
             has_eng,
-            has_ts,
         )
         opp_ids = [r[0] for r in (await self.session.execute(q_opps)).all()]
         if not opp_ids:
@@ -730,6 +718,7 @@ class FinancialForecastRepository:
             metric,
             dc_currency,
             invoice_dc_equals_forecast=True,
+            restrict_opportunity_invoice_dc=False,
             ts_employee_dc_match=True,
             ts_employee_type=EmployeeType.FULL_TIME,
             plan_employee_dc_match=True,
@@ -756,6 +745,7 @@ class FinancialForecastRepository:
             metric,
             dc_currency,
             invoice_dc_equals_forecast=True,
+            restrict_opportunity_invoice_dc=True,
             ts_employee_dc_match=False,
             ts_employee_type=None,
             plan_employee_dc_match=False,
@@ -782,6 +772,7 @@ class FinancialForecastRepository:
             metric,
             dc_currency,
             invoice_dc_equals_forecast=True,
+            restrict_opportunity_invoice_dc=False,
             ts_employee_dc_match=True,
             ts_employee_type=EmployeeType.CONTRACT,
             plan_employee_dc_match=True,
@@ -801,6 +792,7 @@ class FinancialForecastRepository:
         dc_currency: str,
         *,
         invoice_dc_equals_forecast: bool,
+        restrict_opportunity_invoice_dc: bool = True,
         ts_employee_dc_match: bool,
         ts_employee_type: EmployeeType | None,
         plan_employee_dc_match: bool,
@@ -809,18 +801,11 @@ class FinancialForecastRepository:
         plan_require_employee_for_intercompany: bool,
     ) -> None:
         has_eng = exists(select(1).where(Engagement.opportunity_id == Opportunity.id))
-        has_ts = exists(
-            select(1)
-            .select_from(TimesheetApprovedSnapshot)
-            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
-            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
-            .where(
-                _timesheet_entry_belongs_to_opportunity(Opportunity.id),
-                TimesheetEntry.engagement_line_item_id.isnot(None),
-                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
-            )
+        dc_pred = (
+            (Opportunity.delivery_center_id == forecast_dc_id if invoice_dc_equals_forecast else Opportunity.delivery_center_id != forecast_dc_id)
+            if restrict_opportunity_invoice_dc
+            else true()
         )
-        dc_pred = Opportunity.delivery_center_id == forecast_dc_id if invoice_dc_equals_forecast else Opportunity.delivery_center_id != forecast_dc_id
         q_opps = select(Opportunity.id).where(
             dc_pred,
             Opportunity.status.notin_([OpportunityStatus.LOST, OpportunityStatus.CANCELLED]),
@@ -828,7 +813,6 @@ class FinancialForecastRepository:
             Opportunity.start_date <= range_end,
             _opportunity_has_quotable_quote(),
             has_eng,
-            has_ts,
         )
         opp_ids = [r[0] for r in (await self.session.execute(q_opps)).all()]
         if not opp_ids:

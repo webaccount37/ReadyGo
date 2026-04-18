@@ -32,6 +32,9 @@ export function useOpportunities(
     status?: string;
     start_date?: string;
     end_date?: string;
+    search?: string;
+    sort_by?: string;
+    sort_order?: "asc" | "desc";
   },
   options?: Omit<UseQueryOptions<OpportunityListResponse>, "queryKey" | "queryFn">
 ) {

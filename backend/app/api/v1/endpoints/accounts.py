@@ -33,6 +33,12 @@ async def list_accounts(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     region: str = Query(None),
+    search: str = Query(None, description="Search company, industry, location, type"),
+    sort_by: str = Query(
+        None,
+        description="company_name, industry, city, region, country, type",
+    ),
+    sort_order: str = Query("asc", description="asc or desc"),
     db: AsyncSession = Depends(get_db),
 ) -> AccountListResponse:
     """List accounts with optional filters."""
@@ -41,6 +47,9 @@ async def list_accounts(
         skip=skip,
         limit=limit,
         region=region,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
 

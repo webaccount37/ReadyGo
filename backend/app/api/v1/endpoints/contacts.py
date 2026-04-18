@@ -32,6 +32,12 @@ async def create_contact(
 async def list_contacts(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    search: str = Query(None),
+    sort_by: str = Query(
+        None,
+        description="first_name, last_name, email, job_title, account",
+    ),
+    sort_order: str = Query("asc"),
     db: AsyncSession = Depends(get_db),
 ) -> ContactListResponse:
     """List all contacts with pagination."""
@@ -39,6 +45,9 @@ async def list_contacts(
     return await controller.list_contacts(
         skip=skip,
         limit=limit,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
 

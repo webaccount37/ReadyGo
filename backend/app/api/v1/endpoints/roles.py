@@ -32,6 +32,9 @@ async def create_role(
 async def list_roles(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    search: str = Query(None),
+    sort_by: str = Query(None, description="role_name"),
+    sort_order: str = Query("asc"),
     db: AsyncSession = Depends(get_db),
 ) -> RoleListResponse:
     """List roles with optional filters."""
@@ -39,6 +42,9 @@ async def list_roles(
     return await controller.list_roles(
         skip=skip,
         limit=limit,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
 

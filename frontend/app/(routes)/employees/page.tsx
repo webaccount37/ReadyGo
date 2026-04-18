@@ -23,6 +23,8 @@ import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
 import { useMemo } from "react";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh, type SortState } from "@/components/ui/sortable-th";
 
 function EmployeesPageContent() {
   const searchParams = useSearchParams();
@@ -32,6 +34,8 @@ function EmployeesPageContent() {
   const [editingEmployee, setEditingEmployee] = useState<string | null>(null);
   const [viewingEmployee, setViewingEmployee] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ column: "last_name", direction: "asc" });
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
   const [expandedEmployeeId, setExpandedEmployeeId] = useState<string | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
 
@@ -59,7 +63,25 @@ function EmployeesPageContent() {
     }
   }, [searchParams]);
 
-  const { data, isLoading, error, refetch } = useEmployees({ skip, limit });
+  useEffect(() => {
+    setSkip(0);
+  }, [debouncedSearch, sort.column, sort.direction]);
+
+  const handleSort = (column: string) => {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
+
+  const { data, isLoading, error, refetch } = useEmployees({
+    skip,
+    limit,
+    search: debouncedSearch.trim() || undefined,
+    sort_by: sort.column || undefined,
+    sort_order: sort.direction,
+  });
   const createEmployee = useCreateEmployee();
   const updateEmployee = useUpdateEmployee();
   const deleteEmployee = useDeleteEmployee();
@@ -147,42 +169,7 @@ function EmployeesPageContent() {
     return dc?.name || code;
   };
 
-  const filteredItems = useMemo(() => {
-    if (!data?.items || !searchQuery.trim()) {
-      return data?.items || [];
-    }
-    const query = searchQuery.toLowerCase();
-    return data.items.filter((employee) => {
-      const name = `${employee.first_name} ${employee.last_name}`.toLowerCase();
-      const email = (employee.email || "").toLowerCase();
-      const type = (employee.employee_type || "").toLowerCase();
-      const status = (employee.status || "").toLowerCase();
-      const role = (employee.role_title || "").toLowerCase();
-      const deliveryCenter = getDeliveryCenterName(employee.delivery_center).toLowerCase();
-      const timezone = (employee.timezone || "").toLowerCase();
-      const icr = employee.internal_cost_rate?.toString().toLowerCase() || "";
-      const ibr = employee.internal_bill_rate?.toString().toLowerCase() || "";
-      const ebr = employee.external_bill_rate?.toString().toLowerCase() || "";
-      
-      // Get opportunities from relationships queries
-      const employeeData = employeeRelationshipsQueries.find(q => q.data?.id === employee.id)?.data;
-      const opportunityNames = employeeData?.opportunities?.map(opp => opp.name.toLowerCase()).join(" ") || "";
-      
-      return (
-        name.includes(query) ||
-        email.includes(query) ||
-        type.includes(query) ||
-        status.includes(query) ||
-        role.includes(query) ||
-        deliveryCenter.includes(query) ||
-        timezone.includes(query) ||
-        icr.includes(query) ||
-        ibr.includes(query) ||
-        ebr.includes(query) ||
-        opportunityNames.includes(query)
-      );
-    });
-  }, [data, searchQuery, employeeRelationshipsQueries, deliveryCentersData]);
+  const rows = data?.items ?? [];
 
   // Helper function to format currency
   const formatCurrency = (value: number | undefined, currency: string = "USD"): string => {
@@ -261,7 +248,7 @@ function EmployeesPageContent() {
               </div>
             </CardHeader>
             <CardContent className="px-2">
-              {filteredItems.length > 0 ? (
+              {rows.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
                     <div className="hidden md:block w-full">
@@ -283,15 +270,15 @@ function EmployeesPageContent() {
                         </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Name">Name</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Email Address">Email</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Type">Type</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Employee Status">Status</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Internal Cost Rate">ICR</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Internal Bill Rate">IBR</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="External Bill Rate">EBR</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Delivery Center">DC</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Timezone">TZ</th>
+                            <SortableTh label="Name" column="last_name" sort={sort} onSort={handleSort} title="Employee Name" />
+                            <SortableTh label="Email" column="email" sort={sort} onSort={handleSort} title="Email Address" />
+                            <SortableTh label="Type" column="employee_type" sort={sort} onSort={handleSort} title="Employee Type" />
+                            <SortableTh label="Status" column="status" sort={sort} onSort={handleSort} title="Employee Status" />
+                            <SortableTh label="ICR" column="internal_cost_rate" sort={sort} onSort={handleSort} title="Internal Cost Rate" />
+                            <SortableTh label="IBR" column="internal_bill_rate" sort={sort} onSort={handleSort} title="Internal Bill Rate" />
+                            <SortableTh label="EBR" column="external_bill_rate" sort={sort} onSort={handleSort} title="External Bill Rate" />
+                            <SortableTh label="DC" column="delivery_center" sort={sort} onSort={handleSort} title="Delivery Center" />
+                            <SortableTh label="TZ" column="timezone" sort={sort} onSort={handleSort} title="Timezone" />
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="MTD Utilization %">MTD Util %</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="YTD Utilization %">YTD Util %</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunities">Opps</th>
@@ -299,7 +286,7 @@ function EmployeesPageContent() {
                           </tr>
                         </thead>
                         <tbody>
-                        {filteredItems.map((employee) => (
+                        {rows.map((employee) => (
                           <tr 
                             key={employee.id} 
                             className="border-b hover:bg-gray-50 cursor-pointer"
@@ -447,7 +434,7 @@ function EmployeesPageContent() {
 
                   {/* Mobile Card View */}
                   <div className="md:hidden space-y-4">
-                    {filteredItems.map((employee) => (
+                    {rows.map((employee) => (
                       <Card 
                         key={employee.id}
                         className="cursor-pointer"
@@ -629,11 +616,11 @@ function EmployeesPageContent() {
                 ) : (
                   <div className="text-center py-12 text-gray-500">
                     <p>
-                      {searchQuery.trim() 
-                        ? `No employees found matching "${searchQuery}"` 
+                      {debouncedSearch.trim() 
+                        ? `No employees found matching "${debouncedSearch}"` 
                         : "No employees found."}
                     </p>
-                    {!searchQuery.trim() && (
+                    {!debouncedSearch.trim() && (
                       <Button
                         className="mt-4"
                         onClick={() => setIsCreateOpen(true)}
@@ -646,7 +633,7 @@ function EmployeesPageContent() {
             </CardContent>
           </Card>
 
-          {data && data.total > limit && !searchQuery.trim() && (
+          {data && data.total > limit && (
             <div className="flex justify-center items-center gap-4 mt-4">
               <Button
                 variant="outline"

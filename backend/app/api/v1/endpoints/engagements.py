@@ -47,6 +47,12 @@ async def list_engagements(
     quote_id: Optional[UUID] = Query(None),
     employee_id: Optional[UUID] = Query(None, description="Filter engagements where employee has resource plan line items"),
     week_start_date: Optional[str] = Query(None, description="When used with employee_id, only engagements whose line items overlap this week (YYYY-MM-DD)"),
+    search: Optional[str] = Query(None),
+    sort_by: Optional[str] = Query(
+        None,
+        description="name, account, opportunity, quote, created_at",
+    ),
+    sort_order: str = Query("asc"),
     db: AsyncSession = Depends(get_db),
 ) -> EngagementListResponse:
     """List engagements with optional filters."""
@@ -58,6 +64,9 @@ async def list_engagements(
         quote_id=quote_id,
         employee_id=employee_id,
         week_start_date=week_start_date,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
 

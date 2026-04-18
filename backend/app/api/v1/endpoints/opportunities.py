@@ -39,6 +39,12 @@ async def list_opportunities(
     status: str = Query(None),
     start_date: date = Query(None),
     end_date: date = Query(None),
+    search: str = Query(None),
+    sort_by: str = Query(
+        None,
+        description="name, status, start_date, end_date, account, deal_value_usd, forecast_value_usd, default_currency, delivery_center, owner",
+    ),
+    sort_order: str = Query("asc"),
     db: AsyncSession = Depends(get_db),
 ) -> OpportunityListResponse:
     """List opportunities with optional filters."""
@@ -50,6 +56,9 @@ async def list_opportunities(
         status=status,
         start_date=start_date,
         end_date=end_date,
+        search=search,
+        sort_by=sort_by,
+        sort_order=sort_order,
     )
 
 

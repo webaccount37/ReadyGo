@@ -27,6 +27,9 @@ export function useAccounts(
     skip?: number;
     limit?: number;
     region?: string;
+    search?: string;
+    sort_by?: string;
+    sort_order?: "asc" | "desc";
   },
   options?: Omit<UseQueryOptions<AccountListResponse>, "queryKey" | "queryFn">
 ) {

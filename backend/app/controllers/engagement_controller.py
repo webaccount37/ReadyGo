@@ -52,6 +52,9 @@ class EngagementController(BaseController):
         quote_id: Optional[UUID] = None,
         employee_id: Optional[UUID] = None,
         week_start_date: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> EngagementListResponse:
         """List engagements with optional filters.
         When employee_id and week_start_date are both set, only return engagements
@@ -66,6 +69,9 @@ class EngagementController(BaseController):
             quote_id=quote_id,
             employee_id=employee_id,
             week_start_date=week_date,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
         return EngagementListResponse(items=engagements, total=total)
     

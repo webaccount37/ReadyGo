@@ -81,18 +81,30 @@ class RoleService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> tuple[List[RoleResponse], int]:
-        """List roles with optional filters."""
-        result = await self.session.execute(
-            select(Role)
-            .options(
-                selectinload(Role.role_rates).selectinload(RoleRate.delivery_center)
-            )
-            .offset(skip)
-            .limit(limit)
+        """List roles with pagination, search, and sort (server-side)."""
+        from app.db.search_helpers import ilike_pattern, normalize_sort_order
+
+        pattern = ilike_pattern(search)
+        count_q = select(func.count(Role.id))
+        if pattern:
+            count_q = count_q.where(Role.role_name.ilike(pattern, escape="\\"))
+        total = int((await self.session.execute(count_q)).scalar_one() or 0)
+
+        list_q = select(Role).options(
+            selectinload(Role.role_rates).selectinload(RoleRate.delivery_center)
         )
+        if pattern:
+            list_q = list_q.where(Role.role_name.ilike(pattern, escape="\\"))
+        desc = normalize_sort_order(sort_order) == "desc"
+        list_q = list_q.order_by(
+            Role.role_name.desc() if desc else Role.role_name.asc()
+        ).offset(skip).limit(limit)
+        result = await self.session.execute(list_q)
         roles = list(result.scalars().all())
-        total = len(roles)
         return [await self._build_role_response(role.id) for role in roles], total
     
     async def update_role(

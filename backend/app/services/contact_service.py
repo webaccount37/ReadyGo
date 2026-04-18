@@ -77,10 +77,19 @@ class ContactService(BaseService):
         self,
         skip: int = 0,
         limit: int = 100,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> tuple[List[ContactResponse], int]:
         """List all contacts with pagination."""
-        contacts = await self.contact_repo.list_all(skip, limit)
-        total = await self.contact_repo.count_all()
+        contacts = await self.contact_repo.list_all(
+            skip,
+            limit,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total = await self.contact_repo.count_all(search=search)
         return [self._to_response(contact) for contact in contacts], total
     
     async def update_contact(

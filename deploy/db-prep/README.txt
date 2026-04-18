@@ -103,6 +103,9 @@ Environment (optional):
 
 Step 4: Excel load
 ------------------
+Creates accounts, contacts, and opportunities from Excel, then ensures each opportunity has an
+INITIAL active estimate (same behavior as creating an opportunity via the Opportunities API).
+
 Default workbook paths (repo root on host):
 
   uploads/Clients_1776399772.xlsx

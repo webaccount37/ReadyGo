@@ -35,6 +35,9 @@ class EmployeeController(BaseController):
         status: Optional[str] = None,
         employee_type: Optional[str] = None,
         billable: Optional[bool] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> EmployeeListResponse:
         """List employees with optional filters."""
         employees, total = await self.employee_service.list_employees(
@@ -43,6 +46,9 @@ class EmployeeController(BaseController):
             status=status,
             employee_type=employee_type,
             billable=billable,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
         return EmployeeListResponse(items=employees, total=total)
     

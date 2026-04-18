@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useEngagements } from "@/hooks/useEngagements";
 import { Button } from "@/components/ui/button";
@@ -9,17 +9,35 @@ import { Input } from "@/components/ui/input";
 import Link from "next/link";
 import { FileText, ExternalLink, FolderOpen } from "lucide-react";
 import { lucideManilaFolderOpen } from "@/lib/manilaFolder";
-import type { Engagement } from "@/types/engagement";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh, type SortState } from "@/components/ui/sortable-th";
 
 function EngagementsPageContent() {
   const router = useRouter();
-  const [skip] = useState(0);
-  const [limit] = useState(1000);
+  const [skip, setSkip] = useState(0);
+  const [limit] = useState(10);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
+
+  useEffect(() => {
+    setSkip(0);
+  }, [debouncedSearch, sort.column, sort.direction]);
+
+  const handleSort = (column: string) => {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
 
   const { data, isLoading, error } = useEngagements({
     skip,
     limit,
+    search: debouncedSearch.trim() || undefined,
+    sort_by: sort.column || undefined,
+    sort_order: sort.direction,
   });
 
   const formatDate = (dateStr: string): string => {
@@ -57,17 +75,7 @@ function EngagementsPageContent() {
     return "text-red-600";
   };
 
-  const filteredEngagements = data?.items.filter((engagement) => {
-    if (!searchQuery) return true;
-    const query = searchQuery.toLowerCase();
-    return (
-      engagement.name?.toLowerCase().includes(query) ||
-      engagement.quote_number?.toLowerCase().includes(query) ||
-      engagement.quote_display_name?.toLowerCase().includes(query) ||
-      engagement.opportunity_name?.toLowerCase().includes(query) ||
-      engagement.account_name?.toLowerCase().includes(query)
-    );
-  }) || [];
+  const rows = data?.items ?? [];
 
   if (isLoading) {
     return (
@@ -122,7 +130,7 @@ function EngagementsPageContent() {
           </div>
         </CardHeader>
         <CardContent className="px-2">
-          {filteredEngagements.length > 0 ? (
+          {rows.length > 0 ? (
             <>
               {/* Desktop Table View */}
               <div className="hidden md:block w-full overflow-hidden">
@@ -141,11 +149,11 @@ function EngagementsPageContent() {
                   </colgroup>
                   <thead>
                     <tr className="border-b">
-                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Engagement">Name</th>
-                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account">Account</th>
-                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity">Opportunity</th>
-                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Quote">Quote</th>
-                      <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Created Date">Created</th>
+                      <SortableTh label="Name" column="name" sort={sort} onSort={handleSort} title="Engagement" />
+                      <SortableTh label="Account" column="account" sort={sort} onSort={handleSort} title="Account" />
+                      <SortableTh label="Opportunity" column="opportunity" sort={sort} onSort={handleSort} title="Opportunity" />
+                      <SortableTh label="Quote" column="quote" sort={sort} onSort={handleSort} title="Quote" />
+                      <SortableTh label="Created" column="created_at" sort={sort} onSort={handleSort} title="Created Date" />
                       <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Resource Plan Revenue (USD)">Plan $</th>
                       <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actuals from Approved Timesheets (USD)">Actuals $</th>
                       <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Quote/Estimate vs Resource Plan Revenue Deviation %">% Quote Dev</th>
@@ -154,7 +162,7 @@ function EngagementsPageContent() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredEngagements.map((engagement) => (
+                    {rows.map((engagement) => (
                       <tr
                         key={engagement.id}
                         className="border-b hover:bg-gray-50 cursor-pointer"
@@ -267,7 +275,7 @@ function EngagementsPageContent() {
 
               {/* Mobile Card View */}
               <div className="md:hidden space-y-4">
-                {filteredEngagements.map((engagement) => (
+                {rows.map((engagement) => (
                   <Card
                     key={engagement.id}
                     className="cursor-pointer"
@@ -393,14 +401,36 @@ function EngagementsPageContent() {
           ) : (
             <div className="text-center py-12 text-gray-500">
               <p>
-                {searchQuery.trim()
-                  ? `No engagements found matching "${searchQuery}"`
+                {debouncedSearch.trim()
+                  ? `No engagements found matching "${debouncedSearch}"`
                   : "No engagements found."}
               </p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {data && data.total > limit && (
+        <div className="flex justify-center items-center gap-4 mt-4">
+          <Button
+            variant="outline"
+            onClick={() => setSkip(Math.max(0, skip - limit))}
+            disabled={skip === 0}
+          >
+            Previous
+          </Button>
+          <span className="text-sm text-gray-600">
+            Page {Math.floor(skip / limit) + 1} of {Math.ceil(data.total / limit)}
+          </span>
+          <Button
+            variant="outline"
+            onClick={() => setSkip(skip + limit)}
+            disabled={skip + limit >= data.total}
+          >
+            Next
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

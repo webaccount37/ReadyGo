@@ -32,12 +32,18 @@ class AccountController(BaseController):
         skip: int = 0,
         limit: int = 100,
         region: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> AccountListResponse:
         """List accounts with optional filters."""
         accounts, total = await self.account_service.list_accounts(
             skip=skip,
             limit=limit,
             region=region,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
         return AccountListResponse(items=accounts, total=total)
     

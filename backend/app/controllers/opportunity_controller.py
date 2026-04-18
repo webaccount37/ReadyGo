@@ -43,6 +43,9 @@ class OpportunityController(BaseController):
         status: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> OpportunityListResponse:
         """List opportunities with optional filters."""
         opportunities, total = await self.opportunity_service.list_opportunities(
@@ -52,6 +55,9 @@ class OpportunityController(BaseController):
             status=status,
             start_date=start_date,
             end_date=end_date,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
         )
         return OpportunityListResponse(items=opportunities, total=total)
     

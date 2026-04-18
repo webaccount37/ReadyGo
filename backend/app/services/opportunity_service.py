@@ -270,27 +270,38 @@ class OpportunityService(BaseService):
         status: Optional[str] = None,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> tuple[List[OpportunityResponse], int]:
-        """List opportunities with optional filters."""
+        """List opportunities with optional filters (combined with AND), search, and sort."""
         from app.models.opportunity import OpportunityStatus
-        
-        if account_id:
-            opportunities = await self.opportunity_repo.list_by_account(account_id, skip, limit)
-            total = await self.opportunity_repo.count_by_account(account_id)
-        elif status:
+
+        status_enum: Optional[OpportunityStatus] = None
+        if status:
             try:
                 status_enum = OpportunityStatus(status)
-                opportunities = await self.opportunity_repo.list_by_status(status_enum, skip, limit)
-                total = await self.opportunity_repo.count_by_status(status_enum)
             except ValueError:
-                opportunities = []
-                total = 0
-        elif start_date or end_date:
-            opportunities = await self.opportunity_repo.list_by_date_range(start_date, end_date, skip, limit)
-            total = await self.opportunity_repo.count_by_date_range(start_date, end_date)
-        else:
-            opportunities = await self.opportunity_repo.list(skip=skip, limit=limit)
-            total = await self.opportunity_repo.count()
+                return [], 0
+
+        opportunities = await self.opportunity_repo.list_for_list_api(
+            skip=skip,
+            limit=limit,
+            account_id=account_id,
+            status_enum=status_enum,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total = await self.opportunity_repo.count_for_list_api(
+            account_id=account_id,
+            status_enum=status_enum,
+            start_date=start_date,
+            end_date=end_date,
+            search=search,
+        )
         responses = []
         for opp in opportunities:
             responses.append(await self._to_response(opp, include_plan_actuals=True))

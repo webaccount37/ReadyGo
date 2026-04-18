@@ -4,6 +4,10 @@ Load accounts, contacts, and opportunities from three Excel workbooks (header ro
 
 Run after 02_seed_employees_from_entra.py (opportunity owners match employees by email or name).
 
+After inserting opportunities, creates an INITIAL estimate for every opportunity that does not
+yet have one — matching app.services.opportunity_service.OpportunityService.create_opportunity
+(API POST /opportunities), which auto-creates Estimate(name='INITIAL', active_version=True).
+
 Requires: openpyxl, asyncpg (same as backend). DATABASE_URL without +asyncpg.
 """
 
@@ -763,6 +767,22 @@ INSERT INTO opportunities (
             n_op += 1
         wb.close()
         print(f"Opportunities inserted: {n_op}", file=sys.stderr)
+
+        # INITIAL estimate per opportunity (same as OpportunityService.create_opportunity).
+        # Idempotent: only rows with no estimate yet (safe if re-running after partial load).
+        n_est = await conn.fetchval(
+            """
+            WITH ins AS (
+                INSERT INTO estimates (id, opportunity_id, name, description, created_by, active_version, attributes)
+                SELECT gen_random_uuid(), o.id, 'INITIAL', NULL, NULL, TRUE, '{}'::json
+                FROM opportunities o
+                WHERE NOT EXISTS (SELECT 1 FROM estimates e WHERE e.opportunity_id = o.id)
+                RETURNING id
+            )
+            SELECT count(*)::bigint FROM ins
+            """
+        )
+        print(f"Estimates ensured (INITIAL, active): {int(n_est or 0)}", file=sys.stderr)
     finally:
         await conn.close()
 

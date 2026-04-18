@@ -30,6 +30,9 @@ export function useEmployees(
     status?: string;
     employee_type?: string;
     billable?: boolean;
+    search?: string;
+    sort_by?: string;
+    sort_order?: "asc" | "desc";
   },
   options?: Omit<UseQueryOptions<EmployeeListResponse>, "queryKey" | "queryFn">
 ) {

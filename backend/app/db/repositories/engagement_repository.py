@@ -6,10 +6,11 @@ import logging
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select, func, distinct, or_
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
+from app.db.search_helpers import ilike_pattern, normalize_sort_order
 from app.models.engagement import Engagement
 
 logger = logging.getLogger(__name__)
@@ -47,28 +48,88 @@ class EngagementRepository(BaseRepository[Engagement]):
         skip: int = 0,
         limit: int = 100,
         include_line_items: bool = False,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
         **filters,
     ) -> List[Engagement]:
         """List engagements with pagination and filters."""
+        from app.models.opportunity import Opportunity
+        from app.models.account import Account
+        from app.models.quote import Quote
+
         query = self._base_query(include_line_items=include_line_items)
-        
-        # Apply filters
+        query = (
+            query.join(Opportunity, Engagement.opportunity_id == Opportunity.id)
+            .join(Account, Opportunity.account_id == Account.id)
+            .join(Quote, Engagement.quote_id == Quote.id)
+        )
+
         for key, value in filters.items():
             if hasattr(Engagement, key):
                 query = query.where(getattr(Engagement, key) == value)
-        
+
+        pattern = ilike_pattern(search)
+        if pattern:
+            query = query.where(
+                or_(
+                    Engagement.name.ilike(pattern, escape="\\"),
+                    Quote.quote_number.ilike(pattern, escape="\\"),
+                    Opportunity.name.ilike(pattern, escape="\\"),
+                    Account.company_name.ilike(pattern, escape="\\"),
+                )
+            )
+
+        sk = sort_by or "name"
+        desc = normalize_sort_order(sort_order) == "desc"
+        col_map = {
+            "name": Engagement.name,
+            "account": Account.company_name,
+            "opportunity": Opportunity.name,
+            "quote": Quote.quote_number,
+            "created_at": Engagement.created_at,
+        }
+        col = col_map.get(sk, Engagement.name)
+        if desc:
+            query = query.order_by(col.desc().nulls_last())
+        else:
+            query = query.order_by(col.asc().nulls_last())
+
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def count(self, **filters) -> int:
+    async def count(
+        self,
+        search: Optional[str] = None,
+        **filters,
+    ) -> int:
         """Count engagements matching filters."""
-        query = select(func.count(Engagement.id))
-        
+        from app.models.opportunity import Opportunity
+        from app.models.account import Account
+        from app.models.quote import Quote
+
+        query = select(func.count(Engagement.id)).select_from(Engagement).join(
+            Opportunity, Engagement.opportunity_id == Opportunity.id
+        ).join(Account, Opportunity.account_id == Account.id).join(
+            Quote, Engagement.quote_id == Quote.id
+        )
+
         for key, value in filters.items():
             if hasattr(Engagement, key):
                 query = query.where(getattr(Engagement, key) == value)
-        
+
+        pattern = ilike_pattern(search)
+        if pattern:
+            query = query.where(
+                or_(
+                    Engagement.name.ilike(pattern, escape="\\"),
+                    Quote.quote_number.ilike(pattern, escape="\\"),
+                    Opportunity.name.ilike(pattern, escape="\\"),
+                    Account.company_name.ilike(pattern, escape="\\"),
+                )
+            )
+
         result = await self.session.execute(query)
         return result.scalar_one()
     

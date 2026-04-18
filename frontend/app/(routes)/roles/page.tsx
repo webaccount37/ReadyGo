@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect } from "react";
 import {
   useRoles,
   useCreateRole,
@@ -16,6 +16,8 @@ import type { RoleCreate, RoleUpdate } from "@/types/role";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
 import type { RoleRate } from "@/types/role";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh, type SortState } from "@/components/ui/sortable-th";
 
 /** Sort rates by delivery center (code), then currency for consistent display. */
 function sortRoleRates(rates: RoleRate[] | undefined): RoleRate[] {
@@ -34,25 +36,33 @@ export default function RolesPage() {
   const [editingRole, setEditingRole] = useState<string | null>(null);
   const [viewingRole, setViewingRole] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ column: "role_name", direction: "asc" });
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
 
-  const { data, isLoading, error, refetch } = useRoles({ skip, limit });
+  useEffect(() => {
+    setSkip(0);
+  }, [debouncedSearch, sort.column, sort.direction]);
+
+  const handleSort = (column: string) => {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
+
+  const { data, isLoading, error, refetch } = useRoles({
+    skip,
+    limit,
+    search: debouncedSearch.trim() || undefined,
+    sort_by: sort.column || undefined,
+    sort_order: sort.direction,
+  });
   const createRole = useCreateRole();
   const updateRole = useUpdateRole();
   const deleteRole = useDeleteRole();
 
-  const filteredItems = useMemo(() => {
-    if (!data?.items || !searchQuery.trim()) {
-      return data?.items || [];
-    }
-    const query = searchQuery.toLowerCase();
-    return data.items.filter((role) => {
-      const name = (role.role_name || "").toLowerCase();
-      const rates = role.role_rates?.map(r => 
-        `${r.delivery_center_code} ${r.default_currency} ${r.internal_cost_rate} ${r.external_rate}`
-      ).join(" ").toLowerCase() || "";
-      return name.includes(query) || rates.includes(query);
-    });
-  }, [data, searchQuery]);
+  const rows = data?.items ?? [];
 
   const handleCreate = async (data: RoleCreate | RoleUpdate) => {
     try {
@@ -135,7 +145,7 @@ export default function RolesPage() {
               </div>
             </CardHeader>
             <CardContent className="px-2">
-              {filteredItems.length > 0 ? (
+              {rows.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
                     <div className="hidden md:block w-full overflow-hidden">
@@ -147,13 +157,13 @@ export default function RolesPage() {
                         </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Role Name">Role</th>
+                            <SortableTh label="Role" column="role_name" sort={sort} onSort={handleSort} title="Role Name" />
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Rates by Delivery Center">Rates</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                        {filteredItems.map((role) => (
+                        {rows.map((role) => (
                           <tr 
                             key={role.id} 
                             className="border-b hover:bg-gray-50 cursor-pointer"
@@ -232,7 +242,7 @@ export default function RolesPage() {
 
                     {/* Mobile Card View */}
                     <div className="md:hidden space-y-4">
-                      {filteredItems.map((role) => (
+                      {rows.map((role) => (
                       <Card 
                         key={role.id}
                         className="cursor-pointer"
@@ -301,11 +311,11 @@ export default function RolesPage() {
                 ) : (
                   <div className="text-center py-12 text-gray-500">
                     <p>
-                      {searchQuery.trim() 
-                        ? `No roles found matching "${searchQuery}"` 
+                      {debouncedSearch.trim() 
+                        ? `No roles found matching "${debouncedSearch}"` 
                         : "No roles found."}
                     </p>
-                    {!searchQuery.trim() && (
+                    {!debouncedSearch.trim() && (
                       <Button
                         className="mt-4"
                         onClick={() => setIsCreateOpen(true)}
@@ -318,7 +328,7 @@ export default function RolesPage() {
             </CardContent>
           </Card>
 
-          {data && data.total > limit && !searchQuery.trim() && (
+          {data && data.total > limit && (
             <div className="flex justify-center items-center gap-4 mt-4">
               <Button
                 variant="outline"

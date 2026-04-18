@@ -17,7 +17,6 @@ import { cn } from "@/lib/utils";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useBillingTerms } from "@/hooks/useBillingTerms";
-import { useEmployees } from "@/hooks/useEmployees";
 import { opportunitiesApi } from "@/lib/api/opportunities";
 import {
   formatCurrency,
@@ -25,10 +24,11 @@ import {
   getAccountName,
   getDeliveryCenterName,
   getBillingTermName,
-  getEmployeeName,
   getParentOpportunityName,
 } from "@/lib/opportunity-utils";
 import Link from "next/link";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh, type SortState } from "@/components/ui/sortable-th";
 
 function OpportunitiesPageContent() {
   const searchParams = useSearchParams();
@@ -36,6 +36,8 @@ function OpportunitiesPageContent() {
   const [skip, setSkip] = useState(0);
   const [limit] = useState(10);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ column: "name", direction: "asc" });
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
 
   const router = useRouter();
 
@@ -47,6 +49,18 @@ function OpportunitiesPageContent() {
     }
   }, [searchParams]);
 
+  useEffect(() => {
+    setSkip(0);
+  }, [debouncedSearch, sort.column, sort.direction, accountIdParam]);
+
+  const handleSort = (column: string) => {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
+
   // Redirect ?opportunity_id= to the opportunity detail page
   useEffect(() => {
     const opportunityIdParam = searchParams.get("opportunity_id");
@@ -55,10 +69,13 @@ function OpportunitiesPageContent() {
     }
   }, [searchParams, router]);
 
-  const { data, isLoading, error, refetch } = useOpportunities({ 
-    skip, 
+  const { data, isLoading, error, refetch } = useOpportunities({
+    skip,
     limit,
-    account_id: accountIdParam || undefined
+    account_id: accountIdParam || undefined,
+    search: debouncedSearch.trim() || undefined,
+    sort_by: sort.column || undefined,
+    sort_order: sort.direction,
   });
   const {
     getActiveEstimateId,
@@ -81,7 +98,6 @@ function OpportunitiesPageContent() {
   );
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: billingTermsData } = useBillingTerms();
-  const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: allOpportunitiesData } = useOpportunities({ limit: 100 });
   
   // Fetch opportunities with relationships for accurate counts (only for current page)
@@ -117,64 +133,7 @@ function OpportunitiesPageContent() {
     return countDict;
   }, [opportunityCountsQueries]);
 
-  const filteredItems = useMemo(() => {
-    if (!data?.items || !searchQuery.trim()) {
-      return data?.items || [];
-    }
-    const query = searchQuery.toLowerCase();
-    return data.items.filter((opportunity) => {
-      // Basic fields
-      const name = (opportunity.name || "").toLowerCase();
-      const account = (opportunity.account_name || opportunity.account_id || "").toLowerCase();
-      const status = (opportunity.status || "").toLowerCase();
-      const description = (opportunity.description || "").toLowerCase();
-      
-      // Get display names for searchable fields
-      const accountName = accountLabel(opportunity).toLowerCase();
-      const parentName = getParentOpportunityName(allOpportunitiesData, opportunity.parent_opportunity_id).toLowerCase();
-      const deliveryCenterName = getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id).toLowerCase();
-      const ownerName = getEmployeeName(employeesData, opportunity.opportunity_owner_id).toLowerCase();
-      
-      // Date fields
-      const startDate = opportunity.start_date 
-        ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase()
-        : "";
-      const endDate = opportunity.end_date 
-        ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }).toLowerCase()
-        : "";
-      
-      // Numeric/currency fields (convert to string for searching)
-      const dealValue = opportunity.deal_value_usd 
-        ? formatCurrency(opportunity.deal_value_usd, "USD").toLowerCase()
-        : "";
-      const forecastValue = opportunity.forecast_value_usd 
-        ? formatCurrency(opportunity.forecast_value_usd, "USD").toLowerCase()
-        : "";
-      const dealValueNum = opportunity.deal_value_usd ? String(opportunity.deal_value_usd).toLowerCase() : "";
-      const forecastValueNum = opportunity.forecast_value_usd ? String(opportunity.forecast_value_usd).toLowerCase() : "";
-      
-      // Count fields
-      const employeeCount = String(employeeCounts[opportunity.id] ?? 0).toLowerCase();
-      
-      return (
-        name.includes(query) ||
-        account.includes(query) ||
-        accountName.includes(query) ||
-        status.includes(query) ||
-        description.includes(query) ||
-        parentName.includes(query) ||
-        deliveryCenterName.includes(query) ||
-        ownerName.includes(query) ||
-        startDate.includes(query) ||
-        endDate.includes(query) ||
-        dealValue.includes(query) ||
-        forecastValue.includes(query) ||
-        dealValueNum.includes(query) ||
-        forecastValueNum.includes(query) ||
-        employeeCount.includes(query)
-      );
-    });
-  }, [data, searchQuery, accountLabel, deliveryCentersData, employeesData, allOpportunitiesData, employeeCounts]);
+  const rows = data?.items ?? [];
 
   // Helper functions for formatting display values
   const formatEnumValue = (value: string | undefined): string => {
@@ -237,7 +196,7 @@ function OpportunitiesPageContent() {
               </div>
             </CardHeader>
             <CardContent className="px-2">
-              {filteredItems.length > 0 ? (
+              {rows.length > 0 ? (
                   <>
                     {/* Desktop Table View */}
                     <div className="hidden md:block w-full overflow-hidden">
@@ -258,22 +217,22 @@ function OpportunitiesPageContent() {
                         </colgroup>
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Name">Name</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account">Account</th>
+                            <SortableTh label="Name" column="name" sort={sort} onSort={handleSort} title="Opportunity Name" />
+                            <SortableTh label="Account" column="account" sort={sort} onSort={handleSort} title="Account" />
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Parent Opportunity Name">Parent</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Status">Status</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Start Date">Start</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="End Date">End</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Invoice Center">IC</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Deal Value (USD)">Deal $</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Forecast Value (USD)">Forecast $</th>
+                            <SortableTh label="Status" column="status" sort={sort} onSort={handleSort} title="Status" />
+                            <SortableTh label="Start" column="start_date" sort={sort} onSort={handleSort} title="Start Date" />
+                            <SortableTh label="End" column="end_date" sort={sort} onSort={handleSort} title="End Date" />
+                            <SortableTh label="IC" column="delivery_center" sort={sort} onSort={handleSort} title="Invoice Center" />
+                            <SortableTh label="Deal $" column="deal_value_usd" sort={sort} onSort={handleSort} title="Deal Value (USD)" />
+                            <SortableTh label="Forecast $" column="forecast_value_usd" sort={sort} onSort={handleSort} title="Forecast Value (USD)" />
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Plan Revenue (USD)">Plan $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actuals from Approved Timesheets (USD)">Actuals $</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
                         <tbody>
-                        {filteredItems.map((opportunity) => (
+                        {rows.map((opportunity) => (
                           <tr 
                             key={opportunity.id} 
                             className="border-b hover:bg-gray-50 cursor-pointer"
@@ -473,7 +432,7 @@ function OpportunitiesPageContent() {
 
                     {/* Mobile Card View */}
                     <div className="md:hidden space-y-4">
-                      {filteredItems.map((opportunity) => (
+                      {rows.map((opportunity) => (
                         <Card 
                           key={opportunity.id}
                           className="cursor-pointer"
@@ -671,11 +630,11 @@ function OpportunitiesPageContent() {
                 ) : (
                   <div className="text-center py-12 text-gray-500">
                     <p>
-                      {searchQuery.trim() 
-                        ? `No opportunities found matching "${searchQuery}"` 
+                      {debouncedSearch.trim()
+                        ? `No opportunities found matching "${debouncedSearch}"`
                         : "No opportunities found."}
                     </p>
-                    {!searchQuery.trim() && (
+                    {!debouncedSearch.trim() && (
                       <Button
                         className="mt-4"
                         onClick={() => router.push("/opportunities/create")}
@@ -688,7 +647,7 @@ function OpportunitiesPageContent() {
             </CardContent>
           </Card>
 
-          {data && data.total > limit && !searchQuery.trim() && (
+          {data && data.total > limit && (
             <div className="flex justify-center items-center gap-4 mt-4">
               <Button
                 variant="outline"

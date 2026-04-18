@@ -54,6 +54,9 @@ export function useEngagements(
     quote_id?: string;
     employee_id?: string;
     week_start_date?: string;
+    search?: string;
+    sort_by?: string;
+    sort_order?: "asc" | "desc";
   },
   options?: Omit<UseQueryOptions<EngagementListResponse>, "queryKey" | "queryFn">
 ) {

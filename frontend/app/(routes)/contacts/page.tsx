@@ -20,6 +20,8 @@ import { highlightText } from "@/lib/utils/highlight";
 import { getAccountTypeColor, getAccountTypeLabel } from "@/lib/utils/account-type";
 import type { AccountType } from "@/types/account";
 import Link from "next/link";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh, type SortState } from "@/components/ui/sortable-th";
 
 function ContactsPageContent() {
   const searchParams = useSearchParams();
@@ -29,6 +31,8 @@ function ContactsPageContent() {
   const [editingContact, setEditingContact] = useState<string | null>(null);
   const [viewingContact, setViewingContact] = useState<Contact | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [sort, setSort] = useState<SortState>({ column: "last_name", direction: "asc" });
+  const debouncedSearch = useDebouncedValue(searchQuery, 350);
 
   // Initialize search query from URL parameter
   useEffect(() => {
@@ -38,7 +42,25 @@ function ContactsPageContent() {
     }
   }, [searchParams]);
 
-  const { data, isLoading, error, refetch } = useContacts({ skip, limit });
+  useEffect(() => {
+    setSkip(0);
+  }, [debouncedSearch, sort.column, sort.direction]);
+
+  const handleSort = (column: string) => {
+    setSort((prev) =>
+      prev.column === column
+        ? { column, direction: prev.direction === "asc" ? "desc" : "asc" }
+        : { column, direction: "asc" }
+    );
+  };
+
+  const { data, isLoading, error, refetch } = useContacts({
+    skip,
+    limit,
+    search: debouncedSearch.trim() || undefined,
+    sort_by: sort.column || undefined,
+    sort_order: sort.direction,
+  });
   const createContact = useCreateContact();
   const updateContact = useUpdateContact();
   const deleteContact = useDeleteContact();
@@ -50,28 +72,7 @@ function ContactsPageContent() {
     };
   }, [accountsData]);
 
-  const filteredItems = useMemo(() => {
-    if (!data?.items || !searchQuery.trim()) {
-      return data?.items || [];
-    }
-    const query = searchQuery.toLowerCase();
-    return data.items.filter((contact) => {
-      const firstName = (contact.first_name || "").toLowerCase();
-      const lastName = (contact.last_name || "").toLowerCase();
-      const email = (contact.email || "").toLowerCase();
-      const phone = (contact.phone || "").toLowerCase();
-      const jobTitle = (contact.job_title || "").toLowerCase();
-      const accountName = (contact.account_name || getAccountName(contact.account_id) || "").toLowerCase();
-      return (
-        firstName.includes(query) ||
-        lastName.includes(query) ||
-        email.includes(query) ||
-        phone.includes(query) ||
-        jobTitle.includes(query) ||
-        accountName.includes(query)
-      );
-    });
-  }, [data, searchQuery, getAccountName]);
+  const rows = data?.items ?? [];
 
   const handleCreate = async (data: ContactCreate | ContactUpdate) => {
     try {
@@ -158,7 +159,7 @@ function ContactsPageContent() {
             </div>
           </CardHeader>
           <CardContent className="px-2">
-            {filteredItems.length > 0 ? (
+            {rows.length > 0 ? (
                 <>
                   {/* Desktop Table View */}
                   <div className="hidden md:block w-full overflow-hidden">
@@ -175,18 +176,18 @@ function ContactsPageContent() {
                       </colgroup>
                       <thead>
                         <tr className="border-b">
-                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Contact Name">Name</th>
-                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account">Account</th>
+                          <SortableTh label="Name" column="last_name" sort={sort} onSort={handleSort} title="Contact Name" />
+                          <SortableTh label="Account" column="account" sort={sort} onSort={handleSort} title="Account" />
                           <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account Type">Type</th>
-                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Email">Email</th>
-                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Phone">Phone</th>
-                          <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Job Title">Job Title</th>
+                          <SortableTh label="Email" column="email" sort={sort} onSort={handleSort} title="Email" />
+                          <SortableTh label="Phone" column="phone" sort={sort} onSort={handleSort} title="Phone" />
+                          <SortableTh label="Job Title" column="job_title" sort={sort} onSort={handleSort} title="Job Title" />
                           <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Account Opportunities">Opps</th>
                           <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                      {filteredItems.map((contact) => (
+                      {rows.map((contact) => (
                         <tr 
                           key={contact.id} 
                           className="border-b hover:bg-gray-50 cursor-pointer"
@@ -310,7 +311,7 @@ function ContactsPageContent() {
 
                   {/* Mobile Card View */}
                   <div className="md:hidden space-y-4">
-                    {filteredItems.map((contact) => (
+                    {rows.map((contact) => (
                     <Card 
                       key={contact.id}
                       className="cursor-pointer"
@@ -438,11 +439,11 @@ function ContactsPageContent() {
               ) : (
                 <div className="text-center py-12 text-gray-500">
                   <p>
-                    {searchQuery.trim() 
-                      ? `No contacts found matching "${searchQuery}"` 
+                    {debouncedSearch.trim() 
+                      ? `No contacts found matching "${debouncedSearch}"` 
                       : "No contacts found."}
                   </p>
-                  {!searchQuery.trim() && (
+                  {!debouncedSearch.trim() && (
                     <Button className="mt-4" onClick={() => setIsCreateOpen(true)}>
                       Create First Contact
                     </Button>
@@ -453,7 +454,7 @@ function ContactsPageContent() {
         </Card>
       )}
 
-      {data && data.total > limit && !searchQuery.trim() && (
+      {data && data.total > limit && (
         <div className="flex justify-center items-center gap-4 mt-4">
           <Button
             variant="outline"

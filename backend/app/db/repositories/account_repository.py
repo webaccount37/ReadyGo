@@ -5,27 +5,61 @@ Account repository for database operations.
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_, cast, String
 from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
+from app.db.search_helpers import ilike_pattern, normalize_sort_order
 from app.models.account import Account
 
 
 class AccountRepository(BaseRepository[Account]):
     """Repository for account operations."""
-    
+
+    _SORT_COLUMNS = {
+        "company_name": Account.company_name,
+        "industry": Account.industry,
+        "city": Account.city,
+        "region": Account.region,
+        "country": Account.country,
+        "type": Account.type,
+    }
+
     def __init__(self, session: AsyncSession):
         super().__init__(Account, session)
     
     def _base_query(self):
         """Base query with eager loading of billing_term relationship."""
         return select(Account).options(selectinload(Account.billing_term))
+
+    def _apply_search(self, query, pattern: Optional[str]):
+        if not pattern:
+            return query
+        type_txt = cast(Account.type, String)
+        return query.where(
+            or_(
+                Account.company_name.ilike(pattern, escape="\\"),
+                Account.industry.ilike(pattern, escape="\\"),
+                Account.city.ilike(pattern, escape="\\"),
+                Account.region.ilike(pattern, escape="\\"),
+                Account.country.ilike(pattern, escape="\\"),
+                type_txt.ilike(pattern, escape="\\"),
+            )
+        )
+
+    def _apply_sort(self, query, sort_by: Optional[str], sort_order: Optional[str]):
+        col = self._SORT_COLUMNS.get(sort_by or "", Account.company_name)
+        if normalize_sort_order(sort_order) == "desc":
+            return query.order_by(col.desc().nulls_last())
+        return query.order_by(col.asc().nulls_last())
     
     async def list(
         self,
         skip: int = 0,
         limit: int = 100,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
         **filters,
     ) -> List[Account]:
         """List accounts with pagination and filters, eagerly loading billing_term."""
@@ -35,17 +69,27 @@ class AccountRepository(BaseRepository[Account]):
         for key, value in filters.items():
             if hasattr(Account, key):
                 query = query.where(getattr(Account, key) == value)
+
+        pattern = ilike_pattern(search)
+        query = self._apply_search(query, pattern)
+        query = self._apply_sort(query, sort_by, sort_order)
         
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
     
-    async def count(self, **filters) -> int:
+    async def count(
+        self,
+        search: Optional[str] = None,
+        **filters,
+    ) -> int:
         """Count accounts matching filters."""
         query = select(func.count(Account.id))
         for key, value in filters.items():
             if hasattr(Account, key):
                 query = query.where(getattr(Account, key) == value)
+        pattern = ilike_pattern(search)
+        query = self._apply_search(query, pattern)
         result = await self.session.execute(query)
         return result.scalar_one() or 0
     

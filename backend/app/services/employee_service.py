@@ -78,32 +78,43 @@ class EmployeeService(BaseService):
         status: Optional[str] = None,
         employee_type: Optional[str] = None,
         billable: Optional[bool] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> tuple[List[EmployeeResponse], int]:
-        """List employees with optional filters."""
+        """List employees with optional filters (combined with AND), search, and sort."""
         from app.models.employee import EmployeeStatus, EmployeeType
-        
+
+        status_enum: Optional[EmployeeStatus] = None
         if status:
             try:
                 status_enum = EmployeeStatus(status)
-                employees = await self.employee_repo.list_by_status(status_enum, skip, limit)
-                total = await self.employee_repo.count_by_status(status_enum)
             except ValueError:
-                employees = []
-                total = 0
-        elif employee_type:
+                return [], 0
+
+        type_enum: Optional[EmployeeType] = None
+        if employee_type:
             try:
                 type_enum = EmployeeType(employee_type)
-                employees = await self.employee_repo.list_by_type(type_enum, skip, limit)
-                total = await self.employee_repo.count_by_type(type_enum)
             except ValueError:
-                employees = []
-                total = 0
-        elif billable is True:
-            employees = await self.employee_repo.list_billable(skip, limit)
-            total = await self.employee_repo.count_billable()
-        else:
-            employees = await self.employee_repo.list(skip=skip, limit=limit)
-            total = await self.employee_repo.count()
+                return [], 0
+
+        employees = await self.employee_repo.list_paginated(
+            skip=skip,
+            limit=limit,
+            status=status_enum,
+            employee_type=type_enum,
+            billable=billable,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+        )
+        total = await self.employee_repo.count_paginated(
+            status=status_enum,
+            employee_type=type_enum,
+            billable=billable,
+            search=search,
+        )
         # Build responses without relationships (set to empty lists to avoid lazy loading issues)
         responses = []
         for emp in employees:

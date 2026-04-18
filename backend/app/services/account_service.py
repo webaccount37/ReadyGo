@@ -77,10 +77,21 @@ class AccountService(BaseService):
         skip: int = 0,
         limit: int = 100,
         region: Optional[str] = None,
+        search: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_order: Optional[str] = None,
     ) -> tuple[List[AccountResponse], int]:
         """List accounts with optional filters."""
-        accounts = await self.account_repo.list(skip=skip, limit=limit, **({"region": region} if region else {}))
-        total = await self.account_repo.count(**({"region": region} if region else {}))
+        region_kw = {"region": region} if region else {}
+        accounts = await self.account_repo.list(
+            skip=skip,
+            limit=limit,
+            search=search,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            **region_kw,
+        )
+        total = await self.account_repo.count(search=search, **region_kw)
         
         # Add contact count, opportunity count, and summed Forecast/Plan/Actuals from opportunities
         responses = []

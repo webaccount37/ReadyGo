@@ -3,7 +3,7 @@
 from datetime import date, timedelta
 from uuid import uuid4
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import exists, func, select, true
 from sqlalchemy.dialects import postgresql
 
 from app.db.repositories.financial_forecast_repository import (
@@ -59,6 +59,82 @@ def test_quotable_quote_is_union_of_active_engagement_quote_and_accepted():
     q_acc = select(Opportunity.id).where(_opportunity_has_accepted_quote())
     acc_sql = str(q_acc.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True}))
     assert "ACCEPTED" in acc_sql.upper()
+
+
+def test_intercompany_forecast_opportunity_list_has_no_global_timesheet_gate():
+    """Opp scope for consulting_fee_intercompany must allow quote+engagement with zero timesheets (plan path)."""
+    forecast_dc_id = uuid4()
+    range_start = date(2026, 1, 1)
+    range_end = date(2026, 1, 31)
+    has_eng = exists(select(1).where(Engagement.opportunity_id == Opportunity.id))
+    q_opps = select(Opportunity.id).where(
+        Opportunity.delivery_center_id != forecast_dc_id,
+        Opportunity.status.notin_([OpportunityStatus.LOST, OpportunityStatus.CANCELLED]),
+        Opportunity.end_date >= range_start,
+        Opportunity.start_date <= range_end,
+        _opportunity_has_quotable_quote(),
+        has_eng,
+    )
+    sql = str(q_opps.compile(dialect=postgresql.dialect())).lower()
+    assert "timesheet_approved_snapshots" not in sql
+    assert "timesheets" not in sql
+
+
+def test_cogs_forecast_opportunity_list_has_no_global_timesheet_gate():
+    """Opp scope for _cogs_cost_slice (intercompany labor only) keeps invoice DC = forecast DC filter."""
+    forecast_dc_id = uuid4()
+    range_start = date(2026, 1, 1)
+    range_end = date(2026, 1, 31)
+    has_eng = exists(select(1).where(Engagement.opportunity_id == Opportunity.id))
+    q_opps = select(Opportunity.id).where(
+        Opportunity.delivery_center_id == forecast_dc_id,
+        Opportunity.status.notin_([OpportunityStatus.LOST, OpportunityStatus.CANCELLED]),
+        Opportunity.end_date >= range_start,
+        Opportunity.start_date <= range_end,
+        _opportunity_has_quotable_quote(),
+        has_eng,
+    )
+    sql = str(q_opps.compile(dialect=postgresql.dialect())).lower()
+    assert "timesheet_approved_snapshots" not in sql
+    assert "timesheets" not in sql
+
+
+def test_cogs_delivery_forecast_opportunity_list_omits_opportunity_invoice_dc_predicate():
+    """COGS delivery keys off forecast DC employees / payable on plan or timesheet, not opportunity invoice DC."""
+    range_start = date(2026, 1, 1)
+    range_end = date(2026, 1, 31)
+    has_eng = exists(select(1).where(Engagement.opportunity_id == Opportunity.id))
+    q_opps = select(Opportunity.id).where(
+        true(),
+        Opportunity.status.notin_([OpportunityStatus.LOST, OpportunityStatus.CANCELLED]),
+        Opportunity.end_date >= range_start,
+        Opportunity.start_date <= range_end,
+        _opportunity_has_quotable_quote(),
+        has_eng,
+    )
+    sql = str(q_opps.compile(dialect=postgresql.dialect())).lower()
+    assert "timesheet_approved_snapshots" not in sql
+    assert "timesheets" not in sql
+    assert "delivery_center_id" not in sql
+
+
+def test_cogs_subcontract_forecast_opportunity_list_omits_opportunity_invoice_dc_predicate():
+    """COGS subcontract keys off forecast DC contract employees on plan or timesheet, not opportunity invoice DC."""
+    range_start = date(2026, 1, 1)
+    range_end = date(2026, 1, 31)
+    has_eng = exists(select(1).where(Engagement.opportunity_id == Opportunity.id))
+    q_opps = select(Opportunity.id).where(
+        true(),
+        Opportunity.status.notin_([OpportunityStatus.LOST, OpportunityStatus.CANCELLED]),
+        Opportunity.end_date >= range_start,
+        Opportunity.start_date <= range_end,
+        _opportunity_has_quotable_quote(),
+        has_eng,
+    )
+    sql = str(q_opps.compile(dialect=postgresql.dialect())).lower()
+    assert "timesheet_approved_snapshots" not in sql
+    assert "timesheets" not in sql
+    assert "delivery_center_id" not in sql
 
 
 def test_cogs_subcontract_actuals_query_shape_matches_repository():
