@@ -8,6 +8,8 @@ import { EngagementEmptyRow } from "./engagement-empty-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useExportEngagementExcel, useImportEngagementExcel, useApprovedHoursByWeek } from "@/hooks/useEngagements";
+import { useCurrencyRates } from "@/hooks/useCurrencyRates";
+import { setCurrencyRates } from "@/lib/utils/currency";
 
 interface ResourcePlanProps {
   engagement: EngagementDetailResponse;
@@ -26,6 +28,15 @@ export function ResourcePlan({
   billableExpenses = true,
   onRefetch
 }: ResourcePlanProps) {
+  const { data: currencyRatesData } = useCurrencyRates({ limit: 10000 });
+  if (currencyRatesData?.items) {
+    const rates: Record<string, number> = {};
+    for (const rate of currencyRatesData.items) {
+      rates[rate.currency_code.toUpperCase()] = rate.rate_to_usd;
+    }
+    setCurrencyRates(rates);
+  }
+
   const [zoomLevel, setZoomLevel] = useState(100);
   const [emptyRowsCount, setEmptyRowsCount] = useState(20);
   const fileInputRef = useRef<HTMLInputElement>(null);

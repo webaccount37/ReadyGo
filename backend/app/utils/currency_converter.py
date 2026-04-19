@@ -36,8 +36,9 @@ def _get_default_rates() -> dict[str, float]:
         "THB": 35.0,
         "EUR": 0.85,
         "GBP": 0.75,
-        "AUD": 1.35,
-        "SGD": 1.35,
+        # Distinct fallbacks so AUD→SGD is not a no-op when DB rates are missing (rates_to_usd = units per 1 USD).
+        "AUD": 1.52,
+        "SGD": 1.34,
         "JPY": 110.0,
         "CNY": 6.5,
     }

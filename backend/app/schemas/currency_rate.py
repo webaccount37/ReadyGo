@@ -37,3 +37,10 @@ class CurrencyRateListResponse(BaseModel):
     total: int
 
 
+class CurrencyRatesImportResponse(BaseModel):
+    """Summary after importing rates from ExchangeRate-API (USD base)."""
+    rates_date: str = Field(..., description="Provider last update time (UTC string)")
+    updated_codes: List[str]
+    skipped_not_in_feed: List[str]
+
+

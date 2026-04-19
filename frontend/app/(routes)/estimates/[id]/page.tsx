@@ -178,6 +178,15 @@ export default function EstimateDetailPage() {
     return centerChanged || currencyChanged;
   }, [opportunity, estimate, originalInvoiceCenterId, originalInvoiceCurrency, isLockedForEditing]);
 
+  /** Invoice currency for the spreadsheet: opportunity is source of truth; avoid estimate.currency before opp loads. */
+  const spreadsheetInvoiceCurrency = useMemo(() => {
+    const fromOpp = opportunity?.default_currency?.trim();
+    if (fromOpp) return fromOpp;
+    const fromState = invoiceCurrency?.trim();
+    if (fromState) return fromState;
+    return estimate?.currency?.trim() || "USD";
+  }, [opportunity?.default_currency, invoiceCurrency, estimate?.currency]);
+
   // Check for date mismatches
   const hasDateMismatch = useMemo(() => {
     if (!estimate?.line_items || !startDate || !endDate) return false;
@@ -560,7 +569,7 @@ export default function EstimateDetailPage() {
         startDate={startDate} 
         endDate={endDate}
         opportunityDeliveryCenterId={opportunity?.delivery_center_id}
-        opportunityCurrency={invoiceCurrency}
+        opportunityCurrency={spreadsheetInvoiceCurrency}
         invoiceCustomer={invoiceCustomer}
         billableExpenses={billableExpenses}
         readOnly={estimate.is_locked || isLockedForEditing}

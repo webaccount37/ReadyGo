@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useRole } from "@/hooks/useRoles";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
@@ -11,6 +11,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import type { EngagementLineItemCreate, EngagementLineItemUpdate } from "@/types/engagement";
 import { convertCurrency } from "@/lib/utils/currency";
+import { fingerprintRoleRates } from "@/lib/utils/role-rate-fingerprint";
+import { pickRoleRateForOpportunityInvoiceCenter } from "@/lib/utils/role-rate-picker";
 import { EngagementAutoFillDialog } from "./auto-fill-dialog";
 import { engagementsApi } from "@/lib/api/engagements";
 
@@ -37,7 +39,15 @@ export function EngagementEmptyRow({
 }: EngagementEmptyRowProps) {
   const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
   const { data: deliveryCentersData } = useDeliveryCenters();
+
+  const invoiceCenterDefaultCurrency = useMemo(() => {
+    if (!opportunityDeliveryCenterId || !deliveryCentersData?.items?.length) return undefined;
+    return deliveryCentersData.items.find(
+      (d) => String(d.id) === String(opportunityDeliveryCenterId)
+    )?.default_currency;
+  }, [opportunityDeliveryCenterId, deliveryCentersData?.items]);
   const { data: employeesData } = useEmployees({ limit: 100 });
+
   const createLineItem = useCreateLineItem();
   const updateLineItem = useUpdateLineItem();
   const deleteLineItemMutation = useDeleteLineItem();
@@ -47,7 +57,7 @@ export function EngagementEmptyRow({
   // Initialize lineItemId from localStorage or null
   const getInitialLineItemId = (): string | null => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`engagement-line-item-id-${stableId}-${engagementId}-${_rowIndex}`);
+      const saved = localStorage.getItem(`engagement-line-item-id-${stableId}-${engagementId}`);
       return saved || null;
     }
     return null;
@@ -66,14 +76,21 @@ export function EngagementEmptyRow({
   // Get initial form data
   const getInitialFormData = (): Partial<EngagementLineItemCreate> => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`engagement-empty-row-${stableId}-${engagementId}-${_rowIndex}`);
+      const savedLineItemId = localStorage.getItem(`engagement-line-item-id-${stableId}-${engagementId}`);
+      const saved = localStorage.getItem(`engagement-empty-row-${stableId}-${engagementId}`);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          return {
+          const merged: Partial<EngagementLineItemCreate> = {
             ...parsed,
             currency: currency,
           };
+          if (!savedLineItemId) {
+            merged.role_id = "";
+            merged.rate = "0";
+            merged.cost = "0";
+          }
+          return merged;
         } catch {
           // Ignore parse errors
         }
@@ -109,22 +126,22 @@ export function EngagementEmptyRow({
       setLineItemId(null);
       setFormData(getInitialFormData());
       if (typeof window !== "undefined") {
-        localStorage.removeItem(`engagement-line-item-id-${stableId}-${engagementId}-${_rowIndex}`);
-        localStorage.removeItem(`engagement-empty-row-${stableId}-${engagementId}-${_rowIndex}`);
+        localStorage.removeItem(`engagement-line-item-id-${stableId}-${engagementId}`);
+        localStorage.removeItem(`engagement-empty-row-${stableId}-${engagementId}`);
       }
     }
-  }, [isRenderedAsLineItemRow, lineItemId, stableId, engagementId, _rowIndex, engagementDetail]);
+  }, [isRenderedAsLineItemRow, lineItemId, stableId, engagementId, engagementDetail]);
 
   // Persist lineItemId to localStorage
   useEffect(() => {
     if (typeof window !== "undefined") {
       if (lineItemId) {
-        localStorage.setItem(`engagement-line-item-id-${stableId}-${engagementId}-${_rowIndex}`, lineItemId);
+        localStorage.setItem(`engagement-line-item-id-${stableId}-${engagementId}`, lineItemId);
       } else {
-        localStorage.removeItem(`engagement-line-item-id-${stableId}-${engagementId}-${_rowIndex}`);
+        localStorage.removeItem(`engagement-line-item-id-${stableId}-${engagementId}`);
       }
     }
-  }, [lineItemId, stableId, engagementId, _rowIndex]);
+  }, [lineItemId, stableId, engagementId]);
 
   // Fetch role details when role is selected
   const { data: selectedRoleData, isLoading: isLoadingRole, isFetching: isFetchingRole } = useRole(formData.role_id || "", true, {
@@ -136,24 +153,26 @@ export function EngagementEmptyRow({
     enabled: !!formData.employee_id,
   });
 
+  const roleRatesFingerprint = fingerprintRoleRates(selectedRoleData);
+
   // Save formData to localStorage whenever it changes
   useEffect(() => {
     if (typeof window !== "undefined") {
       const hasData = formData.role_id || formData.payable_center_id || formData.employee_id || formData.rate || formData.cost;
       if (hasData) {
-        localStorage.setItem(`engagement-empty-row-${stableId}-${engagementId}-${_rowIndex}`, JSON.stringify(formData));
+        localStorage.setItem(`engagement-empty-row-${stableId}-${engagementId}`, JSON.stringify(formData));
       } else {
-        localStorage.removeItem(`engagement-empty-row-${stableId}-${engagementId}-${_rowIndex}`);
+        localStorage.removeItem(`engagement-empty-row-${stableId}-${engagementId}`);
       }
     }
-  }, [formData, stableId, engagementId, _rowIndex]);
+  }, [formData, stableId, engagementId]);
 
   // Clear localStorage when line item is created
   useEffect(() => {
     if (lineItemId && typeof window !== "undefined") {
-      localStorage.removeItem(`engagement-empty-row-${stableId}-${engagementId}-${_rowIndex}`);
+      localStorage.removeItem(`engagement-empty-row-${stableId}-${engagementId}`);
     }
-  }, [lineItemId, stableId, engagementId, _rowIndex]);
+  }, [lineItemId, stableId, engagementId]);
 
   const [isSaving, setIsSaving] = useState(false);
   const isCreatingRef = useRef(false);
@@ -168,33 +187,16 @@ export function EngagementEmptyRow({
   const lastPopulatedRoleDataRef = useRef<string>("");
   const lastPopulatedEmployeeRef = useRef<string>("");
 
-  // When Role is selected, update Cost and Rate
   useEffect(() => {
-    // Skip if we're currently saving, creating, or receiving backend updates
     if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      if (formData.role_id !== prevRoleIdRef.current) {
-        prevRoleIdRef.current = formData.role_id || "";
-        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      }
       return;
     }
 
-    // Need role_id, opportunity delivery center, and selectedRoleData to proceed
-    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
     if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData || isLoadingRole || isFetchingRole) {
-      // If role changed but data not loaded yet, update ref
-      if (formData.role_id !== prevRoleIdRef.current) {
-        prevRoleIdRef.current = formData.role_id || "";
-        lastPopulatedRoleDataRef.current = "";
-      }
       return;
     }
 
     if (selectedRoleData.id !== formData.role_id) {
-      if (formData.role_id !== prevRoleIdRef.current) {
-        prevRoleIdRef.current = formData.role_id || "";
-        lastPopulatedRoleDataRef.current = "";
-      }
       return;
     }
 
@@ -209,8 +211,10 @@ export function EngagementEmptyRow({
       return;
     }
 
-    const matchingRate = selectedRoleData.role_rates?.find(
-      (rate) => String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
+    const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+      selectedRoleData.role_rates,
+      opportunityDeliveryCenterId,
+      invoiceCenterDefaultCurrency
     );
 
     let newCost: string;
@@ -220,26 +224,27 @@ export function EngagementEmptyRow({
     if (matchingRate) {
       let baseCost = matchingRate.internal_cost_rate || 0;
       let baseRate = matchingRate.external_rate || 0;
-      roleRateCurrency = matchingRate.default_currency || currency;
+      roleRateCurrency =
+        matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
       
       if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
         baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
         baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+        if (!Number.isFinite(baseCost) || !Number.isFinite(baseRate)) {
+          return;
+        }
       }
-      
+
       newCost = parseFloat(baseCost.toFixed(2)).toString();
       newRate = parseFloat(baseRate.toFixed(2)).toString();
+    } else if (selectedRoleData.role_rates?.[0]) {
+      const firstRate = selectedRoleData.role_rates[0];
+      const fallbackCost = firstRate.internal_cost_rate ?? 0;
+      const fallbackRate = firstRate.external_rate ?? 0;
+      newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+      newRate = parseFloat(fallbackRate.toFixed(2)).toString();
     } else {
-      if (selectedRoleData) {
-        const firstRate = selectedRoleData.role_rates?.[0];
-        const fallbackCost = firstRate?.internal_cost_rate ?? 0;
-        const fallbackRate = firstRate?.external_rate ?? 0;
-        newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-        newRate = parseFloat(fallbackRate.toFixed(2)).toString();
-      } else {
-        prevRoleIdRef.current = formData.role_id || "";
-        return;
-      }
+      return;
     }
 
     const hasEmployee = !!formData.employee_id;
@@ -264,29 +269,32 @@ export function EngagementEmptyRow({
     
     prevRoleIdRef.current = formData.role_id || "";
     lastPopulatedRoleDataRef.current = currentKey;
-  }, [formData.role_id, formData.employee_id, opportunityDeliveryCenterId, currency, selectedRoleData, isSaving, isCreatingRef, isLoadingRole, isFetchingRole]);
+  }, [
+    formData.role_id,
+    formData.employee_id,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedRoleData?.id,
+    roleRatesFingerprint,
+    isSaving,
+    isCreatingRef,
+    isLoadingRole,
+    isFetchingRole,
+  ]);
 
-  // When Employee is selected or cleared, update Cost accordingly
   useEffect(() => {
-    // Skip if we're currently saving, creating, or receiving backend updates
     if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      if (formData.employee_id !== prevEmployeeIdRef.current) {
-        prevEmployeeIdRef.current = formData.employee_id || "";
-        lastPopulatedEmployeeRef.current = ""; // Reset when employee changes
-      }
       return;
     }
 
     const currentEmployeeId = formData.employee_id || "";
     const employeeChanged = currentEmployeeId !== prevEmployeeIdRef.current;
-    
-    // If employee changed, reset the populated flag
+
     if (employeeChanged) {
       lastPopulatedEmployeeRef.current = "";
-      prevEmployeeIdRef.current = currentEmployeeId;
     }
-    
-    // Skip if we've already populated cost for this employee (and employee hasn't changed)
+
     if (!employeeChanged && lastPopulatedEmployeeRef.current === currentEmployeeId) {
       return;
     }
@@ -294,41 +302,40 @@ export function EngagementEmptyRow({
     if (!currentEmployeeId) {
       if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData && !isLoadingRole && !isFetchingRole) {
         if (selectedRoleData.id !== formData.role_id) {
-          prevEmployeeIdRef.current = currentEmployeeId;
           return;
         }
-        
-        const matchingRate = selectedRoleData.role_rates?.find(
-          (rate) => String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
+
+        const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+          selectedRoleData.role_rates,
+          opportunityDeliveryCenterId,
+          invoiceCenterDefaultCurrency
         );
 
         let newCost: string;
         if (matchingRate) {
           let baseCost = matchingRate.internal_cost_rate || 0;
-          const roleRateCurrency = matchingRate.default_currency || currency;
-          
+          const roleRateCurrency =
+            matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
+
           if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
             baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+            if (!Number.isFinite(baseCost)) {
+              return;
+            }
           }
-          
+
           newCost = parseFloat(baseCost.toFixed(2)).toString();
+        } else if (selectedRoleData.role_rates?.[0]) {
+          const fallbackCost = selectedRoleData.role_rates[0].internal_cost_rate ?? 0;
+          newCost = parseFloat(fallbackCost.toFixed(2)).toString();
         } else {
-          if (selectedRoleData) {
-            const firstRate = selectedRoleData.role_rates?.[0];
-            const fallbackCost = selectedRoleData.role_rates?.[0]?.internal_cost_rate ?? 0;
-            newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-          } else {
-            prevEmployeeIdRef.current = currentEmployeeId;
-            return;
-          }
+          return;
         }
 
-        // Update cost to role-based cost
         if (newCost !== formData.cost) {
           setFormData((prev) => ({
             ...prev,
             cost: newCost,
-            // Rate is NOT updated - it stays based on Role
           }));
         }
       }
@@ -336,25 +343,11 @@ export function EngagementEmptyRow({
       return;
     }
 
-    // Employee was selected - update cost (and rate if no role) from employee's rates based on delivery center matching
-    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
     if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
-      // Employee data not loaded yet, wait for it
-      prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
 
-    // CRITICAL: Verify that selectedEmployeeData matches the current employee_id
-    // This prevents using stale employee data when employee changes but React Query hasn't finished fetching yet
     if (selectedEmployeeData.id !== currentEmployeeId) {
-      console.warn("Employee data mismatch detected (empty row):", {
-        selectedEmployeeDataId: selectedEmployeeData.id,
-        currentEmployeeId,
-        isLoadingEmployee,
-        isFetchingEmployee,
-      });
-      // Employee data doesn't match current selection - wait for correct data to load
-      prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
 
@@ -391,30 +384,22 @@ export function EngagementEmptyRow({
       employeeRate = selectedEmployeeData.external_bill_rate || 0;
     }
     
-    // Convert to Opportunity Invoice Currency if currencies differ
     if (!currenciesMatch) {
       employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
+      if (!Number.isFinite(employeeCost)) {
+        return;
+      }
       if (!hasRole) {
         employeeRate = convertCurrency(employeeRate, employeeCurrency, currency);
+        if (!Number.isFinite(employeeRate)) {
+          return;
+        }
       }
     }
-    
-    // Round to 2 decimal places
+
     const newCost = parseFloat(employeeCost.toFixed(2)).toString();
     const newRate = !hasRole ? parseFloat(employeeRate.toFixed(2)).toString() : formData.rate;
-    
-    console.log("Updating Cost (and Rate if no role) from Employee:", {
-      centersMatch,
-      rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
-      originalCost: centersMatch ? selectedEmployeeData.internal_cost_rate : selectedEmployeeData.internal_bill_rate,
-      employeeCurrency,
-      convertedCost: employeeCost,
-      newCost,
-      currentCost: formData.cost,
-      hasRole,
-      newRate: !hasRole ? newRate : "not updated (role exists)",
-    });
-    
+
     // Update cost always, and rate only if no role selected
     const updates: Partial<EngagementLineItemCreate> = {
       cost: newCost,
@@ -432,7 +417,23 @@ export function EngagementEmptyRow({
     lastPopulatedEmployeeRef.current = currentEmployeeId;
 
     prevEmployeeIdRef.current = currentEmployeeId;
-  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole]);
+  }, [
+    formData.employee_id,
+    formData.role_id,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedEmployeeData,
+    selectedRoleData?.id,
+    roleRatesFingerprint,
+    deliveryCentersData,
+    isSaving,
+    isCreatingRef,
+    isLoadingEmployee,
+    isFetchingEmployee,
+    isLoadingRole,
+    isFetchingRole,
+  ]);
 
   // Auto-save function
   const saveToDatabase = useCallback(async () => {

@@ -198,7 +198,7 @@ export function OpportunityForm({
           setDealValueUsd(dealValueNum.toFixed(2));
         } else {
           const usdValue = convertCurrency(dealValueNum, formData.default_currency, "USD");
-          setDealValueUsd(usdValue.toFixed(2));
+          setDealValueUsd(Number.isFinite(usdValue) ? usdValue.toFixed(2) : "");
         }
       } else {
         setDealValueUsd("");

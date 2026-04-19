@@ -172,6 +172,9 @@ function OpportunityDetailPageInner() {
   const isLocked =
     opportunity.is_permanently_locked || hasActiveQuote(opportunity.id);
 
+  const accountDisplayName =
+    opportunity.account_name?.trim() || getAccountName(opportunity.account_id);
+
   return (
     <div className="w-full max-w-full overflow-x-hidden min-w-0">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
@@ -184,8 +187,8 @@ function OpportunityDetailPageInner() {
           </Link>
           <h1 className="text-3xl font-bold">{opportunity.name}</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {getAccountName(opportunity.account_id) !== "—" && (
-              <>Account: {getAccountName(opportunity.account_id)} • </>
+            {accountDisplayName !== "—" && (
+              <>Account: {accountDisplayName} • </>
             )}
             Status: {formatStatus(opportunity.status)}
           </p>
@@ -390,10 +393,10 @@ function OpportunityDetailPageInner() {
                 <div>
                   <p className="font-semibold text-gray-800">Account</p>
                   <Link
-                    href={`/accounts?search=${encodeURIComponent(getAccountName(opportunity.account_id))}`}
+                    href={`/accounts?search=${encodeURIComponent(accountDisplayName)}`}
                     className="text-blue-600 hover:underline"
                   >
-                    {getAccountName(opportunity.account_id)}
+                    {accountDisplayName}
                   </Link>
                 </div>
                 <div>

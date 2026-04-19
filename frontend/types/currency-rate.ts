@@ -24,4 +24,10 @@ export interface CurrencyRateListResponse {
   total: number;
 }
 
+export interface CurrencyRatesImportResponse {
+  rates_date: string;
+  updated_codes: string[];
+  skipped_not_in_feed: string[];
+}
+
 

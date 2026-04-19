@@ -9,6 +9,7 @@ import type {
   CurrencyRateCreate,
   CurrencyRateUpdate,
   CurrencyRateListResponse,
+  CurrencyRatesImportResponse,
 } from "@/types/currency-rate";
 
 const QUERY_KEYS = {
@@ -135,6 +136,23 @@ export function useDeleteCurrencyRate(
     onSuccess: (_, id) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
       queryClient.removeQueries({ queryKey: QUERY_KEYS.detail(id) });
+    },
+    ...options,
+  });
+}
+
+/**
+ * Fetch latest USD-based rates from ExchangeRate-API and update existing non-USD rows.
+ */
+export function useImportCurrencyRates(
+  options?: UseMutationOptions<CurrencyRatesImportResponse, Error, void>
+) {
+  const queryClient = useQueryClient();
+
+  return useMutation<CurrencyRatesImportResponse, Error, void>({
+    mutationFn: () => currencyRatesApi.importCurrencyRates(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.lists() });
     },
     ...options,
   });

@@ -9,15 +9,17 @@ import {
   useCreateCurrencyRate,
   useUpdateCurrencyRate,
   useDeleteCurrencyRate,
+  useImportCurrencyRates,
 } from "@/hooks/useCurrencyRates";
 import type { CurrencyRateCreate, CurrencyRateUpdate } from "@/types/currency-rate";
-import { Plus, Trash2, Save, X, Pencil } from "lucide-react";
+import { Plus, Trash2, Save, X, Pencil, Download } from "lucide-react";
 
 export function CurrencyRatesManager() {
   const { data, isLoading, error } = useCurrencyRates({ limit: 1000 });
   const createMutation = useCreateCurrencyRate();
   const updateMutation = useUpdateCurrencyRate();
   const deleteMutation = useDeleteCurrencyRate();
+  const importMutation = useImportCurrencyRates();
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editRate, setEditRate] = useState<number | null>(null);
@@ -69,6 +71,22 @@ export function CurrencyRatesManager() {
     } catch (error) {
       console.error("Failed to delete currency rate:", error);
       alert("Failed to delete currency rate. Please try again.");
+    }
+  };
+
+  const handleImportRates = async () => {
+    try {
+      const result = await importMutation.mutateAsync();
+      const skipped =
+        result.skipped_not_in_feed.length > 0
+          ? `\nNot updated (no provider rate): ${result.skipped_not_in_feed.join(", ")}`
+          : "";
+      alert(
+        `Imported rates as of ${result.rates_date || "unknown"}.\nUpdated: ${result.updated_codes.length} (${result.updated_codes.join(", ")}).${skipped}`
+      );
+    } catch (error) {
+      console.error("Failed to import currency rates:", error);
+      alert("Failed to import currency rates. Please try again.");
     }
   };
 
@@ -147,13 +165,25 @@ export function CurrencyRatesManager() {
         <div className="px-2 py-3 border-b border-gray-200 dark:border-gray-700 flex justify-between items-center">
           <h2 className="text-lg font-semibold">Currency Rates</h2>
           {!showAddForm && (
-            <Button
-              onClick={() => setShowAddForm(true)}
-              className="flex items-center gap-2"
-            >
-              <Plus className="w-4 h-4" />
-              Add Currency Rate
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleImportRates}
+                disabled={importMutation.isPending}
+                className="flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Import Currency Rates
+              </Button>
+              <Button
+                onClick={() => setShowAddForm(true)}
+                className="flex items-center gap-2"
+              >
+                <Plus className="w-4 h-4" />
+                Add Currency Rate
+              </Button>
+            </div>
           )}
         </div>
 

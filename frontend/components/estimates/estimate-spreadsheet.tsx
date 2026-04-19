@@ -8,6 +8,8 @@ import { EstimateEmptyRow } from "./estimate-empty-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useExportEstimateExcel, useImportEstimateExcel, useEstimateDetail } from "@/hooks/useEstimates";
+import { useCurrencyRates } from "@/hooks/useCurrencyRates";
+import { setCurrencyRates } from "@/lib/utils/currency";
 
 interface EstimateSpreadsheetProps {
   estimate: EstimateDetailResponse;
@@ -30,6 +32,15 @@ export function EstimateSpreadsheet({
   billableExpenses = true,
   readOnly = false
 }: EstimateSpreadsheetProps) {
+  const { data: currencyRatesData } = useCurrencyRates({ limit: 10000 });
+  if (currencyRatesData?.items) {
+    const rates: Record<string, number> = {};
+    for (const rate of currencyRatesData.items) {
+      rates[rate.currency_code.toUpperCase()] = rate.rate_to_usd;
+    }
+    setCurrencyRates(rates);
+  }
+
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
   const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count
   const fileInputRef = useRef<HTMLInputElement>(null);

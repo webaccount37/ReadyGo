@@ -8,7 +8,7 @@ from uuid import UUID
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ from app.db.repositories.role_rate_repository import RoleRateRepository
 from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
+from app.models.delivery_center import DeliveryCenter
 from app.models.engagement import Engagement, EngagementLineItem, EngagementWeeklyHours, EngagementPhase
 from app.models.quote import Quote, QuoteStatus, QuoteType
 from app.models.estimate import Estimate
@@ -678,24 +679,40 @@ class EngagementService(BaseService):
         return rate, cost
     
     async def _get_role_rate(self, role_id: UUID, delivery_center_id: UUID, currency: str) -> Optional[RoleRate]:
-        """Get a role rate for the given role, delivery center, and currency.
-        
-        Engagements should NEVER create RoleRate records. If a RoleRate doesn't exist,
-        it should be created through the Roles management interface first.
-        
-        Returns:
-            RoleRate if found, None otherwise
+        """Resolve RoleRate for role + Opportunity Invoice Center (delivery_center_id).
+
+        Same rules as EstimateService._get_role_rate: DC-only row selection, then convert
+        in _get_default_rates_from_role_rate to line/invoice currency.
         """
-        result = await self.session.execute(
-            select(RoleRate).where(
-                and_(
-                    RoleRate.role_id == role_id,
-                    RoleRate.delivery_center_id == delivery_center_id,
-                    RoleRate.default_currency == currency
+        _ = currency
+
+        all_for_dc = list(
+            (
+                await self.session.execute(
+                    select(RoleRate)
+                    .where(
+                        and_(
+                            RoleRate.role_id == role_id,
+                            RoleRate.delivery_center_id == delivery_center_id,
+                        )
+                    )
+                    .order_by(RoleRate.default_currency.asc())
                 )
-            )
+            ).scalars().all()
         )
-        return result.scalar_one_or_none()
+        if not all_for_dc:
+            return None
+        if len(all_for_dc) == 1:
+            return all_for_dc[0]
+
+        dc = (
+            await self.session.execute(select(DeliveryCenter).where(DeliveryCenter.id == delivery_center_id))
+        ).scalar_one_or_none()
+        dc_currency = (dc.default_currency or "").upper() if dc else ""
+        for rr in all_for_dc:
+            if (rr.default_currency or "").upper() == dc_currency:
+                return rr
+        return all_for_dc[0]
     
     async def list_engagements(
         self,
@@ -921,9 +938,8 @@ class EngagementService(BaseService):
             if not line_item_dict.get("cost"):
                 line_item_dict["cost"] = cost
         
-        # Set currency from opportunity if not provided
-        if not line_item_dict.get("currency"):
-            line_item_dict["currency"] = opportunity.default_currency or "USD"
+        # Always store row currency as the Opportunity invoice currency
+        line_item_dict["currency"] = opportunity.default_currency or "USD"
         
         # Get max row_order
         max_order = await self.line_item_repo.get_max_row_order(engagement_id)
@@ -1004,6 +1020,11 @@ class EngagementService(BaseService):
         
         update_dict = line_item_data.model_dump(exclude_unset=True)
 
+        engagement = await self.engagement_repo.get(engagement_id)
+        opportunity = await self.opportunity_repo.get(engagement.opportunity_id) if engagement else None
+        # Single invoice currency: Opportunity default_currency (row.currency is denormalized copy only).
+        invoice_currency = ((opportunity.default_currency or "").strip() or "USD") if opportunity else "USD"
+
         # When timesheet is approved: block Payable Center, Role, Billable, Employee; allow Cost, Rate
         # Start/end dates: allow only if new range still covers all approved weeks
         has_approved = await self._line_item_has_approved_timesheets(line_item_id)
@@ -1073,11 +1094,6 @@ class EngagementService(BaseService):
 
         # Handle role_id updates - use Opportunity Invoice Center (not Payable Center) for role_rate lookup
         if "role_id" in update_dict:
-            # Get currency and opportunity delivery center (Invoice Center) for role_rate lookup
-            engagement = await self.engagement_repo.get(engagement_id)
-            opportunity = await self.opportunity_repo.get(engagement.opportunity_id) if engagement else None
-            currency = update_dict.get("currency") or line_item.currency or (opportunity.default_currency if opportunity else "USD")
-            
             # Use Opportunity Invoice Center (delivery_center_id) for role_rate lookup, NOT Payable Center
             opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
             if not opportunity_delivery_center_id:
@@ -1086,12 +1102,12 @@ class EngagementService(BaseService):
             role_rate = await self._get_role_rate(
                 update_dict["role_id"],
                 opportunity_delivery_center_id,  # Use Opportunity Invoice Center, not Payable Center
-                currency
+                invoice_currency,
             )
             if not role_rate:
                 raise ValueError(
                     f"RoleRate not found for Role '{update_dict['role_id']}', "
-                    f"Delivery Center '{opportunity_delivery_center_id}', Currency '{currency}'. "
+                    f"Delivery Center '{opportunity_delivery_center_id}', Currency '{invoice_currency}'. "
                     f"Please create the RoleRate association first before using it in Engagements."
                 )
             update_dict["role_rates_id"] = role_rate.id
@@ -1132,17 +1148,14 @@ class EngagementService(BaseService):
             
             # For rate lookup, use Role ID + Opportunity Invoice Center (not Payable Center)
             if new_role_id:
-                engagement = await self.engagement_repo.get(engagement_id)
-                opportunity = await self.opportunity_repo.get(engagement.opportunity_id) if engagement else None
                 opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
-                currency = update_dict.get("currency") or line_item.currency or (opportunity.default_currency if opportunity else "USD")
                 
                 if opportunity_delivery_center_id:
                     # Get role_rate using Role ID + Opportunity Invoice Center for rate lookup
                     role_rate_for_rates = await self._get_role_rate(
                         new_role_id,
                         opportunity_delivery_center_id,  # Use Opportunity Invoice Center for rate lookup
-                        currency
+                        invoice_currency,
                     )
                     if not role_rate_for_rates:
                         # If RoleRate doesn't exist, use role defaults or 0
@@ -1153,7 +1166,7 @@ class EngagementService(BaseService):
                         default_rate, default_cost = await self._get_default_rates_from_role_rate(
                             role_rate_for_rates.id,  # Use role_rate with Opportunity Invoice Center
                             new_employee_id,
-                            target_currency=currency,  # Pass currency for conversion
+                            target_currency=invoice_currency,
                             opportunity_delivery_center_id=opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison
                         )
                 else:
@@ -1161,22 +1174,17 @@ class EngagementService(BaseService):
                     default_rate, default_cost = await self._get_default_rates_from_role_rate(
                         update_dict.get("role_rates_id", line_item.role_rates_id),
                         new_employee_id,
-                        target_currency=currency,  # Pass currency for conversion
+                        target_currency=invoice_currency,
                         opportunity_delivery_center_id=opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison (may be None)
                     )
             else:
                 # Fallback to using the role_rates_id directly
-                # Get opportunity delivery center from line item's engagement
-                engagement = await self.engagement_repo.get(engagement_id)
-                fallback_opportunity_delivery_center_id = None
-                if engagement:
-                    opportunity = await self.opportunity_repo.get(engagement.opportunity_id) if engagement else None
-                    fallback_opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
+                fallback_opportunity_delivery_center_id = opportunity.delivery_center_id if opportunity else None
                 
                 default_rate, default_cost = await self._get_default_rates_from_role_rate(
                     update_dict.get("role_rates_id", line_item.role_rates_id),
                     new_employee_id,
-                    target_currency=currency,  # Pass currency for conversion
+                    target_currency=invoice_currency,
                     opportunity_delivery_center_id=fallback_opportunity_delivery_center_id,  # Pass opportunity delivery center for comparison (may be None)
                 )
             
@@ -1185,6 +1193,9 @@ class EngagementService(BaseService):
                 update_dict["rate"] = default_rate
             if "cost" not in update_dict:
                 update_dict["cost"] = default_cost
+
+        if opportunity and opportunity.default_currency:
+            update_dict["currency"] = (opportunity.default_currency or "").strip() or "USD"
         
         updated = await self.line_item_repo.update(line_item_id, **update_dict)
         await self.session.flush()  # Flush to get updated values

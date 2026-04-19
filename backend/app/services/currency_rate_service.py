@@ -2,15 +2,23 @@
 Currency rate service with business logic.
 """
 
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, cast
 from uuid import UUID
+
+import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.repositories.currency_rate_repository import CurrencyRateRepository
-from app.schemas.currency_rate import CurrencyRateCreate, CurrencyRateUpdate, CurrencyRateResponse
-from app.models.currency_rate import CurrencyRate
+from app.schemas.currency_rate import (
+    CurrencyRateCreate,
+    CurrencyRateUpdate,
+    CurrencyRateResponse,
+    CurrencyRatesImportResponse,
+)
 from app.utils.currency_converter import clear_currency_rates_cache
 from app.services.opportunity_service import OpportunityService
+
+OPEN_EXCHANGERATE_API_URL = "https://open.er-api.com/v6/latest/USD"
 
 
 class CurrencyRateService:
@@ -126,4 +134,61 @@ class CurrencyRateService:
         """Get all currency rates as a dictionary for use in currency converter."""
         currency_rates = await self.currency_rate_repo.get_all_rates()
         return {cr.currency_code.upper(): cr.rate_to_usd for cr in currency_rates}
+
+    async def import_rates_from_exchangerate_api(self) -> CurrencyRatesImportResponse:
+        """
+        Fetch USD-based rates from ExchangeRate-API open endpoint and update existing
+        DB rows (except USD). Single commit, cache clear, and forecast sync.
+        """
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.get(OPEN_EXCHANGERATE_API_URL)
+            resp.raise_for_status()
+            data = cast(Dict[str, Any], resp.json())
+
+        if data.get("result") != "success" or data.get("base_code") != "USD":
+            raise ValueError("Invalid response from exchange rate provider")
+
+        raw_rates = data.get("rates")
+        if not isinstance(raw_rates, dict):
+            raise ValueError("Invalid response from exchange rate provider")
+
+        rates_date = str(data.get("time_last_update_utc") or "")
+
+        computed: dict[str, float] = {}
+        for code, value in raw_rates.items():
+            key = str(code).upper()
+            try:
+                rate_val = float(value)
+            except (TypeError, ValueError):
+                continue
+            if rate_val > 0:
+                computed[key] = rate_val
+
+        all_rows = await self.currency_rate_repo.get_all_rates()
+        updated_codes: List[str] = []
+        skipped_not_in_feed: List[str] = []
+
+        for cr in all_rows:
+            code = cr.currency_code.upper()
+            if code == "USD":
+                continue
+            if code not in computed:
+                skipped_not_in_feed.append(code)
+                continue
+            new_rate = computed[code]
+            if new_rate <= 0:
+                skipped_not_in_feed.append(code)
+                continue
+            await self.currency_rate_repo.update(cr.id, rate_to_usd=new_rate)
+            updated_codes.append(code)
+
+        await self.session.commit()
+        clear_currency_rates_cache()
+        await self._sync_opportunity_forecasts()
+
+        return CurrencyRatesImportResponse(
+            rates_date=rates_date,
+            updated_codes=sorted(updated_codes),
+            skipped_not_in_feed=sorted(skipped_not_in_feed),
+        )
 

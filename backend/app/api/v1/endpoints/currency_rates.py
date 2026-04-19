@@ -2,6 +2,7 @@
 Currency rate API endpoints.
 """
 
+import httpx
 from fastapi import APIRouter, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -13,6 +14,7 @@ from app.schemas.currency_rate import (
     CurrencyRateUpdate,
     CurrencyRateResponse,
     CurrencyRateListResponse,
+    CurrencyRatesImportResponse,
 )
 
 router = APIRouter()
@@ -46,6 +48,26 @@ async def list_currency_rates(
         skip=skip,
         limit=limit,
     )
+
+
+@router.post("/import", response_model=CurrencyRatesImportResponse)
+async def import_currency_rates(
+    db: AsyncSession = Depends(get_db),
+) -> CurrencyRatesImportResponse:
+    """Fetch latest USD-based rates from ExchangeRate-API and update existing non-USD rows."""
+    controller = CurrencyRateController(db)
+    try:
+        return await controller.import_rates_from_exchangerate_api()
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Exchange rate provider unreachable",
+        ) from exc
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        ) from exc
 
 
 @router.get("/{currency_rate_id}", response_model=CurrencyRateResponse)

@@ -377,7 +377,7 @@ class QuoteService(BaseService):
             quote_total = await engagement_service.get_quote_total_revenue(quote_id)
             if quote_total is not None:
                 opportunity = await self.opportunity_repo.get(quote.opportunity_id)
-                if opportunity:
+                if opportunity and opportunity.status != OpportunityStatus.WON:
                     currency = opportunity.default_currency or "USD"
                     probability = OpportunityService.calculate_probability_from_status(OpportunityStatus.NEGOTIATION)
                     deal_value_usd = await opportunity_service.calculate_deal_value_usd(quote_total, currency)

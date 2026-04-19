@@ -13,6 +13,7 @@ from app.schemas.currency_rate import (
     CurrencyRateUpdate,
     CurrencyRateResponse,
     CurrencyRateListResponse,
+    CurrencyRatesImportResponse,
 )
 
 
@@ -71,5 +72,9 @@ class CurrencyRateController(BaseController):
     async def delete_currency_rate(self, currency_rate_id: UUID) -> bool:
         """Delete a currency rate."""
         return await self.currency_rate_service.delete_currency_rate(currency_rate_id)
+
+    async def import_rates_from_exchangerate_api(self) -> CurrencyRatesImportResponse:
+        """Import latest USD-based rates from ExchangeRate-API for existing currencies."""
+        return await self.currency_rate_service.import_rates_from_exchangerate_api()
 
 

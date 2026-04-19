@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import type { EstimateLineItem, EstimateDetailResponse, EstimateLineItemUpdate } from "@/types/estimate";
 import { AutoFillDialog } from "./auto-fill-dialog";
 import { useUpdateLineItem } from "@/hooks/useEstimates";
@@ -12,6 +12,8 @@ import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { convertCurrency } from "@/lib/utils/currency";
+import { fingerprintRoleRates } from "@/lib/utils/role-rate-fingerprint";
+import { pickRoleRateForOpportunityInvoiceCenter } from "@/lib/utils/role-rate-picker";
 import { estimatesApi } from "@/lib/api/estimates";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -153,7 +155,21 @@ export function EstimateLineItemRow({
       const newValue = lineItem.billable_expense_percentage || "0";
       return prev !== newValue ? newValue : prev;
     });
-  }, [lineItem.id, lineItem.cost, lineItem.rate, lineItem.start_date, lineItem.end_date, lineItem.delivery_center_id, lineItem.role_id, lineItem.employee_id, lineItem.billable, lineItem.billable_expense_percentage, roleValue]);
+    // Intentionally omit local roleValue from deps — sync from server lineItem only to avoid
+    // overwriting in-progress edits before debounced save completes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    lineItem.id,
+    lineItem.cost,
+    lineItem.rate,
+    lineItem.start_date,
+    lineItem.end_date,
+    lineItem.delivery_center_id,
+    lineItem.role_id,
+    lineItem.employee_id,
+    lineItem.billable,
+    lineItem.billable_expense_percentage,
+  ]);
 
   // Weekly hours editing state
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
@@ -166,6 +182,13 @@ export function EstimateLineItemRow({
   // Only show roles that have RoleRate associations with Opportunity Invoice Center
   const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
   const { data: deliveryCentersData, isLoading: isLoadingDeliveryCenters, isFetching: isFetchingDeliveryCenters } = useDeliveryCenters();
+
+  const invoiceCenterDefaultCurrency = useMemo(() => {
+    if (!opportunityDeliveryCenterId || !deliveryCentersData?.items?.length) return undefined;
+    return deliveryCentersData.items.find(
+      (d) => String(d.id) === String(opportunityDeliveryCenterId)
+    )?.default_currency;
+  }, [opportunityDeliveryCenterId, deliveryCentersData?.items]);
   const { data: employeesData } = useEmployees({ limit: 100 });
 
   // Fetch role details when role is selected (to get role rates)
@@ -567,158 +590,116 @@ export function EstimateLineItemRow({
   const prevRoleRef = useRef<string>(roleValue);
   const prevEmployeeRef = useRef<string>(employeeValue);
   const lastPopulatedRoleDataRef = useRef<string>("");
+  const roleRatesFingerprint = fingerprintRoleRates(selectedRoleData);
 
-  // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role
-  // IMPORTANT: Only auto-populate when role/employee changes, NOT when lineItem updates
+  // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role.
+  // Do not advance prevRoleRef on loading/mismatch exits (avoids stuck state when useRole lags).
+  // When role is unchanged but invoice currency or center changed, repopulate if currentKey differs.
   useEffect(() => {
-    console.log("Role change useEffect triggered:", {
-      roleValue,
-      prevRole: prevRoleRef.current,
-      isUpdatingRef: isUpdatingRef.current,
-      selectedRoleDataId: selectedRoleData?.id,
-      isLoadingRole,
-      isFetchingRole,
-    });
-
-    // Only proceed if role actually changed (not just on every render)
-    const roleChanged = roleValue !== prevRoleRef.current;
-    if (!roleChanged) {
-      return; // Don't auto-populate if role didn't change
-    }
-
-    console.log("Role changed detected, proceeding with rate calculation");
-
-    // Need roleValue, opportunity delivery center, and selectedRoleData to proceed
-    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
-    if (!roleValue || !opportunityDeliveryCenterId || !selectedRoleData || isLoadingRole || isFetchingRole) {
-      // If role changed but data not loaded yet, update ref
-      prevRoleRef.current = roleValue;
-      lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      return;
-    }
-
-    // CRITICAL: Verify that selectedRoleData matches the current roleValue
-    // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
-    if (selectedRoleData.id !== roleValue) {
-      console.warn("Role data mismatch detected:", {
-        selectedRoleDataId: selectedRoleData.id,
-        currentRoleValue: roleValue,
-        isLoadingRole,
-        isFetchingRole,
-      });
-      // Role data doesn't match current selection - wait for correct data to load
-      prevRoleRef.current = roleValue;
-      lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      return;
-    }
-
-    // Check if we've already populated for this role+opportunity+currency combination
     const currentKey = `${roleValue}-${opportunityDeliveryCenterId}-${currency}`;
-    
-    // Skip if we've already populated for this exact combination (unless role changed)
-    if (lastPopulatedRoleDataRef.current === currentKey) {
-      prevRoleRef.current = roleValue;
+    const roleChanged = roleValue !== prevRoleRef.current;
+
+    if (!roleValue || !opportunityDeliveryCenterId) {
       return;
     }
 
-    // Find the role rate that matches opportunity invoice center
-    // Compare as strings to handle UUID string comparison
-    console.log("Finding matching rate for role:", {
-      roleId: roleValue,
-      roleName: selectedRoleData.role_name,
+    if (isLoadingRole || isFetchingRole || !selectedRoleData) {
+      return;
+    }
+
+    if (selectedRoleData.id !== roleValue) {
+      return;
+    }
+
+    if (!roleChanged && lastPopulatedRoleDataRef.current === currentKey) {
+      return;
+    }
+
+    const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+      selectedRoleData.role_rates,
       opportunityDeliveryCenterId,
-      roleRatesCount: selectedRoleData.role_rates?.length || 0,
-      roleRates: selectedRoleData.role_rates?.map(r => ({
-        delivery_center_id: r.delivery_center_id,
-        external_rate: r.external_rate,
-        internal_cost_rate: r.internal_cost_rate,
-      })),
-    });
-    
-    const matchingRate = selectedRoleData.role_rates?.find(
-      (rate) =>
-        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
+      invoiceCenterDefaultCurrency
     );
 
     let newCost: string;
     let newRate: string;
 
     if (matchingRate) {
-      console.log("Found matching rate:", {
-        roleId: roleValue,
-        roleName: selectedRoleData.role_name,
-        matchingRate: {
-          delivery_center_id: matchingRate.delivery_center_id,
-          external_rate: matchingRate.external_rate,
-          internal_cost_rate: matchingRate.internal_cost_rate,
-          default_currency: matchingRate.default_currency,
-        },
-      });
-      
-      // Get rates from role rate
-      // Centers already match (we found matchingRate by matching delivery_center_id)
       let baseCost = matchingRate.internal_cost_rate || 0;
       let baseRate = matchingRate.external_rate || 0;
-      const roleRateCurrency = matchingRate.default_currency || currency;
-      
-      // Apply currency conversion: convert if currencies don't match
-      // Rate always uses external_rate, Cost always uses internal_cost_rate
+      const roleRateCurrency =
+        matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
+
       if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
         baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
         baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+        if (!Number.isFinite(baseRate) || !Number.isFinite(baseCost)) {
+          return;
+        }
       }
-      
-      // Round to 2 decimal places
+
       newCost = parseFloat(baseCost.toFixed(2)).toString();
       newRate = parseFloat(baseRate.toFixed(2)).toString();
+    } else if (selectedRoleData.role_rates?.[0]) {
+      const firstRate = selectedRoleData.role_rates[0];
+      const fallbackCost = firstRate.internal_cost_rate ?? 0;
+      const fallbackRate = firstRate.external_rate ?? 0;
+      newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+      newRate = parseFloat(fallbackRate.toFixed(2)).toString();
     } else {
-      // Fallback to role default rates if no matching rate found
-      // Use selectedRoleData which has full role info including defaults
-      if (selectedRoleData) {
-        const firstRate = selectedRoleData.role_rates?.[0];
-        const fallbackCost = firstRate?.internal_cost_rate ?? 0;
-        const fallbackRate = firstRate?.external_rate ?? 0;
-        // Round to 2 decimal places
-        newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-        newRate = parseFloat(fallbackRate.toFixed(2)).toString();
-      } else {
+      return;
+    }
+
+    if (!Number.isFinite(parseFloat(newCost)) || !Number.isFinite(parseFloat(newRate))) {
+      return;
+    }
+
+    const hasEmployee = !!employeeValue;
+
+    // Initial hydration: role already matches server and we have not marked populated yet.
+    // Do not debounce-save rate/cost on every spreadsheet open when values already match.
+    if (!roleChanged && lastPopulatedRoleDataRef.current === "") {
+      const liRate = parseFloat(String(lineItem.rate || "0"));
+      const liCost = parseFloat(String(lineItem.cost || "0"));
+      const nr = parseFloat(newRate);
+      const nc = parseFloat(newCost);
+      const rateClose = Math.abs(liRate - nr) < 0.005;
+      const costClose = hasEmployee || Math.abs(liCost - nc) < 0.005;
+      if (rateClose && costClose) {
+        lastPopulatedRoleDataRef.current = currentKey;
         prevRoleRef.current = roleValue;
         return;
       }
     }
 
-    console.log("Updating rates for role:", {
-      roleId: roleValue,
-      roleName: selectedRoleData.role_name,
-      newRate,
-      newCost,
-      previousRate: lineItem.rate,
-      previousCost: lineItem.cost,
-      hasEmployee: !!employeeValue,
-    });
-    
-    // Set flag to prevent sync effect from overwriting these values
     isUpdatingRatesFromRoleRef.current = true;
-    
-    // Update Rate always (Rate always comes from Role) - but ONLY when role changes
+
     setRateValue(newRate);
     handleFieldUpdate("rate", newRate, lineItem.rate || "0");
 
-    // Update Cost only if NO employee is selected (if employee selected, Cost comes from employee)
-    const hasEmployee = !!employeeValue;
     if (!hasEmployee) {
       setCostValue(newCost);
       handleFieldUpdate("cost", newCost, lineItem.cost || "0");
     }
 
-    // Clear flag after a short delay to allow updates to complete
     setTimeout(() => {
       isUpdatingRatesFromRoleRef.current = false;
     }, 1000);
 
     prevRoleRef.current = roleValue;
-    lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-  }, [roleValue, employeeValue, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, handleFieldUpdate, lineItem.cost, lineItem.rate, isLoadingRole, isFetchingRole]);
+    lastPopulatedRoleDataRef.current = currentKey;
+  }, [
+    roleValue,
+    employeeValue,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedRoleData?.id,
+    roleRatesFingerprint,
+    handleFieldUpdate,
+    isLoadingRole,
+    isFetchingRole,
+  ]);
 
   // When Employee is selected or cleared, update Cost accordingly
   useEffect(() => {
@@ -743,41 +724,33 @@ export function EstimateLineItemRow({
         // CRITICAL: Verify that selectedRoleData matches the current roleValue
         // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
         if (selectedRoleData.id !== roleValue) {
-          console.warn("Role data mismatch when clearing employee:", {
-            selectedRoleDataId: selectedRoleData.id,
-            currentRoleValue: roleValue,
-            isLoadingRole,
-            isFetchingRole,
-          });
-          // Role data doesn't match current selection - wait for correct data to load
-          prevEmployeeRef.current = employeeValue;
           return;
         }
-        
-        // Find the role rate that matches opportunity delivery center and currency
-        const matchingRate = selectedRoleData.role_rates?.find(
-          (rate) =>
-            String(rate.delivery_center_id) === String(opportunityDeliveryCenterId) &&
-            rate.default_currency === currency
+
+        const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+          selectedRoleData.role_rates,
+          opportunityDeliveryCenterId,
+          invoiceCenterDefaultCurrency
         );
 
         let newCost: string;
         if (matchingRate) {
-          const matchingCost = matchingRate.internal_cost_rate || 0;
-          // Round to 2 decimal places
-          newCost = parseFloat(matchingCost.toFixed(2)).toString();
-        } else {
-          // Fallback to role default rates if no matching rate found
-          // Use selectedRoleData which has full role info including defaults
-          if (selectedRoleData) {
-            const firstRate = selectedRoleData.role_rates?.[0];
-            const fallbackCost = firstRate?.internal_cost_rate ?? 0;
-            // Round to 2 decimal places
-            newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-          } else {
-            prevEmployeeRef.current = employeeValue;
-            return;
+          let matchingCost = matchingRate.internal_cost_rate || 0;
+          const roleRateCurrency =
+            matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
+          if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+            matchingCost = convertCurrency(matchingCost, roleRateCurrency, currency);
+            if (!Number.isFinite(matchingCost)) {
+              return;
+            }
           }
+          newCost = parseFloat(matchingCost.toFixed(2)).toString();
+        } else if (selectedRoleData.role_rates?.[0]) {
+          const firstRate = selectedRoleData.role_rates[0];
+          const fallbackCost = firstRate.internal_cost_rate ?? 0;
+          newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+        } else {
+          return;
         }
 
         // Update cost to role-based cost
@@ -792,31 +765,14 @@ export function EstimateLineItemRow({
     // Employee was selected - update cost from employee's rates based on delivery center matching
     // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
     if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
-      // Employee data not loaded yet, wait for it
-      prevEmployeeRef.current = employeeValue;
       return;
     }
 
-    // CRITICAL: Verify that selectedEmployeeData matches the current employeeValue
-    // This prevents using stale employee data when employee changes but React Query hasn't finished fetching yet
     if (selectedEmployeeData.id !== employeeValue) {
-      console.warn("Employee data mismatch detected:", {
-        selectedEmployeeDataId: selectedEmployeeData.id,
-        currentEmployeeValue: employeeValue,
-        isLoadingEmployee,
-        isFetchingEmployee,
-      });
-      // Employee data doesn't match current selection - wait for correct data to load
-      prevEmployeeRef.current = employeeValue;
       return;
     }
 
-    // CRITICAL: Wait for delivery centers data to load before calculating centersMatch
-    // If deliveryCentersData isn't loaded, we can't determine the employee's delivery center ID,
-    // which would cause centersMatch to incorrectly default to false
     if (!deliveryCentersData || isLoadingDeliveryCenters || isFetchingDeliveryCenters) {
-      console.log("Waiting for delivery centers data to load before calculating centersMatch");
-      prevEmployeeRef.current = employeeValue;
       return;
     }
 
@@ -831,15 +787,6 @@ export function EstimateLineItemRow({
       ? String(opportunityDeliveryCenterId) === String(employeeDeliveryCenterId)
       : false;
     
-    console.log("Calculating centersMatch (line item row):", {
-      opportunityDeliveryCenterId,
-      employeeDeliveryCenterCode: selectedEmployeeData.delivery_center,
-      employeeDeliveryCenterId,
-      centersMatch,
-      deliveryCentersDataLoaded: !!deliveryCentersData,
-      deliveryCentersCount: deliveryCentersData?.items?.length || 0,
-    });
-
     // Determine which rate to use and whether to convert currency
     let employeeCost: number;
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
@@ -858,30 +805,39 @@ export function EstimateLineItemRow({
       employeeCost = selectedEmployeeData.internal_bill_rate || 0;
     }
     
-    // Convert to Opportunity Invoice Currency if currencies differ
     if (!currenciesMatch) {
       employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
+      if (!Number.isFinite(employeeCost)) {
+        return;
+      }
     }
-    
-    // Round to 2 decimal places
+
     const newCost = parseFloat(employeeCost.toFixed(2)).toString();
-    console.log("Updating Cost from Employee (line item row):", {
-      centersMatch,
-      rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
-      originalCost: centersMatch ? selectedEmployeeData.internal_cost_rate : selectedEmployeeData.internal_bill_rate,
-      employeeCurrency,
-      convertedCost: employeeCost,
-      newCost,
-      currentCost: costValue,
-    });
-    
+
     // Always update cost from employee (don't check if changed, as it should update when employee changes)
     setCostValue(newCost);
     // Trigger save - only cost, NOT rate (use original value from lineItem)
     handleFieldUpdate("cost", newCost, lineItem.cost || "0");
 
     prevEmployeeRef.current = employeeValue;
-  }, [employeeValue, roleValue, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, handleFieldUpdate, lineItem.cost, costValue, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole, isLoadingDeliveryCenters, isFetchingDeliveryCenters]);
+  }, [
+    employeeValue,
+    roleValue,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedEmployeeData,
+    selectedRoleData?.id,
+    roleRatesFingerprint,
+    deliveryCentersData,
+    handleFieldUpdate,
+    isLoadingEmployee,
+    isFetchingEmployee,
+    isLoadingRole,
+    isFetchingRole,
+    isLoadingDeliveryCenters,
+    isFetchingDeliveryCenters,
+  ]);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     if (readOnly) {

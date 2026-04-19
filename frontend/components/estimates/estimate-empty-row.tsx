@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useRole } from "@/hooks/useRoles";
@@ -8,11 +8,12 @@ import { useRolesForDeliveryCenter } from "@/hooks/useEstimates";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { useCreateLineItem, useUpdateLineItem, useDeleteLineItem, useEstimateDetail } from "@/hooks/useEstimates";
-import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { estimatesApi } from "@/lib/api/estimates";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EstimateLineItemCreate, EstimateLineItem, EstimateLineItemUpdate } from "@/types/estimate";
-import { convertCurrency, setCurrencyRates } from "@/lib/utils/currency";
+import { convertCurrency } from "@/lib/utils/currency";
+import { fingerprintRoleRates } from "@/lib/utils/role-rate-fingerprint";
+import { pickRoleRateForOpportunityInvoiceCenter } from "@/lib/utils/role-rate-picker";
 import { AutoFillDialog } from "./auto-fill-dialog";
 
 interface EstimateEmptyRowProps {
@@ -45,29 +46,23 @@ export function EstimateEmptyRow({
   // Only show roles that have RoleRate associations with Opportunity Invoice Center
   const { data: rolesData } = useRolesForDeliveryCenter(opportunityDeliveryCenterId);
   const { data: deliveryCentersData, isLoading: isLoadingDeliveryCenters, isFetching: isFetchingDeliveryCenters } = useDeliveryCenters();
+
+  const invoiceCenterDefaultCurrency = useMemo(() => {
+    if (!opportunityDeliveryCenterId || !deliveryCentersData?.items?.length) return undefined;
+    return deliveryCentersData.items.find(
+      (d) => String(d.id) === String(opportunityDeliveryCenterId)
+    )?.default_currency;
+  }, [opportunityDeliveryCenterId, deliveryCentersData?.items]);
   const { data: employeesData } = useEmployees({ limit: 100 });
-  const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
   const createLineItem = useCreateLineItem();
   const updateLineItem = useUpdateLineItem();
   const deleteLineItemMutation = useDeleteLineItem();
   const queryClient = useQueryClient();
 
-  // Update currency rates cache when rates are fetched
-  useEffect(() => {
-    if (currencyRatesData?.items) {
-      const rates: Record<string, number> = {};
-      currencyRatesData.items.forEach((rate) => {
-        rates[rate.currency_code.toUpperCase()] = rate.rate_to_usd;
-      });
-      setCurrencyRates(rates);
-      console.log("Currency rates loaded:", rates);
-    }
-  }, [currencyRatesData]);
-
   // Initialize lineItemId from localStorage or null
   const getInitialLineItemId = (): string | null => {
     if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+      const saved = localStorage.getItem(`line-item-id-${stableId}-${estimateId}`);
       return saved || null;
     }
     return null;
@@ -95,17 +90,26 @@ export function EstimateEmptyRow({
       .split("T")[0];
     
     if (typeof window !== "undefined") {
-      // Include rowIndex in key to prevent first row from affecting second row
-      const saved = localStorage.getItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+      const savedLineItemId = localStorage.getItem(`line-item-id-${stableId}-${estimateId}`);
+      // stableId + estimateId: each empty slot has its own draft key (rowIndex not needed)
+      const saved = localStorage.getItem(`empty-row-${stableId}-${estimateId}`);
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          return {
+          const merged: EstimateLineItemCreate = {
             ...parsed,
             currency: currency, // Always use current currency
             start_date: defaultStartDate, // Always use Opportunity start date
             end_date: defaultEndDate, // Always use Opportunity end date
           };
+          // Without a server line item id, restoring role_id makes the auto-save effect
+          // create a new line item on every mount — multiple empty slots → many spurious rows.
+          if (!savedLineItemId) {
+            merged.role_id = "";
+            merged.rate = "";
+            merged.cost = "";
+          }
+          return merged;
         } catch {
           // Ignore parse errors
         }
@@ -183,11 +187,11 @@ export function EstimateEmptyRow({
       setLineItemId(null);
       setFormData(getInitialFormData());
       if (typeof window !== "undefined") {
-        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
-        localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
+        localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
       }
     }
-  }, [isRenderedAsLineItemRow, lineItemId, stableId, estimateId, _rowIndex, estimateDetail]);
+  }, [isRenderedAsLineItemRow, lineItemId, stableId, estimateId, estimateDetail]);
   
   // CRITICAL: Clear stale lineItemId from localStorage if it doesn't exist in database
   useEffect(() => {
@@ -196,11 +200,11 @@ export function EstimateEmptyRow({
       setLineItemId(null);
       setFormData(getInitialFormData());
       if (typeof window !== "undefined") {
-        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
-        localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
+        localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
       }
     }
-  }, [hasStaleLineItemId, lineItemId, stableId, estimateId, _rowIndex]);
+  }, [hasStaleLineItemId, lineItemId, stableId, estimateId]);
   
   // CRITICAL: Check if this row's formData matches a line item that doesn't exist
   // This handles cases where form data was saved but the line item creation failed
@@ -254,8 +258,8 @@ export function EstimateEmptyRow({
               });
               setFormData(getInitialFormData());
               if (typeof window !== "undefined") {
-                localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
-                localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+                localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
+                localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
               }
             }
           }
@@ -264,7 +268,7 @@ export function EstimateEmptyRow({
         return () => clearTimeout(timeoutId);
       }
     }
-  }, [estimateDetail?.line_items, lineItemId, stableId, estimateId, _rowIndex, opportunityDeliveryCenterId]); // Only depend on estimateDetail changes, not formData (isSaving checked inside effect)
+  }, [estimateDetail?.line_items, lineItemId, stableId, estimateId, opportunityDeliveryCenterId]); // Only depend on estimateDetail changes, not formData (isSaving checked inside effect)
   
   // CRITICAL: Also run cleanup on mount and when estimateDetail first loads
   // This ensures stale form data is cleared even if it was loaded before estimateDetail
@@ -303,8 +307,8 @@ export function EstimateEmptyRow({
                 });
                 setFormData(getInitialFormData());
                 if (typeof window !== "undefined") {
-                  localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
-                  localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+                  localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
+                  localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
                 }
               }
             }
@@ -349,12 +353,12 @@ export function EstimateEmptyRow({
   useEffect(() => {
     if (typeof window !== "undefined") {
       if (lineItemId) {
-        localStorage.setItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`, lineItemId);
+        localStorage.setItem(`line-item-id-${stableId}-${estimateId}`, lineItemId);
       } else {
-        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
       }
     }
-  }, [lineItemId, stableId, estimateId, _rowIndex]);
+  }, [lineItemId, stableId, estimateId]);
 
   // Fetch role details when role is selected (to get role rates)
   const { data: selectedRoleData, isLoading: isLoadingRole, isFetching: isFetchingRole } = useRole(formData.role_id || "", true, {
@@ -365,26 +369,28 @@ export function EstimateEmptyRow({
   const { data: selectedEmployeeData, isLoading: isLoadingEmployee, isFetching: isFetchingEmployee } = useEmployee(formData.employee_id || "", false, {
     enabled: !!formData.employee_id,
   });
-  
+
+  const roleRatesFingerprint = fingerprintRoleRates(selectedRoleData);
+
   // Save formData to localStorage whenever it changes (but not on initial mount)
   useEffect(() => {
     if (typeof window !== "undefined") {
       const hasData = formData.role_id || formData.delivery_center_id || formData.employee_id || formData.rate || formData.cost;
       if (hasData) {
         // Include rowIndex in key to prevent first row from affecting second row
-        localStorage.setItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`, JSON.stringify(formData));
+        localStorage.setItem(`empty-row-${stableId}-${estimateId}`, JSON.stringify(formData));
       } else {
-        localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+        localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
       }
     }
-  }, [formData, stableId, estimateId, _rowIndex]);
+  }, [formData, stableId, estimateId]);
   
   // Clear localStorage when line item is created (this row becomes a real line item)
   useEffect(() => {
     if (lineItemId && typeof window !== "undefined") {
-      localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+      localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
     }
-  }, [lineItemId, stableId, estimateId, _rowIndex]);
+  }, [lineItemId, stableId, estimateId]);
   const [isSaving, setIsSaving] = useState(false);
   const [weeklyHoursValues, setWeeklyHoursValues] = useState<Map<string, string>>(
     new Map()
@@ -599,40 +605,15 @@ export function EstimateEmptyRow({
 
   // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role
   useEffect(() => {
-    // Skip if we're currently saving, creating, or receiving backend updates
     if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      if (formData.role_id !== prevRoleIdRef.current) {
-        prevRoleIdRef.current = formData.role_id || "";
-        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      }
       return;
     }
 
-    // Need role_id, opportunity delivery center, and selectedRoleData to proceed
-    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
     if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData || isLoadingRole || isFetchingRole) {
-      // If role changed but data not loaded yet, update ref
-      if (formData.role_id !== prevRoleIdRef.current) {
-        prevRoleIdRef.current = formData.role_id || "";
-        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      }
       return;
     }
 
-    // CRITICAL: Verify that selectedRoleData matches the current role_id
-    // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
     if (selectedRoleData.id !== formData.role_id) {
-      console.warn("Role data mismatch detected (empty row):", {
-        selectedRoleDataId: selectedRoleData.id,
-        currentRoleId: formData.role_id,
-        isLoadingRole,
-        isFetchingRole,
-      });
-      // Role data doesn't match current selection - wait for correct data to load
-      if (formData.role_id !== prevRoleIdRef.current) {
-        prevRoleIdRef.current = formData.role_id || "";
-        lastPopulatedRoleDataRef.current = ""; // Reset when role changes
-      }
       return;
     }
 
@@ -660,11 +641,10 @@ export function EstimateEmptyRow({
       role_rates_count: selectedRoleData?.role_rates?.length || 0,
     });
 
-    // Find the role rate that matches opportunity delivery center (may have different currency)
-    // Compare as strings to handle UUID string comparison
-    const matchingRate = selectedRoleData.role_rates?.find(
-      (rate) =>
-        String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
+    const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+      selectedRoleData.role_rates,
+      opportunityDeliveryCenterId,
+      invoiceCenterDefaultCurrency
     );
 
     let newCost: string;
@@ -675,16 +655,18 @@ export function EstimateEmptyRow({
       // Get rates from role rate
       let baseCost = matchingRate.internal_cost_rate || 0;
       let baseRate = matchingRate.external_rate || 0;
-      roleRateCurrency = matchingRate.default_currency || currency;
+      roleRateCurrency =
+        matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
       
       // Check if currency conversion is needed: Role Rate Default Currency <> Opportunity Invoice Currency
       if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
-        // Convert both cost and rate
         baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
         baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+        if (!Number.isFinite(baseCost) || !Number.isFinite(baseRate)) {
+          return;
+        }
       }
-      
-      // Round to 2 decimal places
+
       newCost = parseFloat(baseCost.toFixed(2)).toString();
       newRate = parseFloat(baseRate.toFixed(2)).toString();
     } else {
@@ -733,18 +715,24 @@ export function EstimateEmptyRow({
     lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
     // formData.cost / formData.rate updated via setFormData in this effect; listing them retriggers unnecessarily
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.role_id, formData.employee_id, opportunityDeliveryCenterId, currency, selectedRoleData, rolesData, isSaving, isCreatingRef, isLoadingRole, isFetchingRole]);
+  }, [
+    formData.role_id,
+    formData.employee_id,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedRoleData?.id,
+    roleRatesFingerprint,
+    isSaving,
+    isCreatingRef,
+    isLoadingRole,
+    isFetchingRole,
+  ]);
 
   // When Employee is selected or cleared, update Cost accordingly
   // When Employee is selected, update Cost (and Rate if no role) from employee's rates
   useEffect(() => {
-    // Skip if we're currently saving, creating, or receiving backend updates
     if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      if (formData.employee_id !== prevEmployeeIdRef.current) {
-        prevEmployeeIdRef.current = formData.employee_id || "";
-        lastPopulatedEmployeeRef.current = ""; // Reset when employee changes
-        lastCalculationSignatureRef.current = ""; // Reset signature when employee changes
-      }
       return;
     }
 
@@ -756,11 +744,9 @@ export function EstimateEmptyRow({
     const calculationSignature = `${currentEmployeeId}|${currency}|${opportunityDeliveryCenterId}|${!!deliveryCentersData}`;
     const signatureChanged = calculationSignature !== lastCalculationSignatureRef.current;
     
-    // If employee changed, reset the populated flag
     if (employeeChanged) {
       lastPopulatedEmployeeRef.current = "";
       lastCalculationSignatureRef.current = "";
-      prevEmployeeIdRef.current = currentEmployeeId;
     }
     
     // Skip if we've already populated cost for this exact combination of inputs
@@ -778,34 +764,29 @@ export function EstimateEmptyRow({
         // CRITICAL: Verify that selectedRoleData matches the current role_id
         // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
         if (selectedRoleData.id !== formData.role_id) {
-          console.warn("Role data mismatch when clearing employee (empty row):", {
-            selectedRoleDataId: selectedRoleData.id,
-            currentRoleId: formData.role_id,
-            isLoadingRole,
-            isFetchingRole,
-          });
-          // Role data doesn't match current selection - wait for correct data to load
-          prevEmployeeIdRef.current = currentEmployeeId;
           return;
         }
         
-        // Find the role rate that matches opportunity invoice center
-        const matchingRate = selectedRoleData.role_rates?.find(
-          (rate) =>
-            String(rate.delivery_center_id) === String(opportunityDeliveryCenterId)
+        const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+          selectedRoleData.role_rates,
+          opportunityDeliveryCenterId,
+          invoiceCenterDefaultCurrency
         );
 
         let newCost: string;
         if (matchingRate) {
           let baseCost = matchingRate.internal_cost_rate || 0;
-          const roleRateCurrency = matchingRate.default_currency || currency;
+          const roleRateCurrency =
+            matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
           
           // Apply currency conversion: convert if currencies don't match
           if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
             baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+            if (!Number.isFinite(baseCost)) {
+              return;
+            }
           }
-          
-          // Round to 2 decimal places
+
           newCost = parseFloat(baseCost.toFixed(2)).toString();
         } else {
           // Fallback to role default rates if no matching rate found
@@ -816,7 +797,6 @@ export function EstimateEmptyRow({
             // Round to 2 decimal places
             newCost = parseFloat(fallbackCost.toFixed(2)).toString();
           } else {
-            prevEmployeeIdRef.current = currentEmployeeId;
             return;
           }
         }
@@ -837,31 +817,14 @@ export function EstimateEmptyRow({
     // Employee was selected - update cost from employee's rates based on delivery center matching
     // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
     if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
-      // Employee data not loaded yet, wait for it
-      prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
 
-    // CRITICAL: Verify that selectedEmployeeData matches the current employee_id
-    // This prevents using stale employee data when employee changes but React Query hasn't finished fetching yet
     if (selectedEmployeeData.id !== currentEmployeeId) {
-      console.warn("Employee data mismatch detected (empty row):", {
-        selectedEmployeeDataId: selectedEmployeeData.id,
-        currentEmployeeId,
-        isLoadingEmployee,
-        isFetchingEmployee,
-      });
-      // Employee data doesn't match current selection - wait for correct data to load
-      prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
 
-    // CRITICAL: Wait for delivery centers data to load before calculating centersMatch
-    // If deliveryCentersData isn't loaded, we can't determine the employee's delivery center ID,
-    // which would cause centersMatch to incorrectly default to false
     if (!deliveryCentersData || isLoadingDeliveryCenters || isFetchingDeliveryCenters) {
-      console.log("Waiting for delivery centers data to load before calculating centersMatch");
-      prevEmployeeIdRef.current = currentEmployeeId;
       return;
     }
 
@@ -876,15 +839,6 @@ export function EstimateEmptyRow({
       ? String(opportunityDeliveryCenterId) === String(employeeDeliveryCenterId)
       : false;
     
-    console.log("Calculating centersMatch:", {
-      opportunityDeliveryCenterId,
-      employeeDeliveryCenterCode: selectedEmployeeData.delivery_center,
-      employeeDeliveryCenterId,
-      centersMatch,
-      deliveryCentersDataLoaded: !!deliveryCentersData,
-      deliveryCentersCount: deliveryCentersData?.items?.length || 0,
-    });
-
     // Determine which rate to use and whether to convert currency
     let employeeCost: number;
     let employeeRate: number = 0; // Initialize to avoid TypeScript error
@@ -910,52 +864,24 @@ export function EstimateEmptyRow({
       employeeRate = selectedEmployeeData.external_bill_rate || 0;
     }
     
-    // Convert to Opportunity Invoice Currency if currencies differ
     if (!currenciesMatch) {
-      console.log("BEFORE currency conversion:", {
-        employeeCost,
-        employeeCurrency,
-        targetCurrency: currency,
-        employeeRate: !hasRole ? employeeRate : "N/A (has role)",
-      });
-      const convertedCost = convertCurrency(employeeCost, employeeCurrency, currency);
-      console.log("AFTER currency conversion:", {
-        from: employeeCurrency,
-        to: currency,
-        originalAmount: employeeCost,
-        convertedAmount: convertedCost,
-        calculation: `${employeeCost} USD / 1.0 * ${currency === "PHP" ? "58.88 (or fallback 50.0)" : "rate"} = ${convertedCost}`,
-      });
-      // Round to 2 decimal places
-      employeeCost = parseFloat(convertedCost.toFixed(2));
+      employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
+      if (!Number.isFinite(employeeCost)) {
+        return;
+      }
+      employeeCost = parseFloat(employeeCost.toFixed(2));
       if (!hasRole) {
-        const convertedRate = convertCurrency(employeeRate, employeeCurrency, currency);
-        console.log("Converting Rate:", {
-          from: employeeCurrency,
-          to: currency,
-          originalAmount: employeeRate,
-          convertedAmount: convertedRate,
-        });
-        employeeRate = convertedRate;
+        employeeRate = convertCurrency(employeeRate, employeeCurrency, currency);
+        if (!Number.isFinite(employeeRate)) {
+          return;
+        }
+        employeeRate = parseFloat(employeeRate.toFixed(2));
       }
     }
-    
-    // Round to 2 decimal places
+
     const newCost = parseFloat(employeeCost.toFixed(2)).toString();
     const newRate = !hasRole ? parseFloat(employeeRate.toFixed(2)).toString() : formData.rate;
-    
-    console.log("Updating Cost (and Rate if no role) from Employee:", {
-      centersMatch,
-      rateUsed: centersMatch ? "internal_cost_rate" : "internal_bill_rate",
-      originalCost: centersMatch ? selectedEmployeeData.internal_cost_rate : selectedEmployeeData.internal_bill_rate,
-      employeeCurrency,
-      convertedCost: employeeCost,
-      newCost,
-      currentCost: formData.cost,
-      hasRole,
-      newRate: !hasRole ? newRate : "not updated (role exists)",
-    });
-    
+
     // Update cost always, and rate only if no role selected
     const updates: Partial<EstimateLineItemCreate> = {
       cost: newCost,
@@ -976,7 +902,22 @@ export function EstimateEmptyRow({
     prevEmployeeIdRef.current = currentEmployeeId;
     // formData.cost / formData.rate read for logging and setFormData; not stable effect deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole, isLoadingDeliveryCenters, isFetchingDeliveryCenters]);
+  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, invoiceCenterDefaultCurrency, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole, isLoadingDeliveryCenters, isFetchingDeliveryCenters]);
+
+  const parseLocalDate = (dateStr: string): Date => {
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const formatDateKey = (date: Date): string => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, "0");
+    const d = String(date.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  };
+
+  const getWeekKey = (week: Date) => formatDateKey(week);
 
   const handleWeeklyHoursUpdate = async (weekKey: string, hours: string) => {
     // Ensure we have required fields and create line item if needed
@@ -984,11 +925,11 @@ export function EstimateEmptyRow({
       return; // Can't save hours without required fields
     }
 
-    const weekDate = new Date(weekKey);
-    const startDate = new Date(formData.start_date);
-    const endDate = new Date(formData.end_date);
+    const weekDate = parseLocalDate(weekKey);
+    const startDate = parseLocalDate(formData.start_date);
+    const endDate = parseLocalDate(formData.end_date);
 
-    // Only update if within date range
+    // Only update if within date range (weekDate is Sunday of column; compare to inclusive line range)
     if (weekDate < startDate || weekDate > endDate) {
       return;
     }
@@ -1082,17 +1023,6 @@ export function EstimateEmptyRow({
         });
       }
     }, 500);
-  };
-
-  const getWeekKey = (week: Date) => {
-    return week.toISOString().split("T")[0];
-  };
-
-  // Helper function to parse date string as local date (avoid timezone conversion)
-  const parseLocalDate = (dateStr: string): Date => {
-    const datePart = dateStr.split("T")[0];
-    const [year, month, day] = datePart.split("-").map(Number);
-    return new Date(year, month - 1, day); // month is 0-indexed in JS
   };
 
   // Clear hours for weeks before new start date when start_date is moved later
@@ -1454,8 +1384,8 @@ export function EstimateEmptyRow({
                     setFormData(getInitialFormData());
                     // Clear localStorage
                     if (typeof window !== "undefined") {
-                      localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
-                      localStorage.removeItem(`empty-row-${stableId}-${estimateId}-${_rowIndex}`);
+                      localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
+                      localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
                     }
                   } catch (err: unknown) {
                     console.error("Failed to delete line item:", err);
@@ -1474,7 +1404,7 @@ export function EstimateEmptyRow({
                       console.log("Line item not found, clearing stale lineItemId");
                       setLineItemId(null);
                       if (typeof window !== "undefined") {
-                        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}-${_rowIndex}`);
+                        localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
                       }
                     } else {
                       alert(`Failed to delete line item: ${message}`);
