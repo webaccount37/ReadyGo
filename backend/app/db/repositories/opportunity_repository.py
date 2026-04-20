@@ -2,7 +2,7 @@
 Opportunity repository for database operations.
 """
 
-from typing import Optional, List
+from typing import Optional, List, Set
 from uuid import UUID
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload, aliased
 from app.db.repositories.base_repository import BaseRepository
 from app.db.search_helpers import ilike_pattern, normalize_sort_order
 from app.models.opportunity import Opportunity, OpportunityStatus
+from app.models.engagement import Engagement, EngagementLineItem
 
 
 class OpportunityRepository(BaseRepository[Opportunity]):
@@ -334,3 +335,26 @@ class OpportunityRepository(BaseRepository[Opportunity]):
         )
         result = await self.session.execute(query)
         return int(result.scalar_one() or 0)
+
+    async def account_ids_with_active_engagement_line_on(
+        self,
+        account_ids: List[UUID],
+        as_of: date,
+    ) -> Set[UUID]:
+        """Accounts that have an engagement line item active on as_of (inclusive date range)."""
+        if not account_ids:
+            return set()
+        q = (
+            select(Opportunity.account_id)
+            .distinct()
+            .select_from(EngagementLineItem)
+            .join(Engagement, EngagementLineItem.engagement_id == Engagement.id)
+            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
+            .where(
+                Opportunity.account_id.in_(account_ids),
+                EngagementLineItem.start_date <= as_of,
+                EngagementLineItem.end_date >= as_of,
+            )
+        )
+        r = await self.session.execute(q)
+        return {row[0] for row in r.all() if row[0] is not None}

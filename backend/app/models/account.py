@@ -40,7 +40,17 @@ class Account(Base):
     billing_term_id = Column(UUID(as_uuid=True), ForeignKey("billing_terms.id"), nullable=True, index=True)
     default_currency = Column(String(3), default="USD", nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    
+
+    msa_blob_container = Column(String(255), nullable=True)
+    msa_blob_name = Column(String(512), nullable=True)
+    msa_original_filename = Column(String(512), nullable=True)
+    nda_blob_container = Column(String(255), nullable=True)
+    nda_blob_name = Column(String(512), nullable=True)
+    nda_original_filename = Column(String(512), nullable=True)
+    other_blob_container = Column(String(255), nullable=True)
+    other_blob_name = Column(String(512), nullable=True)
+    other_original_filename = Column(String(512), nullable=True)
+
     # Relationships
     opportunities = relationship("Opportunity", back_populates="account", cascade="all, delete-orphan")
     contacts = relationship("Contact", back_populates="account", cascade="all, delete-orphan")

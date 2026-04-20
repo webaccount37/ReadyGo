@@ -25,7 +25,7 @@ export interface NavItem {
   href: string;
   icon?: React.ComponentType<{ className?: string }>;
   comingSoon?: boolean;
-  badgeKey?: "timesheet-incomplete" | "timesheet-pending" | "expense-pending";
+  badgeKey?: "timesheet-incomplete" | "timesheet-pending" | "expense-pending" | "quote-pending";
 }
 
 export interface NavGroup {
@@ -50,7 +50,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { title: "Estimates", href: "/estimates", icon: Calculator },
       { title: "Quotes", href: "/quotes", icon: FileCheck },
-      { title: "Quote Approvals", href: "/quote-approvals", icon: CheckCircle2 },
+      { title: "Quote Approvals", href: "/quote-approvals", icon: CheckCircle2, badgeKey: "quote-pending" },
       { title: "Engagements", href: "/engagements", icon: Briefcase },
     ],
   },

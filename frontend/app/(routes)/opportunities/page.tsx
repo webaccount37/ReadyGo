@@ -88,7 +88,7 @@ function OpportunitiesPageContent() {
   } = useOpportunityActions();
 
   // Fetch related data for display names
-  const { data: accountsData } = useAccounts({ limit: 100 });
+  const { data: accountsData } = useAccounts({ skip: 0, limit: 1000 });
 
   /** Prefer API account_name; client account list is capped and would show raw UUIDs for missing rows. */
   const accountLabel = useCallback(

@@ -162,6 +162,30 @@ export function EstimateEmptyRow({
     }
   }, [opportunityStartDate, opportunityEndDate, lineItemId]);
 
+  // When Opportunity Invoice Center loads after first paint, default Payable (delivery_center_id) for new rows
+  useEffect(() => {
+    if (!opportunityDeliveryCenterId || lineItemId) return;
+    setFormData((prev) => {
+      if (prev.delivery_center_id) return prev;
+      const next = { ...prev, delivery_center_id: opportunityDeliveryCenterId };
+      if (typeof window !== "undefined") {
+        const saved = localStorage.getItem(`empty-row-${stableId}-${estimateId}`);
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            localStorage.setItem(
+              `empty-row-${stableId}-${estimateId}`,
+              JSON.stringify({ ...parsed, delivery_center_id: opportunityDeliveryCenterId })
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      return next;
+    });
+  }, [opportunityDeliveryCenterId, lineItemId, stableId, estimateId]);
+
   // SIMPLE: Each row is tied directly to its database record ID
   // If we have a lineItemId (from localStorage or creation), use it directly
   // Once a line item is created, it will be rendered as EstimateLineItemRow after refetch

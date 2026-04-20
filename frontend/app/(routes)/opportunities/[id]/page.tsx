@@ -84,7 +84,7 @@ function OpportunityDetailPageInner() {
     handleDelete,
   } = useOpportunityActions();
 
-  const { data: accountsData } = useAccounts({ limit: 100 });
+  const { data: accountsData } = useAccounts({ skip: 0, limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: billingTermsData } = useBillingTerms();
   const { data: employeesData } = useEmployees({ limit: 1000 });

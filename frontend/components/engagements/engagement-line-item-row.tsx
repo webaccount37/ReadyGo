@@ -724,19 +724,11 @@ export function EngagementLineItemRow({
 
     const hasEmployee = !!employeeValue;
 
-    // Initial hydration: same as estimate line item — avoid debounced save on open when values match.
-    if (!roleChanged && lastPopulatedRoleDataRef.current === "") {
-      const liRate = parseFloat(String(lineItem.rate || "0"));
-      const liCost = parseFloat(String(lineItem.cost || "0"));
-      const nr = parseFloat(newRate);
-      const nc = parseFloat(newCost);
-      const rateClose = Math.abs(liRate - nr) < 0.005;
-      const costClose = hasEmployee || Math.abs(liCost - nc) < 0.005;
-      if (rateClose && costClose) {
-        lastPopulatedRoleDataRef.current = currentKey;
-        prevRoleRef.current = roleValue;
-        return;
-      }
+    // Persisted rate/cost (e.g. from quoting) must win on open/refetch — only apply Role defaults when the user changes Role.
+    if (!roleChanged) {
+      lastPopulatedRoleDataRef.current = currentKey;
+      prevRoleRef.current = roleValue;
+      return;
     }
 
     isUpdatingRatesFromRoleRef.current = true;

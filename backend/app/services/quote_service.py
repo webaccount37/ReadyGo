@@ -374,6 +374,8 @@ class QuoteService(BaseService):
             opportunity_service = OpportunityService(self.session)
 
             # Update Opportunity: status=NEGOTIATION, deal_value=Quote Total Revenue
+            # get_quote_total_revenue uses scoped weekly hours (aligned with estimate UI). Opportunities
+            # whose deal_value was set under older logic may still show stale amounts until corrected.
             quote_total = await engagement_service.get_quote_total_revenue(quote_id)
             if quote_total is not None:
                 opportunity = await self.opportunity_repo.get(quote.opportunity_id)

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -11,8 +12,36 @@ import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEngagements } from "@/hooks/useEngagements";
 import { useTimesheetPendingApprovals } from "@/hooks/useTimesheets";
 import { useExpensePendingApprovals } from "@/hooks/useExpenses";
+import { useQuotesForApproval } from "@/hooks/useQuotes";
 import { LogOut, User } from "lucide-react";
 import { navGroups } from "@/components/layout/nav-config";
+
+/** `surface` is the page / bar background behind the logo (dark → light mark, light → dark mark). */
+export function ConsultCortexNavLogo({
+  className,
+  priority,
+  surface = "dark",
+  altText = "ConsultCortex",
+}: {
+  className?: string;
+  priority?: boolean;
+  surface?: "dark" | "light";
+  /** Use `""` when a visible or sr-only heading already names the app. */
+  altText?: string;
+}) {
+  const src =
+    surface === "light" ? "/ConsultCortexBlack.png" : "/ConsultCortex.png";
+  return (
+    <Image
+      src={src}
+      alt={altText}
+      width={220}
+      height={56}
+      className={cn("object-contain object-left", className)}
+      priority={priority}
+    />
+  );
+}
 
 interface SidebarContentProps {
   onNavigate?: () => void;
@@ -24,6 +53,10 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
   const { data: incompleteData } = useTimesheetIncompleteCount();
   const { data: pendingData } = useTimesheetPendingApprovals({ limit: 1 });
   const { data: expensePendingData } = useExpensePendingApprovals({ limit: 1 });
+  const { data: quoteApprovalsData } = useQuotesForApproval(
+    { limit: 1 },
+    { enabled: isAuthenticated }
+  );
   useAccounts({ limit: 500 }, { enabled: isAuthenticated });
   useOpportunities({ limit: 500 }, { enabled: isAuthenticated });
   useEngagements({ limit: 500 }, { enabled: isAuthenticated });
@@ -31,6 +64,7 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
     "timesheet-incomplete": incompleteData?.count ?? 0,
     "timesheet-pending": pendingData?.total ?? 0,
     "expense-pending": expensePendingData?.total ?? 0,
+    "quote-pending": quoteApprovalsData?.total ?? 0,
   };
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => {
     const initial = new Set<number>();
@@ -185,7 +219,13 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
               />
             </svg>
           </button>
-          <div className="text-xs font-bold mb-8">RG</div>
+          <Link
+            href="/"
+            className="mb-8 flex justify-center px-1"
+            title="ConsultCortex"
+          >
+            <ConsultCortexNavLogo className="h-8 w-auto max-w-[3rem]" priority />
+          </Link>
           <nav className="space-y-4">
             {navGroups.map((group, groupIndex) => (
               <div key={groupIndex} className="flex flex-col items-center">
@@ -232,11 +272,10 @@ export function Sidebar({ collapsed = false, onToggle }: SidebarProps) {
         </div>
       ) : (
         <>
-          <div className="flex justify-between items-center mb-8">
-            <div>
-              <h1 className="text-xl font-bold">ReadyGo</h1>
-              <p className="text-sm text-gray-400">Consulting Platform</p>
-            </div>
+          <div className="flex justify-between items-center gap-2 mb-8">
+            <Link href="/" className="min-w-0 flex-1" title="ConsultCortex">
+              <ConsultCortexNavLogo className="h-10 w-auto max-w-[11rem]" priority />
+            </Link>
             <button
               onClick={onToggle}
               className="p-1 hover:bg-gray-800 rounded-md transition-colors"

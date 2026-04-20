@@ -2,7 +2,7 @@
 Account Pydantic schemas for request/response validation.
 """
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, List, TYPE_CHECKING
 from uuid import UUID
 from datetime import datetime
@@ -72,6 +72,9 @@ class AccountUpdate(BaseModel):
 
 class AccountResponse(AccountBase):
     """Schema for account response."""
+
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
     id: UUID
     billing_term_id: Optional[UUID] = None
     billing_term: Optional[BillingTermInfo] = None
@@ -82,9 +85,10 @@ class AccountResponse(AccountBase):
     plan_sum: Optional[float] = None  # Sum of opportunities' plan_amount (for list view)
     actuals_sum: Optional[float] = None  # Sum of opportunities' actuals_amount (for list view)
     has_locked_opportunities: Optional[bool] = None  # True if account has any locked or permanently locked opportunities (disables delete)
-    
-    class Config:
-        from_attributes = True
+    has_active_engagement_today: Optional[bool] = None
+    msa_original_filename: Optional[str] = None
+    nda_original_filename: Optional[str] = None
+    other_original_filename: Optional[str] = None
 
 
 class AccountWithContactsResponse(AccountResponse):

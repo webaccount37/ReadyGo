@@ -29,6 +29,10 @@ export interface Account {
   plan_sum?: number;
   actuals_sum?: number;
   has_locked_opportunities?: boolean;
+  has_active_engagement_today?: boolean;
+  msa_original_filename?: string | null;
+  nda_original_filename?: string | null;
+  other_original_filename?: string | null;
 }
 
 export interface AccountCreate {

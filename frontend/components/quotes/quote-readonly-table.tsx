@@ -1,18 +1,56 @@
 "use client";
 
-import React from "react";
+import React, { useMemo } from "react";
 import type { Quote, QuoteLineItem } from "@/types/quote";
+import {
+  computeScopedLineMoney,
+  opportunityWeeksFromStrings,
+  type LineItemLike,
+} from "@/lib/planning-week-totals";
 
 interface QuoteReadonlyTableProps {
   quote: Quote;
+  /** Prefer live opportunity dates; snapshot is used when these are missing. */
+  opportunityStartDate?: string | null;
+  opportunityEndDate?: string | null;
 }
 
-export function QuoteReadonlyTable({ quote }: QuoteReadonlyTableProps) {
+export function QuoteReadonlyTable({
+  quote,
+  opportunityStartDate,
+  opportunityEndDate,
+}: QuoteReadonlyTableProps) {
+  const snapStart =
+    typeof quote.snapshot_data?.start_date === "string" ? quote.snapshot_data.start_date : null;
+  const snapEnd =
+    typeof quote.snapshot_data?.end_date === "string" ? quote.snapshot_data.end_date : null;
+
+  const scopedWeeks = useMemo(() => {
+    const startEff = opportunityStartDate ?? snapStart;
+    const endEff = opportunityEndDate ?? snapEnd;
+    return opportunityWeeksFromStrings(startEff, endEff);
+  }, [opportunityStartDate, opportunityEndDate, snapStart, snapEnd]);
+
+  const totals = useMemo(() => {
+    let totalCost = 0;
+    let totalRevenue = 0;
+    let totalHours = 0;
+
+    (quote.line_items ?? []).forEach((item) => {
+      const { hours, cost, revenue } = computeScopedLineMoney(item as LineItemLike, scopedWeeks);
+      totalHours += hours;
+      totalCost += cost;
+      totalRevenue += revenue;
+    });
+
+    return { totalHours, totalCost, totalRevenue, margin: totalRevenue - totalCost };
+  }, [quote.line_items, scopedWeeks]);
+
   if (!quote.line_items || quote.line_items.length === 0) {
     return <p className="text-gray-500 text-sm">No line items in this quote.</p>;
   }
 
-  // Calculate weeks from all line items
+  // Calculate weeks from all line items (column headers)
   const allWeeks = new Set<string>();
   quote.line_items.forEach((item) => {
     if (item.weekly_hours) {
@@ -24,39 +62,15 @@ export function QuoteReadonlyTable({ quote }: QuoteReadonlyTableProps) {
 
   const sortedWeeks = Array.from(allWeeks).sort();
 
-  // Helper to format date
   const formatDate = (dateStr: string): string => {
     const date = new Date(dateStr);
     return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
   };
 
-  // Helper to get hours for a specific week
   const getHoursForWeek = (lineItem: QuoteLineItem, weekStartDate: string): string => {
     const weeklyHour = lineItem.weekly_hours?.find((wh) => wh.week_start_date === weekStartDate);
     return weeklyHour ? parseFloat(weeklyHour.hours).toFixed(2) : "0.00";
   };
-
-  // Calculate totals
-  const calculateTotals = () => {
-    let totalCost = 0;
-    let totalRevenue = 0;
-    let totalHours = 0;
-
-    quote.line_items?.forEach((item) => {
-      const itemHours = item.weekly_hours?.reduce((sum, wh) => sum + parseFloat(wh.hours || "0"), 0) || 0;
-      const itemCost = itemHours * parseFloat(item.cost || "0");
-      // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
-      const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
-
-      totalHours += itemHours;
-      totalCost += itemCost;
-      totalRevenue += itemRevenue;
-    });
-
-    return { totalHours, totalCost, totalRevenue, margin: totalRevenue - totalCost };
-  };
-
-  const totals = calculateTotals();
 
   return (
     <div className="overflow-x-auto">
@@ -89,10 +103,10 @@ export function QuoteReadonlyTable({ quote }: QuoteReadonlyTableProps) {
           {quote.line_items
             .sort((a, b) => a.row_order - b.row_order)
             .map((item) => {
-              const itemHours = item.weekly_hours?.reduce((sum, wh) => sum + parseFloat(wh.hours || "0"), 0) || 0;
-              const itemCost = itemHours * parseFloat(item.cost || "0");
-              // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
-              const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
+              const { hours: itemHours, cost: itemCost, revenue: itemRevenue } = computeScopedLineMoney(
+                item as LineItemLike,
+                scopedWeeks,
+              );
 
               return (
                 <tr key={item.id} className="hover:bg-gray-50">

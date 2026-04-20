@@ -497,6 +497,70 @@ class StaffingForecastRepository:
             })
         return out
 
+    async def fetch_accepted_engagement_plan_billable_weekly_for_utilization(
+        self,
+        start_week: date,
+        end_week: date,
+        delivery_center_id: Optional[UUID] = None,
+        employee_id: Optional[UUID] = None,
+        billable_filter: Optional[bool] = None,
+    ) -> list[dict]:
+        """
+        Raw weekly billable plan hours for assigned employees on engagements whose quote is ACCEPTED.
+        Excludes weeks covered by engagement actuals rows (caller merges with actuals_data keys).
+        """
+        if billable_filter is False:
+            return []
+
+        query = (
+            select(
+                EngagementLineItem.id.label("line_item_id"),
+                EngagementLineItem.employee_id,
+                Employee.delivery_center_id.label("emp_delivery_center_id"),
+                Opportunity.delivery_center_id.label("opp_delivery_center_id"),
+                EngagementWeeklyHours.week_start_date,
+                EngagementWeeklyHours.hours,
+            )
+            .select_from(EngagementWeeklyHours)
+            .join(EngagementLineItem, EngagementWeeklyHours.engagement_line_item_id == EngagementLineItem.id)
+            .join(Engagement, EngagementLineItem.engagement_id == Engagement.id)
+            .join(Quote, Engagement.quote_id == Quote.id)
+            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
+            .outerjoin(Employee, EngagementLineItem.employee_id == Employee.id)
+            .where(
+                Quote.status == QuoteStatus.ACCEPTED,
+                EngagementLineItem.billable == True,
+                EngagementLineItem.employee_id.isnot(None),
+                EngagementWeeklyHours.week_start_date >= start_week,
+                EngagementWeeklyHours.week_start_date <= end_week,
+            )
+        )
+        if employee_id is not None:
+            query = query.where(EngagementLineItem.employee_id == employee_id)
+        if delivery_center_id is not None:
+            query = query.where(
+                or_(
+                    and_(EngagementLineItem.employee_id.isnot(None), Employee.delivery_center_id == delivery_center_id),
+                    and_(EngagementLineItem.employee_id.is_(None), Opportunity.delivery_center_id == delivery_center_id),
+                )
+            )
+
+        result = await self.session.execute(query)
+        rows = result.all()
+        out = []
+        for row in rows:
+            dc_id = row.emp_delivery_center_id if row.employee_id else row.opp_delivery_center_id
+            if delivery_center_id is not None and dc_id != delivery_center_id:
+                continue
+            out.append({
+                "engagement_line_item_id": str(row.line_item_id),
+                "employee_id": str(row.employee_id) if row.employee_id else None,
+                "delivery_center_id": str(dc_id) if dc_id else None,
+                "week_start": row.week_start_date,
+                "hours": float(row.hours or 0),
+            })
+        return out
+
     async def fetch_engagement_actuals_weekly_data(
         self,
         start_week: date,
@@ -635,13 +699,13 @@ class StaffingForecastRepository:
     async def fetch_active_employees_for_forecast(
         self,
         start_week: date,
+        end_week: date,
         delivery_center_id: Optional[UUID] = None,
         employee_id: Optional[UUID] = None,
     ) -> list[dict]:
         """
-        Fetch all active employees for the forecast.
-        Returns list of dicts with: employee_id, employee_name, delivery_center_id, delivery_center_name.
-        Includes all active employees regardless of start_date so the forecast matches the Employee filter.
+        Fetch active employees who overlap the forecast window [start_week, end_week].
+        Excludes employees whose start_date is after end_week, or who ended before start_week.
         """
         from app.models.employee import EmployeeStatus
 
@@ -654,7 +718,11 @@ class StaffingForecastRepository:
             )
             .select_from(Employee)
             .outerjoin(DeliveryCenter, Employee.delivery_center_id == DeliveryCenter.id)
-            .where(Employee.status == EmployeeStatus.ACTIVE)
+            .where(
+                Employee.status == EmployeeStatus.ACTIVE,
+                Employee.start_date <= end_week,
+                or_(Employee.end_date.is_(None), Employee.end_date >= start_week),
+            )
         )
 
         if delivery_center_id is not None:

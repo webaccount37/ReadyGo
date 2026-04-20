@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     )
     
     # Project metadata
-    PROJECT_NAME: str = "ReadyGo Consulting Platform"
+    PROJECT_NAME: str = "ConsultCortex"
     VERSION: str = "0.1.0"
     API_V1_PREFIX: str = "/api/v1"
     
@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     AZURE_STORAGE_ACCOUNT_NAME: str = ""
     AZURE_STORAGE_ACCOUNT_KEY: str = ""
     AZURE_STORAGE_EXPENSE_RECEIPTS_CONTAINER: str = "expense-receipts"
+    AZURE_STORAGE_ACCOUNT_DOCUMENTS_CONTAINER: str = "account-documents"
     AZURE_KEY_VAULT_URL: str = ""
     
     # Entra ID (Azure AD) SSO Configuration

@@ -34,6 +34,11 @@ from app.models.estimate import Estimate
 from app.models.role_rate import RoleRate
 from app.utils.currency_converter import convert_currency
 from app.utils.quote_display import compute_quote_display_name
+from app.utils.planning_week_hours import (
+    resolve_opportunity_scope_for_estimate,
+    sum_billable_counted_hours_for_estimate,
+    sum_counted_weekly_hours_for_line,
+)
 from app.schemas.engagement import (
     EngagementCreate, EngagementUpdate, EngagementResponse, EngagementDetailResponse, EngagementListResponse,
     EngagementLineItemCreate, EngagementLineItemUpdate, EngagementLineItemResponse,
@@ -281,11 +286,13 @@ class EngagementService(BaseService):
         currency = engagement.line_items[0].currency if engagement.line_items else "USD"
         
         for line_item in engagement.line_items:
-            # Calculate hours for this line item
-            item_hours = Decimal("0")
-            if line_item.weekly_hours:
-                for weekly_hour in line_item.weekly_hours:
-                    item_hours += Decimal(str(weekly_hour.hours))
+            # Hours in weeks overlapping the line item window (matches staffing grid totals)
+            item_hours = sum_counted_weekly_hours_for_line(
+                line_item.start_date,
+                line_item.end_date,
+                line_item.weekly_hours or (),
+                opportunity_scope=None,
+            )
             
             # Calculate cost and revenue
             item_cost = item_hours * Decimal(str(line_item.cost))
@@ -559,7 +566,7 @@ class EngagementService(BaseService):
         )
     
     async def _calculate_estimate_summary(self, estimate: Estimate) -> dict:
-        """Calculate Estimate totals."""
+        """Calculate Estimate totals (aligned with estimate spreadsheet: opportunity scope + line dates)."""
         if not estimate.line_items:
             return {
                 "total_revenue": Decimal("0"),
@@ -567,16 +574,28 @@ class EngagementService(BaseService):
                 "margin_amount": Decimal("0"),
                 "margin_percentage": Decimal("0"),
             }
-        
+
+        opportunity = getattr(estimate, "opportunity", None)
+        if opportunity is None and estimate.opportunity_id:
+            opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        opportunity_scope = None
+        if opportunity is not None:
+            opportunity_scope = resolve_opportunity_scope_for_estimate(
+                opportunity.start_date,
+                opportunity.end_date,
+            )
+
         total_revenue = Decimal("0")
         total_cost = Decimal("0")
-        
+
         for line_item in estimate.line_items:
-            item_hours = Decimal("0")
-            if line_item.weekly_hours:
-                for weekly_hour in line_item.weekly_hours:
-                    item_hours += Decimal(str(weekly_hour.hours))
-            
+            item_hours = sum_counted_weekly_hours_for_line(
+                line_item.start_date,
+                line_item.end_date,
+                line_item.weekly_hours or (),
+                opportunity_scope=opportunity_scope,
+            )
+
             item_cost = item_hours * Decimal(str(line_item.cost))
             item_revenue = item_hours * Decimal(str(line_item.rate)) if line_item.billable else Decimal("0")
             
@@ -616,14 +635,26 @@ class EngagementService(BaseService):
             from app.models.quote import RateBillingUnit
             if quote.rate_billing_unit in [RateBillingUnit.HOURLY_BLENDED, RateBillingUnit.DAILY_BLENDED]:
                 if quote.blended_rate_amount:
-                    # Calculate total hours from estimate
-                    total_hours = Decimal("0")
                     estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
-                    if estimate and estimate.line_items:
-                        for line_item in estimate.line_items:
-                            if line_item.billable and line_item.weekly_hours:
-                                for weekly_hour in line_item.weekly_hours:
-                                    total_hours += Decimal(str(weekly_hour.hours))
+                    opportunity = (
+                        getattr(estimate, "opportunity", None) if estimate else None
+                    )
+                    if opportunity is None and estimate and estimate.opportunity_id:
+                        opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+                    opportunity_scope = None
+                    if opportunity is not None:
+                        opportunity_scope = resolve_opportunity_scope_for_estimate(
+                            opportunity.start_date,
+                            opportunity.end_date,
+                        )
+                    total_hours = (
+                        sum_billable_counted_hours_for_estimate(
+                            estimate.line_items if estimate else (),
+                            opportunity_scope,
+                        )
+                        if estimate
+                        else Decimal("0")
+                    )
                     return total_hours * Decimal(str(quote.blended_rate_amount))
             # Otherwise use estimate total revenue
             return estimate_summary.get("total_revenue")

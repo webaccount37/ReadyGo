@@ -571,6 +571,28 @@ export function EstimateLineItemRow({
     };
   }, []);
 
+  const defaultedPayableForLineRef = useRef<string | null>(null);
+  useEffect(() => {
+    defaultedPayableForLineRef.current = null;
+  }, [lineItem.id]);
+
+  // Persist default Payable when API had null but Opportunity Invoice Center is known (first paint race)
+  useEffect(() => {
+    if (readOnly || !opportunityDeliveryCenterId) return;
+    const existing = lineItem.delivery_center_id;
+    if (existing) return;
+    if (defaultedPayableForLineRef.current === lineItem.id) return;
+    defaultedPayableForLineRef.current = lineItem.id;
+    setDeliveryCenterValue(opportunityDeliveryCenterId);
+    void handleFieldUpdate("delivery_center_id", opportunityDeliveryCenterId, existing || "");
+  }, [
+    readOnly,
+    opportunityDeliveryCenterId,
+    lineItem.id,
+    lineItem.delivery_center_id,
+    handleFieldUpdate,
+  ]);
+
   // Clear billable expense percentage when billableExpenses changes from true to false
   useEffect(() => {
     if (prevBillableExpensesRef.current && !billableExpenses) {
@@ -592,9 +614,8 @@ export function EstimateLineItemRow({
   const lastPopulatedRoleDataRef = useRef<string>("");
   const roleRatesFingerprint = fingerprintRoleRates(selectedRoleData);
 
-  // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role.
-  // Do not advance prevRoleRef on loading/mismatch exits (avoids stuck state when useRole lags).
-  // When role is unchanged but invoice currency or center changed, repopulate if currentKey differs.
+  // When Role is selected, update Cost and Rate from RoleRate. Do not advance prevRoleRef on loading/mismatch exits.
+  // When Role is unchanged, keep persisted rate/cost (manual/quote values); only sync from Role after a Role change.
   useEffect(() => {
     const currentKey = `${roleValue}-${opportunityDeliveryCenterId}-${currency}`;
     const roleChanged = roleValue !== prevRoleRef.current;
@@ -656,20 +677,11 @@ export function EstimateLineItemRow({
 
     const hasEmployee = !!employeeValue;
 
-    // Initial hydration: role already matches server and we have not marked populated yet.
-    // Do not debounce-save rate/cost on every spreadsheet open when values already match.
-    if (!roleChanged && lastPopulatedRoleDataRef.current === "") {
-      const liRate = parseFloat(String(lineItem.rate || "0"));
-      const liCost = parseFloat(String(lineItem.cost || "0"));
-      const nr = parseFloat(newRate);
-      const nc = parseFloat(newCost);
-      const rateClose = Math.abs(liRate - nr) < 0.005;
-      const costClose = hasEmployee || Math.abs(liCost - nc) < 0.005;
-      if (rateClose && costClose) {
-        lastPopulatedRoleDataRef.current = currentKey;
-        prevRoleRef.current = roleValue;
-        return;
-      }
+    // Persisted rate/cost must win on open/refetch — only apply Role defaults when the user changes Role.
+    if (!roleChanged) {
+      lastPopulatedRoleDataRef.current = currentKey;
+      prevRoleRef.current = roleValue;
+      return;
     }
 
     isUpdatingRatesFromRoleRef.current = true;

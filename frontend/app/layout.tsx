@@ -11,8 +11,12 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: "ReadyGo Consulting Platform",
-  description: "Professional consulting platform",
+  title: {
+    default: "ConsultCortex",
+    template: "%s | ConsultCortex",
+  },
+  applicationName: "ConsultCortex",
+  description: "ConsultCortex — professional consulting platform",
   icons: {
     icon: 'data:,', // Empty data URI to prevent favicon 404
   },

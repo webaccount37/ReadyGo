@@ -114,6 +114,7 @@ class StaffingForecastService:
         # Fetch all active employees (start_date >= start_week) to ensure they appear even with no assignments
         active_employees = await self.repo.fetch_active_employees_for_forecast(
             start_week=start_week,
+            end_week=end_week,
             delivery_center_id=delivery_center_id,
             employee_id=employee_id,
         )
@@ -239,6 +240,41 @@ class StaffingForecastService:
             key = (r["employee_id"], r["delivery_center_id"], week_iso)
             billable_lookup[key] = r["billable_hours"]
 
+        # Billable plan hours (ACCEPTED quote engagements), excluding weeks already covered by timesheet actuals
+        accepted_plan_util_rows = await self.repo.fetch_accepted_engagement_plan_billable_weekly_for_utilization(
+            start_week=start_week,
+            end_week=end_week,
+            delivery_center_id=delivery_center_id,
+            employee_id=employee_id,
+            billable_filter=billable_filter,
+        )
+        actuals_line_week_keys = {
+            (
+                str(r["engagement_line_item_id"]),
+                r["week_start"].isoformat() if hasattr(r["week_start"], "isoformat") else str(r["week_start"]),
+            )
+            for r in actuals_data
+            if r.get("engagement_line_item_id")
+        }
+        plan_util_lookup: dict[tuple[str, str, str], float] = {}
+        for r in accepted_plan_util_rows:
+            li = r["engagement_line_item_id"]
+            wk = r["week_start"].isoformat() if hasattr(r["week_start"], "isoformat") else str(r["week_start"])
+            if (li, wk) in actuals_line_week_keys:
+                continue
+            emp = r.get("employee_id")
+            dc = r.get("delivery_center_id")
+            if not emp or not dc:
+                continue
+            key = (emp, dc, wk)
+            plan_util_lookup[key] = plan_util_lookup.get(key, 0.0) + float(r.get("hours") or 0)
+
+        def _billable_hours_for_util(emp_key: str, dc_key: str, week_iso: str) -> float:
+            """Timesheet billable hours combined with engagement plan (ACCEPTED); max avoids double-count."""
+            ts_h = billable_lookup.get((emp_key, dc_key, week_iso), 0.0)
+            pl_h = plan_util_lookup.get((emp_key, dc_key, week_iso), 0.0)
+            return max(ts_h, pl_h)
+
         # Add rows for active employees who have no estimate/engagement data (all 0 hours)
         dc_name_by_id = {str(k): v for k, v in dc_names.items()}
         for emp in active_employees:
@@ -320,7 +356,7 @@ class StaffingForecastService:
                 if not _week_in_utilization_scope(week_date, ranges):
                     c["billable_utilization_pct"] = None
                     continue
-                billable_hours = billable_lookup.get((emp_id, dc_id, wk), 0.0)
+                billable_hours = _billable_hours_for_util(emp_id, dc_id, wk)
                 holiday_hours = holiday_by_dc_week.get((dc_id, wk), 0.0)
                 pto_hours = pto_by_emp_week.get((emp_id, wk), 0.0)
                 available = AVAILABLE_PER_WEEK - holiday_hours - pto_hours
@@ -394,7 +430,7 @@ class StaffingForecastService:
                             ranges = utilization_ranges.get(emp_id, {})
                             week_date = date.fromisoformat(wk)
                             if _week_in_utilization_scope(week_date, ranges):
-                                billable_h = billable_lookup.get((emp_id, dc_id, wk), 0.0)
+                                billable_h = _billable_hours_for_util(emp_id, dc_id, wk)
                                 holiday_h = holiday_by_dc_week.get((dc_id, wk), 0.0)
                                 pto_h = pto_by_emp_week.get((emp_id, wk), 0.0)
                                 available = 40.0 - holiday_h - pto_h

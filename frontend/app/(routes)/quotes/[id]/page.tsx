@@ -13,12 +13,17 @@ import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
 import { UnlockDialog } from "@/components/quotes/unlock-dialog";
 import { Lock, FileText } from "lucide-react";
 import { QuoteReadonlyTable } from "@/components/quotes/quote-readonly-table";
+import {
+  computeScopedLineMoney,
+  opportunityWeeksFromStrings,
+  type LineItemLike,
+} from "@/lib/planning-week-totals";
 
 export default function QuoteDetailPage() {
   const params = useParams();
   const router = useRouter();
   const quoteId = params.id as string;
-  const { data: quote, isLoading, error, refetch } = useQuoteDetail(quoteId);
+  const { data: quote, isLoading, error } = useQuoteDetail(quoteId);
   const deactivateQuote = useDeactivateQuote();
   const [isUnlockDialogOpen, setIsUnlockDialogOpen] = useState(false);
   
@@ -70,93 +75,47 @@ export default function QuoteDetailPage() {
     return "USD";
   };
 
-  // Calculate estimate summary from quote's snapshot line items
+  // Calculate estimate summary from quote's snapshot line items (same scoping as estimate spreadsheet)
   const estimateSummary = useMemo(() => {
-    if (!quote?.line_items || !opportunity) return null;
-    
-    const parseLocalDate = (dateStr: string): Date => {
-      const datePart = dateStr.split("T")[0];
-      const [year, month, day] = datePart.split("-").map(Number);
-      return new Date(year, month - 1, day);
-    };
-    
-    const formatDateKey = (date: Date): string => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    };
-    
-    // Generate weeks from opportunity start/end dates
-    const weeks: Date[] = [];
-    if (!opportunity.start_date || !opportunity.end_date) {
-      return null;
-    }
-    const startDate = parseLocalDate(opportunity.start_date);
-    const endDate = parseLocalDate(opportunity.end_date);
-    
-    // Find first Sunday
-    const current = new Date(startDate);
-    const dayOfWeek = current.getDay();
-    const diff = current.getDate() - dayOfWeek;
-    current.setDate(diff);
-    
-    while (current <= endDate) {
-      const weekStart = new Date(current);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-      
-      if (weekStart <= endDate && weekEnd >= startDate) {
-        weeks.push(new Date(weekStart));
-      }
-      current.setDate(current.getDate() + 7);
-    }
-    
-    // Calculate totals from quote's snapshot line items
+    if (!quote?.line_items) return null;
+
+    const snap = quote.snapshot_data;
+    const startStr =
+      opportunity?.start_date ??
+      (typeof snap?.start_date === "string" ? snap.start_date : null);
+    const endStr =
+      opportunity?.end_date ?? (typeof snap?.end_date === "string" ? snap.end_date : null);
+
+    const weeks = opportunityWeeksFromStrings(startStr, endStr);
+    if (!weeks?.length) return null;
+
     let totalCost = 0;
     let totalRevenue = 0;
     let totalHours = 0;
-    
+
     quote.line_items.forEach((item) => {
-      const itemHours = weeks.reduce((hoursSum, week) => {
-        const weekKey = formatDateKey(week);
-        const weekDate = week;
-        const itemStartDate = parseLocalDate(item.start_date);
-        const itemEndDate = parseLocalDate(item.end_date);
-        const weekEnd = new Date(weekDate);
-        weekEnd.setDate(weekEnd.getDate() + 6);
-        
-        if (weekDate <= itemEndDate && weekEnd >= itemStartDate) {
-          const weeklyHour = item.weekly_hours?.find((wh) => {
-            const whDate = parseLocalDate(wh.week_start_date);
-            return formatDateKey(whDate) === weekKey;
-          });
-          return hoursSum + parseFloat(weeklyHour?.hours || "0");
-        }
-        return hoursSum;
-      }, 0);
-      
-      const itemCost = itemHours * parseFloat(item.cost || "0");
-      // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
-      const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
-      
-      totalCost += itemCost;
-      totalRevenue += itemRevenue;
-      // For blended rate calculations, only include hours from billable rows
-      // Non-billable hours don't generate revenue, so they shouldn't be multiplied by blended rate
-      totalHours += item.billable ? itemHours : 0;
+      const { hours, cost, revenue } = computeScopedLineMoney(item as LineItemLike, weeks);
+      totalCost += cost;
+      totalRevenue += revenue;
+      totalHours += item.billable ? hours : 0;
     });
-    
+
     const marginAmount = totalRevenue - totalCost;
     const marginPercentage = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
-    
+
+    const currency =
+      quote.snapshot_data?.default_currency &&
+      typeof quote.snapshot_data.default_currency === "string"
+        ? quote.snapshot_data.default_currency
+        : (opportunity?.default_currency ?? "USD");
+
     return {
       totalCost,
       totalRevenue,
       totalHours,
       marginAmount,
       marginPercentage,
-      currency: getCurrency(),
+      currency,
     };
   }, [quote, opportunity]);
 
@@ -686,7 +645,11 @@ export default function QuoteDetailPage() {
           <p className="text-sm text-gray-600 mb-4">
             This is a read-only snapshot of the estimate data at the time the quote was created.
           </p>
-          <QuoteReadonlyTable quote={quote} />
+          <QuoteReadonlyTable
+            quote={quote}
+            opportunityStartDate={opportunity?.start_date}
+            opportunityEndDate={opportunity?.end_date}
+          />
         </CardContent>
       </Card>
 

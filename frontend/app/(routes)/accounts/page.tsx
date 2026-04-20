@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   useAccounts,
@@ -11,6 +11,7 @@ import {
 } from "@/hooks/useAccounts";
 import { Button } from "@/components/ui/button";
 import { Trash2, Pencil, Eye } from "lucide-react";
+import { accountsApi } from "@/lib/api/accounts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
 import { AccountForm } from "@/components/accounts/account-form";
@@ -23,6 +24,100 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { SortableTh, type SortState } from "@/components/ui/sortable-th";
+
+type AccountDocType = "msa" | "nda" | "other";
+
+function AccountDocumentSlot({
+  accountId,
+  docType,
+  label,
+  filename,
+  onUpdated,
+}: {
+  accountId: string;
+  docType: AccountDocType;
+  label: string;
+  filename?: string | null;
+  onUpdated: () => void;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [pending, setPending] = useState(false);
+
+  const pick = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    setPending(true);
+    try {
+      await accountsApi.uploadAccountDocument(accountId, docType, f);
+      onUpdated();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const download = async () => {
+    try {
+      const { blob, filename: fn } = await accountsApi.downloadAccountDocumentBlob(accountId, docType);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = fn || `${docType}-document`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      alert("Download failed");
+    }
+  };
+
+  const clear = async () => {
+    if (!confirm(`Remove ${label} file?`)) return;
+    setPending(true);
+    try {
+      await accountsApi.deleteAccountDocument(accountId, docType);
+      onUpdated();
+    } catch {
+      alert("Remove failed");
+    } finally {
+      setPending(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0" onClick={(e) => e.stopPropagation()}>
+      <input ref={inputRef} type="file" className="hidden" onChange={pick} />
+      <div className="flex items-center gap-0.5 flex-wrap">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-6 px-1 text-[10px]"
+          disabled={pending}
+          onClick={() => inputRef.current?.click()}
+        >
+          {pending ? "…" : "Up"}
+        </Button>
+        {filename ? (
+          <>
+            <button
+              type="button"
+              className="text-blue-600 hover:underline truncate max-w-[56px] text-[10px]"
+              title={filename}
+              onClick={download}
+            >
+              DL
+            </button>
+            <button type="button" className="text-red-600 text-[10px] px-0.5" onClick={clear} title="Remove">
+              ×
+            </button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+}
 
 function AccountsPageContent() {
   const searchParams = useSearchParams();
@@ -67,7 +162,7 @@ function AccountsPageContent() {
     }
   }, [accountIdParam, accountData]);
 
-  const { data, isLoading, error, refetch } = useAccounts({
+  const { data, isLoading, error, refetch: refetchAccounts } = useAccounts({
     skip,
     limit,
     search: debouncedSearch.trim() || undefined,
@@ -84,7 +179,7 @@ function AccountsPageContent() {
     try {
       await createAccount.mutateAsync(data as AccountCreate);
       setIsCreateOpen(false);
-      refetch();
+      refetchAccounts();
     } catch (err) {
       console.error("Failed to create account:", err);
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -96,7 +191,7 @@ function AccountsPageContent() {
     try {
       await updateAccount.mutateAsync({ id: editingAccount, data: data as AccountUpdate });
       setEditingAccount(null);
-      refetch();
+      refetchAccounts();
     } catch (err) {
       console.error("Failed to update account:", err);
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -109,7 +204,7 @@ function AccountsPageContent() {
     if (confirm("Are you sure you want to delete this account?")) {
       try {
         await deleteAccount.mutateAsync(id);
-        refetch();
+        refetchAccounts();
       } catch (err) {
         console.error("Failed to delete account:", err);
         alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -184,26 +279,34 @@ function AccountsPageContent() {
                     <div className="hidden md:block w-full overflow-hidden">
                       <table className="w-full text-xs table-fixed border-collapse">
                         <colgroup>
-                          <col style={{ width: "18%" }} />
-                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "3%" }} />
                           <col style={{ width: "14%" }} />
-                          <col style={{ width: "6%" }} />
-                          <col style={{ width: "6%" }} />
-                          <col style={{ width: "9%" }} />
-                          <col style={{ width: "9%" }} />
-                          <col style={{ width: "9%" }} />
-                          <col style={{ width: "13%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "10%" }} />
+                          <col style={{ width: "5%" }} />
+                          <col style={{ width: "5%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "8%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "7%" }} />
+                          <col style={{ width: "11%" }} />
                         </colgroup>
                         <thead>
                           <tr className="border-b">
+                            <th className="text-left p-1 font-semibold whitespace-nowrap" title="Active engagement today">Act</th>
                             <SortableTh label="Company" column="company_name" sort={sort} onSort={handleSort} title="Company Name" />
                             <SortableTh label="Type" column="type" sort={sort} onSort={handleSort} title="Account Type" />
                             <SortableTh label="Location" column="city" sort={sort} onSort={handleSort} title="City" />
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Contact Count">Contacts</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Opportunity Count">Opps</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Forecast Value (USD)">Forecast $</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Plan Revenue (USD)">Plan $</th>
-                            <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Sum of Opportunities Actuals (USD)">Actuals $</th>
+                            <SortableTh label="Forecast $" column="forecast_sum" sort={sort} onSort={handleSort} title="Sum of Opportunities Forecast Value (USD)" />
+                            <SortableTh label="Plan $" column="plan_sum" sort={sort} onSort={handleSort} title="Sum of Opportunities Plan Revenue (USD)" />
+                            <SortableTh label="Actuals $" column="actuals_sum" sort={sort} onSort={handleSort} title="Sum of Opportunities Actuals (USD)" />
+                            <th className="text-left p-1 font-semibold whitespace-nowrap" title="Master Services Agreement">MSA</th>
+                            <th className="text-left p-1 font-semibold whitespace-nowrap" title="Non-Disclosure Agreement">NDA</th>
+                            <th className="text-left p-1 font-semibold whitespace-nowrap" title="Other agreement">Other</th>
                             <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actions">Actions</th>
                           </tr>
                         </thead>
@@ -214,6 +317,13 @@ function AccountsPageContent() {
                               className="border-b hover:bg-gray-50 cursor-pointer"
                               onClick={() => setViewingAccount(account)}
                             >
+                              <td className="p-1 align-middle text-center" title={account.has_active_engagement_today ? "Active engagement today" : ""}>
+                                {account.has_active_engagement_today ? (
+                                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 shrink-0" aria-label="Active engagement today" />
+                                ) : (
+                                  <span className="inline-block w-2 h-2 shrink-0" aria-hidden />
+                                )}
+                              </td>
                               <td className="p-1.5 font-medium text-xs overflow-hidden" title={account.company_name}>
                                 <div className="truncate">{highlightText(account.company_name, searchQuery)}</div>
                                 {account.industry && (
@@ -267,6 +377,33 @@ function AccountsPageContent() {
                                 {account.actuals_sum != null && account.actuals_sum !== undefined && account.actuals_sum !== 0
                                   ? formatCurrency(account.actuals_sum, "USD")
                                   : "—"}
+                              </td>
+                              <td className="p-1 align-top border-l border-gray-100">
+                                <AccountDocumentSlot
+                                  accountId={account.id}
+                                  docType="msa"
+                                  label="MSA"
+                                  filename={account.msa_original_filename}
+                                  onUpdated={() => refetchAccounts()}
+                                />
+                              </td>
+                              <td className="p-1 align-top border-l border-gray-100">
+                                <AccountDocumentSlot
+                                  accountId={account.id}
+                                  docType="nda"
+                                  label="NDA"
+                                  filename={account.nda_original_filename}
+                                  onUpdated={() => refetchAccounts()}
+                                />
+                              </td>
+                              <td className="p-1 align-top border-l border-gray-100">
+                                <AccountDocumentSlot
+                                  accountId={account.id}
+                                  docType="other"
+                                  label="Other"
+                                  filename={account.other_original_filename}
+                                  onUpdated={() => refetchAccounts()}
+                                />
                               </td>
                               <td className="p-1 overflow-hidden min-w-0">
                                 <div className="flex flex-nowrap gap-0.5 justify-start" onClick={(e) => e.stopPropagation()}>
@@ -332,7 +469,12 @@ function AccountsPageContent() {
                             <div className="space-y-3">
                               <div>
                                 <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Company</div>
-                                <div className="text-sm font-medium">{highlightText(account.company_name, searchQuery)}</div>
+                                <div className="text-sm font-medium flex items-center gap-2">
+                                  {account.has_active_engagement_today ? (
+                                    <span className="h-2 w-2 rounded-full bg-emerald-500 shrink-0" title="Active engagement today" />
+                                  ) : null}
+                                  {highlightText(account.company_name, searchQuery)}
+                                </div>
                                 {account.industry && (
                                   <div className="text-xs text-gray-500">{highlightText(account.industry, searchQuery)}</div>
                                 )}
@@ -382,6 +524,20 @@ function AccountsPageContent() {
                                 <div>
                                   <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Actuals $</div>
                                   <span>{account.actuals_sum != null && account.actuals_sum !== 0 ? formatCurrency(account.actuals_sum, "USD") : "—"}</span>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-3 gap-2 text-xs" onClick={(e) => e.stopPropagation()}>
+                                <div>
+                                  <div className="font-semibold text-gray-500 uppercase mb-1">MSA</div>
+                                  <AccountDocumentSlot accountId={account.id} docType="msa" label="MSA" filename={account.msa_original_filename} onUpdated={() => refetchAccounts()} />
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-500 uppercase mb-1">NDA</div>
+                                  <AccountDocumentSlot accountId={account.id} docType="nda" label="NDA" filename={account.nda_original_filename} onUpdated={() => refetchAccounts()} />
+                                </div>
+                                <div>
+                                  <div className="font-semibold text-gray-500 uppercase mb-1">Other</div>
+                                  <AccountDocumentSlot accountId={account.id} docType="other" label="Other" filename={account.other_original_filename} onUpdated={() => refetchAccounts()} />
                                 </div>
                               </div>
                               <div className="flex gap-2 pt-2">

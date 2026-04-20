@@ -151,7 +151,10 @@ async def update_opportunity(
 ) -> OpportunityResponse:
     """Update an opportunity."""
     controller = OpportunityController(db)
-    opportunity = await controller.update_opportunity(opportunity_id, opportunity_data)
+    try:
+        opportunity = await controller.update_opportunity(opportunity_id, opportunity_data)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not opportunity:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

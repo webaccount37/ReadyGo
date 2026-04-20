@@ -2,12 +2,15 @@
 Account API endpoints.
 """
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, Query, HTTPException, status, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
+import io
 
 from app.db.session import get_db
 from app.controllers.account_controller import AccountController
+from app.services.account_document_service import AccountDocumentService
 from app.schemas.account import (
     AccountCreate,
     AccountUpdate,
@@ -36,7 +39,7 @@ async def list_accounts(
     search: str = Query(None, description="Search company, industry, location, type"),
     sort_by: str = Query(
         None,
-        description="company_name, industry, city, region, country, type",
+        description="company_name, industry, city, region, country, type, forecast_sum, plan_sum, actuals_sum",
     ),
     sort_order: str = Query("asc", description="asc or desc"),
     db: AsyncSession = Depends(get_db),
@@ -102,8 +105,69 @@ async def delete_account(
         )
 
 
+def _doc_type(doc: str) -> str:
+    d = (doc or "").lower()
+    if d not in ("msa", "nda", "other"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid document type")
+    return d
 
 
+@router.post("/{account_id}/documents/{doc_type}", status_code=status.HTTP_204_NO_CONTENT)
+async def upload_account_document(
+    account_id: UUID,
+    doc_type: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    doc = _doc_type(doc_type)
+    data = await file.read()
+    try:
+        await AccountDocumentService(db).upload(
+            account_id,
+            doc,  # type: ignore[arg-type]
+            file.filename or "file",
+            file.content_type,
+            data,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get("/{account_id}/documents/{doc_type}/download")
+async def download_account_document(
+    account_id: UUID,
+    doc_type: str,
+    db: AsyncSession = Depends(get_db),
+):
+    doc = _doc_type(doc_type)
+    try:
+        data, content_type, filename = await AccountDocumentService(db).download(
+            account_id,
+            doc,  # type: ignore[arg-type]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    headers = {}
+    if filename:
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return StreamingResponse(
+        io.BytesIO(data),
+        media_type=content_type or "application/octet-stream",
+        headers=headers,
+    )
+
+
+@router.delete("/{account_id}/documents/{doc_type}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account_document(
+    account_id: UUID,
+    doc_type: str,
+    db: AsyncSession = Depends(get_db),
+):
+    doc = _doc_type(doc_type)
+    try:
+        await AccountDocumentService(db).delete(account_id, doc)  # type: ignore[arg-type]
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
 

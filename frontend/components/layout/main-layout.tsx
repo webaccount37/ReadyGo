@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Sidebar, SidebarContent } from "./sidebar";
+import { Sidebar, SidebarContent, ConsultCortexNavLogo } from "./sidebar";
 import { Sheet, SheetContent, SheetClose } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
 
@@ -51,6 +51,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       <Sheet open={mobileMenuOpen} onOpenChange={setMobileMenuOpen}>
         <SheetContent side="left" className="bg-gray-900 text-white p-4">
           <SheetClose onClick={() => setMobileMenuOpen(false)} />
+          <div className="mb-6 pr-10 pt-1">
+            <ConsultCortexNavLogo className="h-10 w-auto max-w-[11rem]" priority />
+          </div>
           <SidebarContent onNavigate={() => setMobileMenuOpen(false)} />
         </SheetContent>
       </Sheet>

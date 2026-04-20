@@ -40,7 +40,7 @@ export function OpportunityForm({
   onCancel,
   isLoading = false,
 }: OpportunityFormProps) {
-  const { data: accountsData } = useAccounts({ limit: 100 });
+  const { data: accountsData } = useAccounts({ skip: 0, limit: 1000 });
   const { data: opportunitiesData } = useOpportunities({ limit: 100 });
   const { data: employeesData } = useEmployees({ limit: 1000 });
   const { data: deliveryCentersData } = useDeliveryCenters();
@@ -224,6 +224,18 @@ export function OpportunityForm({
   
   const probability = useMemo(() => calculateProbability(formData.status || "discovery"), [formData.status]);
 
+  /** Full list for the API max page size; ensure the current account row exists if it was outside the fetched page. */
+  const accountSelectItems = useMemo(() => {
+    const items = accountsData?.items ?? [];
+    const selectedId = formData.account_id;
+    if (selectedId && !items.some((a) => a.id === selectedId)) {
+      const opp = initialData && "account_name" in initialData ? (initialData as Opportunity) : undefined;
+      const label = opp?.account_name?.trim() || selectedId;
+      return [{ id: selectedId, company_name: label }, ...items];
+    }
+    return items;
+  }, [accountsData?.items, formData.account_id, initialData]);
+
   // Auto-calculate Forecast Values when Status, Default Currency, Probability, or Deal Value changes
   useEffect(() => {
     const currentProbability = probability;
@@ -325,7 +337,15 @@ export function OpportunityForm({
             if (errors.name) setErrors({ ...errors, name: undefined });
           }}
           required
+          disabled={hasActiveQuote || hasPermanentLock}
           className={errors.name ? "border-red-500" : ""}
+          title={
+            hasActiveQuote
+              ? "Cannot change opportunity name when a quote is active"
+              : hasPermanentLock
+                ? "Cannot change opportunity name when permanently locked"
+                : undefined
+          }
         />
         {errors.name && (
           <p className="text-red-500 text-sm mt-1">{errors.name}</p>
@@ -348,7 +368,7 @@ export function OpportunityForm({
             title={hasActiveQuote ? "Cannot change account when quote is active" : ""}
           >
             <option value="">Select an account</option>
-            {accountsData?.items.map((account) => (
+            {accountSelectItems.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.company_name}
               </option>
@@ -753,7 +773,10 @@ export function OpportunityForm({
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
-        <Button type="submit" disabled={isLoading || billingTermsLoading || isLocked}>
+        <Button
+          type="submit"
+          disabled={isLoading || billingTermsLoading || hasPermanentLock}
+        >
           {isLoading ? "Saving..." : initialData ? "Update" : "Create"}
         </Button>
       </div>

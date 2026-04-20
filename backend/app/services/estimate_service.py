@@ -28,6 +28,10 @@ from app.models.role_rate import RoleRate
 from app.models.role import Role
 from app.models.employee import Employee
 from app.utils.currency_converter import convert_to_usd, get_conversion_rate_to_usd, convert_currency
+from app.utils.planning_week_hours import (
+    resolve_opportunity_scope_for_estimate,
+    weekly_row_counts_toward_totals,
+)
 from app.schemas.estimate import (
     EstimateCreate, EstimateUpdate, EstimateResponse, EstimateDetailResponse, EstimateListResponse,
     EstimateLineItemCreate, EstimateLineItemUpdate, EstimateLineItemResponse,
@@ -1003,7 +1007,17 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get_with_line_items(estimate_id)
         if not estimate:
             raise ValueError("Estimate not found")
-        
+
+        opportunity = getattr(estimate, "opportunity", None)
+        if opportunity is None and estimate.opportunity_id:
+            opportunity = await self.opportunity_repo.get(estimate.opportunity_id)
+        opportunity_scope = None
+        if opportunity is not None:
+            opportunity_scope = resolve_opportunity_scope_for_estimate(
+                opportunity.start_date,
+                opportunity.end_date,
+            )
+
         weekly_totals_dict: Dict[date, Dict[str, Decimal]] = {}
         role_totals_dict: Dict[UUID, Dict[str, Decimal]] = {}
         
@@ -1031,12 +1045,19 @@ class EstimateService(BaseService):
                     "revenue": Decimal("0"),
                 }
             
-            # Process weekly hours
+            # Process weekly hours (same in-scope rules as estimate spreadsheet)
             if line_item.weekly_hours:
                 for weekly_hour in line_item.weekly_hours:
                     week_start = weekly_hour.week_start_date
+                    if not weekly_row_counts_toward_totals(
+                        week_start,
+                        line_item.start_date,
+                        line_item.end_date,
+                        opportunity_scope,
+                    ):
+                        continue
                     hours = Decimal(str(weekly_hour.hours))
-                    
+
                     # Initialize week totals if needed
                     if week_start not in weekly_totals_dict:
                         weekly_totals_dict[week_start] = {
@@ -1326,13 +1347,19 @@ class EstimateService(BaseService):
             if hasattr(line_item, 'payable_center') and line_item.payable_center:
                 payable_center_name = line_item.payable_center.name
         
+        effective_payable_id = (
+            line_item.payable_center_id if getattr(line_item, "payable_center_id", None) else delivery_center_id
+        )
+        if not payable_center_name and effective_payable_id and delivery_center_id == effective_payable_id:
+            if line_item.role_rate and line_item.role_rate.delivery_center:
+                payable_center_name = line_item.role_rate.delivery_center.name
         line_item_dict = {
             "id": line_item.id,
             "estimate_id": line_item.estimate_id,
             "role_rates_id": line_item.role_rates_id,
             "role_id": role_id,  # Included for backward compatibility
-            "delivery_center_id": line_item.payable_center_id if hasattr(line_item, 'payable_center_id') else delivery_center_id,  # Payable Center (for backward compatibility, fallback to role_rate.delivery_center)
-            "payable_center_id": line_item.payable_center_id if hasattr(line_item, 'payable_center_id') else None,  # Payable Center
+            "delivery_center_id": effective_payable_id,  # Payable Center; fallback to invoice center from role rate when DB null
+            "payable_center_id": effective_payable_id,
             "employee_id": line_item.employee_id,
             "rate": line_item.rate,
             "cost": line_item.cost,
@@ -1343,8 +1370,8 @@ class EstimateService(BaseService):
             "billable": line_item.billable,
             "billable_expense_percentage": line_item.billable_expense_percentage,
             "role_name": role_name,
-            "delivery_center_name": payable_center_name or delivery_center_name,  # Use payable_center_name if available, otherwise fallback
-            "payable_center_name": payable_center_name,  # Payable Center name
+            "delivery_center_name": payable_center_name or delivery_center_name,
+            "payable_center_name": payable_center_name or delivery_center_name,
             "employee_name": employee_name,
         }
         

@@ -27,6 +27,28 @@ from app.core.integrations.sharepoint_graph import SharePointProjectFolderServic
 logger = get_logger(__name__)
 
 
+def _locked_quote_field_value_changed(field: str, current, incoming) -> bool:
+    """True if `incoming` would change the stored value (for active-quote locked fields)."""
+    if field in (
+        "account_id",
+        "delivery_center_id",
+        "billing_term_id",
+        "opportunity_owner_id",
+    ):
+        if current is None and incoming is None:
+            return False
+        if current is None or incoming is None:
+            return True
+        return str(current) != str(incoming)
+    if field in ("start_date", "end_date"):
+        return current != incoming
+    if field == "default_currency":
+        return (current or "").upper() != (incoming or "").upper()
+    if field == "name":
+        return (current or "").strip() != (incoming or "").strip()
+    return current != incoming
+
+
 class OpportunityService(BaseService):
     """Service for opportunity operations."""
     
@@ -384,9 +406,6 @@ class OpportunityService(BaseService):
         active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity_id)
         
         # Server-side validation: end_date must be after start_date when both are provided
-        # Check which fields were explicitly set in the request
-        # Pydantic v2 provides model_fields_set to see which fields were explicitly provided
-        fields_set = getattr(opportunity_data, 'model_fields_set', None)
         update_dict = opportunity_data.model_dump(exclude_unset=True, exclude_none=False)
         
         # CRITICAL: end_date is required (NOT NULL constraint), so never set it to None
@@ -396,8 +415,10 @@ class OpportunityService(BaseService):
             del update_dict['end_date']
         
         if active_quote:
-            # Fields that cannot be changed when locked by active quote
+            # Fields that cannot be changed when locked by active quote (clients often send
+            # full form bodies; only reject when values actually differ from the database).
             locked_fields = {
+                'name',
                 'delivery_center_id',  # Invoice Center
                 'default_currency',
                 'start_date',
@@ -406,9 +427,14 @@ class OpportunityService(BaseService):
                 'account_id',
                 'billing_term_id',
             }
-            
-            # Check if any locked fields are in the update
-            attempted_locked_fields = [field for field in locked_fields if field in update_dict]
+            attempted_locked_fields = []
+            for field in locked_fields:
+                if field not in update_dict:
+                    continue
+                current = getattr(opportunity, field)
+                incoming = update_dict[field]
+                if _locked_quote_field_value_changed(field, current, incoming):
+                    attempted_locked_fields.append(field)
             if attempted_locked_fields:
                 raise ValueError(
                     f"Opportunity is locked by active quote {active_quote.quote_number}. "

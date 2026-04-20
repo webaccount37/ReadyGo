@@ -2,6 +2,7 @@
 
 import { useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import { ConsultCortexNavLogo } from "@/components/layout/sidebar";
 import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 
@@ -39,8 +40,14 @@ function LoginPageContent() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full space-y-8 p-8 bg-white rounded-lg shadow-md">
         <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900">ReadyGo</h1>
-          <p className="mt-2 text-gray-600">Consulting Platform</p>
+          <h1 className="sr-only">ConsultCortex</h1>
+          <ConsultCortexNavLogo
+            surface="light"
+            altText=""
+            className="mx-auto h-14 w-auto max-w-full object-center"
+            priority
+          />
+          <p className="mt-3 text-gray-600">Consulting platform</p>
         </div>
 
         {error && (
