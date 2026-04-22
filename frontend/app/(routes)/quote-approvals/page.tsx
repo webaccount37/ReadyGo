@@ -5,6 +5,7 @@ import { useQuotesForApproval, useUpdateQuoteStatus } from "@/hooks/useQuotes";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import { useEngagements } from "@/hooks/useEngagements";
 import { useQueryClient } from "@tanstack/react-query";
+import { engagementsApi } from "@/lib/api/engagements";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -37,13 +38,29 @@ function QuoteApprovalsPageContent() {
         quoteId,
         status: { status: "ACCEPTED" },
       });
-      // Invalidate engagements query to refetch and get the newly created engagement
-      queryClient.invalidateQueries({ queryKey: ["engagements"] });
-      // Wait a moment for the engagement to be created, then refetch
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      refetch();
+      await queryClient.invalidateQueries({ queryKey: ["engagements"] });
+      // Poll for the new engagement (creation runs in the same request; list may lag briefly)
+      let createdEngagementId: string | null = null;
+      for (let i = 0; i < 15; i++) {
+        const res = await engagementsApi.getEngagements({ skip: 0, limit: 100, quote_id: quoteId });
+        const hit = res.items?.find((e) => e.quote_id === quoteId);
+        if (hit?.id) {
+          createdEngagementId = hit.id;
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      await refetch();
       await refetchEngagements();
-      alert(`Quote "${displayName}" approved successfully! An Engagement has been created. Check the Engagements page to view it.`);
+      if (createdEngagementId) {
+        alert(
+          `Quote "${displayName}" approved. Engagement is ready — you can open it from the list or Engagements.`
+        );
+      } else {
+        alert(
+          `Quote "${displayName}" approved. If you do not see the engagement link yet, refresh the page.`
+        );
+      }
     } catch (err) {
       console.error("Failed to approve quote:", err);
       alert(`Error: ${err instanceof Error ? err.message : String(err)}`);
@@ -238,6 +255,7 @@ function QuoteApprovalsPageContent() {
                           size="sm"
                           onClick={() => handleApprove(quote.id, quote.display_name)}
                           disabled={updateQuoteStatus.isPending}
+                          aria-busy={updateQuoteStatus.isPending}
                           className="bg-green-600 hover:bg-green-700 text-white"
                         >
                           <CheckCircle2 className="h-4 w-4 mr-1" />

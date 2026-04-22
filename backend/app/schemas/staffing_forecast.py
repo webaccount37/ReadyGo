@@ -22,9 +22,9 @@ class StaffingForecastSourceItem(BaseModel):
 
 class StaffingForecastCell(BaseModel):
     """Cell value for a row/week or row/month intersection."""
-    hours: float
-    revenue: float
-    cost: float
+    hours: Optional[float] = None  # null when employee week is outside tenure (employee rows)
+    revenue: Optional[float] = None
+    cost: Optional[float] = None
     margin_pct: Optional[float] = None
     billable_utilization_pct: Optional[float] = None
     billable_hours: Optional[float] = None  # For employee rows in utilization scope; enables correct aggregation

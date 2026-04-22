@@ -54,6 +54,22 @@ export function EstimateEmptyRow({
     )?.default_currency;
   }, [opportunityDeliveryCenterId, deliveryCentersData?.items]);
   const { data: employeesData } = useEmployees({ limit: 100 });
+  const rolesSorted = useMemo(
+    () =>
+      rolesData
+        ? [...rolesData].sort((a, b) => (a.role_name || "").localeCompare(b.role_name || ""))
+        : undefined,
+    [rolesData]
+  );
+  const employeesSorted = useMemo(
+    () =>
+      employeesData?.items
+        ? [...employeesData.items].sort((a, b) =>
+            `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`)
+          )
+        : undefined,
+    [employeesData?.items]
+  );
   const createLineItem = useCreateLineItem();
   const updateLineItem = useUpdateLineItem();
   const deleteLineItemMutation = useDeleteLineItem();
@@ -1181,7 +1197,7 @@ export function EstimateEmptyRow({
           className="text-xs h-7 w-full"
         >
           <option value="">Select...</option>
-          {rolesData?.map((role) => (
+          {rolesSorted?.map((role) => (
             <option key={role.id} value={role.id}>
               {role.role_name}
             </option>
@@ -1199,7 +1215,7 @@ export function EstimateEmptyRow({
           className="text-xs h-7 w-full"
         >
           <option value="">-</option>
-          {employeesData?.items?.map((employee) => (
+          {employeesSorted?.map((employee) => (
             <option key={employee.id} value={employee.id}>
               {employee.first_name} {employee.last_name}
             </option>

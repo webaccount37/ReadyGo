@@ -550,6 +550,7 @@ class FinancialForecastRepository:
             .select_from(TimesheetApprovedSnapshot)
             .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
             .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .join(EngagementLineItem, TimesheetEntry.engagement_line_item_id == EngagementLineItem.id)
             .join(Opportunity, TimesheetEntry.opportunity_id == Opportunity.id)
             .where(
                 TimesheetEntry.opportunity_id.in_(opp_ids),
@@ -558,6 +559,7 @@ class FinancialForecastRepository:
                 Timesheet.week_start_date >= range_start - timedelta(days=6),
                 Timesheet.week_start_date <= range_end,
                 Opportunity.delivery_center_id == forecast_dc_id,
+                EngagementLineItem.billable == True,
             )
             .group_by(Timesheet.week_start_date, TimesheetEntry.engagement_line_item_id, TimesheetApprovedSnapshot.invoice_currency)
         )
@@ -592,6 +594,7 @@ class FinancialForecastRepository:
                     EngagementWeeklyHours.week_start_date >= range_start - timedelta(days=6),
                     EngagementWeeklyHours.week_start_date <= range_end,
                     EngagementWeeklyHours.hours > 0,
+                    EngagementLineItem.billable == True,
                 )
             )
             for r in (await self.session.execute(q_plan)).all():
@@ -635,11 +638,17 @@ class FinancialForecastRepository:
                 Timesheet.week_start_date.label("ws"),
                 TimesheetEntry.engagement_line_item_id.label("eli"),
                 TimesheetApprovedSnapshot.invoice_currency.label("inv_cur"),
-                func.sum(TimesheetApprovedSnapshot.hours * TimesheetApprovedSnapshot.invoice_cost).label("cost_rev"),
+                func.sum(
+                    case(
+                        (TimesheetApprovedSnapshot.billable == True, TimesheetApprovedSnapshot.hours * TimesheetApprovedSnapshot.invoice_cost),
+                        else_=0,
+                    )
+                ).label("cost_rev"),
             )
             .select_from(TimesheetApprovedSnapshot)
             .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
             .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .join(EngagementLineItem, TimesheetEntry.engagement_line_item_id == EngagementLineItem.id)
             .join(Employee, Timesheet.employee_id == Employee.id)
             .where(
                 _timesheet_entry_opportunity_in(opp_ids),
@@ -648,6 +657,7 @@ class FinancialForecastRepository:
                 Employee.delivery_center_id == forecast_dc_id,
                 Timesheet.week_start_date >= range_start - timedelta(days=6),
                 Timesheet.week_start_date <= range_end,
+                EngagementLineItem.billable == True,
             )
             .group_by(Timesheet.week_start_date, TimesheetEntry.engagement_line_item_id, TimesheetApprovedSnapshot.invoice_currency)
         )
@@ -680,6 +690,7 @@ class FinancialForecastRepository:
                     EngagementWeeklyHours.hours > 0,
                     EngagementWeeklyHours.week_start_date >= range_start - timedelta(days=6),
                     EngagementWeeklyHours.week_start_date <= range_end,
+                    EngagementLineItem.billable == True,
                     or_(
                         and_(EngagementLineItem.employee_id.isnot(None), Employee.delivery_center_id == forecast_dc_id),
                         and_(

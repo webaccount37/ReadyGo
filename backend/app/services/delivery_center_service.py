@@ -312,14 +312,11 @@ class DeliveryCenterService(BaseService):
         if not delivery_center:
             raise ValueError("Delivery center not found")
         
-        # Verify employee exists and belongs to this delivery center
+        # Verify employee exists (approvers may be in any delivery center)
         employee = await self.employee_repo.get(approver_data.employee_id)
         if not employee:
             raise ValueError("Employee not found")
-        
-        if employee.delivery_center_id != delivery_center_id:
-            raise ValueError("Employee must belong to the same delivery center")
-        
+
         # Check if association already exists
         existing = await self.approver_repo.get_association(delivery_center_id, approver_data.employee_id)
         if existing:

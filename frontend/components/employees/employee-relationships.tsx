@@ -60,7 +60,7 @@ export function EmployeeRelationships({
   const { data: deliveryCentersData } = useDeliveryCenters();
   const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
   // Fetch all quotes at top level to check for active quotes per opportunity
-  const { data: allQuotesData } = useQuotes({ limit: 10000 });
+  const { data: allQuotesData } = useQuotes({ limit: 1000 });
   const [selectedAccountId, setSelectedAccountId] = useState<string>("");
   
   // Get selected opportunity for auto-fill

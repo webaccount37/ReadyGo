@@ -191,6 +191,23 @@ export function EstimateLineItemRow({
   }, [opportunityDeliveryCenterId, deliveryCentersData?.items]);
   const { data: employeesData } = useEmployees({ limit: 100 });
 
+  const rolesSorted = useMemo(
+    () =>
+      rolesData
+        ? [...rolesData].sort((a, b) => (a.role_name || "").localeCompare(b.role_name || ""))
+        : undefined,
+    [rolesData]
+  );
+  const employeesSorted = useMemo(
+    () =>
+      employeesData?.items
+        ? [...employeesData.items].sort((a, b) =>
+            `${a.first_name} ${a.last_name}`.localeCompare(`${b.first_name} ${b.last_name}`)
+          )
+        : undefined,
+    [employeesData?.items]
+  );
+
   // Fetch role details when role is selected (to get role rates)
   const { data: selectedRoleData, isLoading: isLoadingRole, isFetching: isFetchingRole } = useRole(roleValue || "", true, {
     enabled: !!roleValue,
@@ -571,27 +588,30 @@ export function EstimateLineItemRow({
     };
   }, []);
 
-  const defaultedPayableForLineRef = useRef<string | null>(null);
+  // One-shot default Payable when the API still has null (first paint). Intentionally does not
+  // depend on handleFieldUpdate to avoid re-running on callback identity changes when other rows save.
+  const defaultPayableAppliedRef = useRef(false);
   useEffect(() => {
-    defaultedPayableForLineRef.current = null;
+    defaultPayableAppliedRef.current = false;
   }, [lineItem.id]);
+  useEffect(() => {
+    if (lineItem.delivery_center_id) {
+      defaultPayableAppliedRef.current = false;
+    }
+  }, [lineItem.delivery_center_id, lineItem.id]);
 
   // Persist default Payable when API had null but Opportunity Invoice Center is known (first paint race)
   useEffect(() => {
     if (readOnly || !opportunityDeliveryCenterId) return;
-    const existing = lineItem.delivery_center_id;
-    if (existing) return;
-    if (defaultedPayableForLineRef.current === lineItem.id) return;
-    defaultedPayableForLineRef.current = lineItem.id;
+    if (lineItem.delivery_center_id) return;
+    if (defaultPayableAppliedRef.current) return;
+    if (isUpdatingRef.current) return;
+    defaultPayableAppliedRef.current = true;
     setDeliveryCenterValue(opportunityDeliveryCenterId);
-    void handleFieldUpdate("delivery_center_id", opportunityDeliveryCenterId, existing || "");
-  }, [
-    readOnly,
-    opportunityDeliveryCenterId,
-    lineItem.id,
-    lineItem.delivery_center_id,
-    handleFieldUpdate,
-  ]);
+    void handleFieldUpdate("delivery_center_id", opportunityDeliveryCenterId, "");
+    // handleFieldUpdate omitted from deps: only re-run on line/opportunity data changes, not other rows' updates
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, opportunityDeliveryCenterId, lineItem.id, lineItem.delivery_center_id]);
 
   // Clear billable expense percentage when billableExpenses changes from true to false
   useEffect(() => {
@@ -973,7 +993,7 @@ export function EstimateLineItemRow({
             className="text-xs h-7 w-full"
           >
             <option value="">Select...</option>
-            {rolesData?.map((role: { id: string; role_name: string }) => (
+            {rolesSorted?.map((role: { id: string; role_name: string }) => (
               <option key={role.id} value={role.id}>
                 {role.role_name}
               </option>
@@ -998,7 +1018,7 @@ export function EstimateLineItemRow({
             className="text-xs h-7 w-full"
           >
             <option value="">-</option>
-            {employeesData?.items?.map((employee: { id: string; first_name: string; last_name: string }) => (
+            {employeesSorted?.map((employee: { id: string; first_name: string; last_name: string }) => (
               <option key={employee.id} value={employee.id}>
                 {employee.first_name} {employee.last_name}
               </option>

@@ -148,14 +148,17 @@ export default function StaffingForecastsPage() {
   };
 
   const formatCellValue = (
-    cell: { hours: number; margin_pct?: number; billable_utilization_pct?: number } | null,
+    cell: { hours?: number | null; margin_pct?: number | null; billable_utilization_pct?: number | null } | null,
     metricType: "hours" | "margin" | "billable_utilization"
   ): string => {
     if (!cell) return metricType === "hours" ? "0" : "—";
     if (metricType === "margin" && cell.margin_pct != null) return `${cell.margin_pct.toFixed(1)}%`;
     if (metricType === "billable_utilization" && cell.billable_utilization_pct !== undefined && cell.billable_utilization_pct !== null)
       return `${cell.billable_utilization_pct.toFixed(1)}%`;
-    if (metricType === "hours") return cell.hours.toFixed(1);
+    if (metricType === "hours") {
+      if (cell.hours == null) return "—";
+      return cell.hours.toFixed(1);
+    }
     return "—";
   };
 
@@ -217,15 +220,15 @@ export default function StaffingForecastsPage() {
       let atZeroCount = 0;
       visibleRows.forEach((row) => {
         const cell = data.cells[row.row_key]?.[p.key];
-        const raw = cell
+        const raw = !cell
           ? isHours
-            ? cell.hours
+            ? 0
+            : null
+          : isHours
+            ? (cell.hours ?? null)
             : isUtilization
               ? (cell.billable_utilization_pct ?? null)
-              : (cell.margin_pct ?? null)
-          : isHours
-            ? 0
-            : null;
+              : (cell.margin_pct ?? null);
         const clamped = raw === null ? null : Math.max(0, Math.min(150, raw));
         point[row.row_key] = clamped;
         if (raw !== null && atZeroThreshold(raw)) atZeroCount++;
@@ -279,9 +282,9 @@ export default function StaffingForecastsPage() {
       for (const row of visibleRows) {
         const cell = data.cells[row.row_key]?.[p.key];
         if (!cell) continue;
-        hours += cell.hours;
-        revenue += cell.revenue;
-        cost += cell.cost;
+        if (cell.hours != null) hours += cell.hours;
+        if (cell.revenue != null) revenue += cell.revenue;
+        if (cell.cost != null) cost += cell.cost;
         billable_hours += cell.billable_hours ?? 0;
         available_hours += cell.available_hours ?? 0;
       }
@@ -300,9 +303,9 @@ export default function StaffingForecastsPage() {
       for (const p of periods) {
         const cell = data.cells[row.row_key]?.[p.key];
         if (!cell) continue;
-        hours += cell.hours;
-        revenue += cell.revenue;
-        cost += cell.cost;
+        if (cell.hours != null) hours += cell.hours;
+        if (cell.revenue != null) revenue += cell.revenue;
+        if (cell.cost != null) cost += cell.cost;
         billable_hours += cell.billable_hours ?? 0;
         available_hours += cell.available_hours ?? 0;
       }
@@ -595,15 +598,15 @@ export default function StaffingForecastsPage() {
                       const cell = data.cells[row.row_key]?.[p.key];
                       const isHours = metric === "hours";
                       const isUtilization = metric === "billable_utilization";
-                      const effectiveValue = cell
+                      const effectiveValue = !cell
                         ? isHours
-                          ? cell.hours
+                          ? 0
+                          : null
+                        : isHours
+                          ? (cell.hours ?? null)
                           : isUtilization
                             ? (cell.billable_utilization_pct ?? null)
-                            : (cell.margin_pct ?? null)
-                        : isHours
-                          ? 0
-                          : null;
+                            : (cell.margin_pct ?? null);
                       const displayValue = cell
                         ? formatCellValue(cell, metric)
                         : isHours
@@ -635,7 +638,7 @@ export default function StaffingForecastsPage() {
                             title={
                               cell
                                 ? (isHours
-                                    ? `Hours: ${cell.hours.toFixed(1)}\n\n`
+                                    ? `Hours: ${cell.hours == null ? "—" : cell.hours.toFixed(1)}\n\n`
                                     : isUtilization
                                       ? `Utilization: ${cell.billable_utilization_pct?.toFixed(1) ?? "—"}%\n\n`
                                       : `Margin: ${cell.margin_pct?.toFixed(1) ?? "—"}%\n\n`) +

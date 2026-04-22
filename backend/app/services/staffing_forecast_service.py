@@ -355,6 +355,11 @@ class StaffingForecastService:
                 week_date = date.fromisoformat(wk)
                 if not _week_in_utilization_scope(week_date, ranges):
                     c["billable_utilization_pct"] = None
+                    c["hours"] = None
+                    c["revenue"] = None
+                    c["cost"] = None
+                    c["margin_pct"] = None
+                    c["sources"] = []
                     continue
                 billable_hours = _billable_hours_for_util(emp_id, dc_id, wk)
                 holiday_hours = holiday_by_dc_week.get((dc_id, wk), 0.0)
@@ -417,9 +422,12 @@ class StaffingForecastService:
                             "available_hours_sum": 0.0,
                         }
                     mc = month_cells[rk][month_key]
-                    mc["hours"] += c["hours"]
-                    mc["revenue"] += c["revenue"]
-                    mc["cost"] += c["cost"]
+                    if c.get("hours") is not None:
+                        mc["hours"] += c["hours"]
+                    if c.get("revenue") is not None:
+                        mc["revenue"] += c["revenue"]
+                    if c.get("cost") is not None:
+                        mc["cost"] += c["cost"]
                     if c.get("margin_pct") is not None and mc["revenue"] > 0:
                         mc["margin_pct"] = round((mc["revenue"] - mc["cost"]) / mc["revenue"] * 100, 1)
 

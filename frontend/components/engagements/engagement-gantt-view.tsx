@@ -2,6 +2,7 @@
 
 import React, { useMemo } from "react";
 import type { EngagementDetailResponse, EngagementPhase } from "@/types/engagement";
+import { startOfWeekSunday } from "@/lib/utils/week";
 
 interface EngagementGanttViewProps {
   engagement: EngagementDetailResponse;
@@ -98,20 +99,17 @@ export function EngagementGanttView({
     return { start: earliestStart, end: latestEnd };
   }, [engagement.phases, opportunityStart, opportunityEnd]);
 
-  // Generate weekly columns (Monday start)
+  // Generate weekly columns (Sunday start, Sun–Sat)
   const weeks = useMemo(() => {
     const weekStarts: Date[] = [];
-    const current = new Date(timelineBounds.start);
-
-    const dayOfWeek = current.getDay();
-    const diff = current.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
-    current.setDate(diff);
-
-    while (current <= timelineBounds.end) {
+    let current = startOfWeekSunday(timelineBounds.start);
+    const end = timelineBounds.end;
+    while (current <= end) {
       weekStarts.push(new Date(current));
-      current.setDate(current.getDate() + 7);
+      const next = new Date(current);
+      next.setDate(next.getDate() + 7);
+      current = next;
     }
-
     return weekStarts;
   }, [timelineBounds]);
 

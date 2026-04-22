@@ -18,7 +18,7 @@ from app.models.quote import Quote, QuoteStatus
 from app.models.role import Role
 from app.models.role_rate import RoleRate
 from app.models.delivery_center import DeliveryCenter
-from app.models.employee import Employee
+from app.models.employee import Employee, EmployeeStatus
 from app.models.timesheet import (
     TimesheetApprovedSnapshot,
     TimesheetEntry,
@@ -99,7 +99,7 @@ class StaffingForecastRepository:
                 Employee.delivery_center_id,
             )
             .select_from(Employee)
-            .where(Employee.id.in_(emp_ids))
+            .where(Employee.id.in_(emp_ids), Employee.status == EmployeeStatus.ACTIVE)
         )
         if delivery_center_id is not None:
             query = query.where(Employee.delivery_center_id == delivery_center_id)
@@ -354,6 +354,7 @@ class StaffingForecastRepository:
                 no_accepted_quote,
                 EstimateWeeklyHours.week_start_date >= start_week,
                 EstimateWeeklyHours.week_start_date <= end_week,
+                or_(EstimateLineItem.employee_id.is_(None), Employee.status == EmployeeStatus.ACTIVE),
             )
         )
 
@@ -451,6 +452,7 @@ class StaffingForecastRepository:
             .where(
                 EngagementWeeklyHours.week_start_date >= start_week,
                 EngagementWeeklyHours.week_start_date <= end_week,
+                or_(EngagementLineItem.employee_id.is_(None), Employee.status == EmployeeStatus.ACTIVE),
             )
         )
 
@@ -531,6 +533,7 @@ class StaffingForecastRepository:
                 Quote.status == QuoteStatus.ACCEPTED,
                 EngagementLineItem.billable == True,
                 EngagementLineItem.employee_id.isnot(None),
+                Employee.status == EmployeeStatus.ACTIVE,
                 EngagementWeeklyHours.week_start_date >= start_week,
                 EngagementWeeklyHours.week_start_date <= end_week,
             )
@@ -634,7 +637,10 @@ class StaffingForecastRepository:
             .outerjoin(Employee, EngagementLineItem.employee_id == Employee.id)
             .outerjoin(dc_emp, Employee.delivery_center_id == dc_emp.id)
             .outerjoin(dc_opp, Opportunity.delivery_center_id == dc_opp.id)
-            .where(EngagementLineItem.id.in_(li_ids))
+            .where(
+                EngagementLineItem.id.in_(li_ids),
+                or_(EngagementLineItem.employee_id.is_(None), Employee.status == EmployeeStatus.ACTIVE),
+            )
         )
 
         if billable_filter is not None:

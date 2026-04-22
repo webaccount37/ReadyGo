@@ -10,7 +10,7 @@ import {
   useAccount,
 } from "@/hooks/useAccounts";
 import { Button } from "@/components/ui/button";
-import { Trash2, Pencil, Eye } from "lucide-react";
+import { Trash2, Pencil, Eye, Upload, Loader2 } from "lucide-react";
 import { accountsApi } from "@/lib/api/accounts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogHeader, DialogTitle, DialogContent } from "@/components/ui/dialog";
@@ -93,11 +93,16 @@ function AccountDocumentSlot({
           type="button"
           size="sm"
           variant="outline"
-          className="h-6 px-1 text-[10px]"
+          className="h-6 w-6 p-0"
+          title={`Upload ${label}`}
           disabled={pending}
           onClick={() => inputRef.current?.click()}
         >
-          {pending ? "…" : "Up"}
+          {pending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+          ) : (
+            <Upload className="h-3.5 w-3.5" aria-hidden />
+          )}
         </Button>
         {filename ? (
           <>

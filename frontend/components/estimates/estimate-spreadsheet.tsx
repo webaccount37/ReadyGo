@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useMemo, useRef } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import type { EstimateDetailResponse, EstimatePhase } from "@/types/estimate";
 import { EstimateLineItemRow } from "./estimate-line-item-row";
 import { EstimateTotalsRow } from "./estimate-totals-row";
@@ -32,14 +32,15 @@ export function EstimateSpreadsheet({
   billableExpenses = true,
   readOnly = false
 }: EstimateSpreadsheetProps) {
-  const { data: currencyRatesData } = useCurrencyRates({ limit: 10000 });
-  if (currencyRatesData?.items) {
+  const { data: currencyRatesData } = useCurrencyRates({ limit: 1000 });
+  useEffect(() => {
+    if (!currencyRatesData?.items?.length) return;
     const rates: Record<string, number> = {};
     for (const rate of currencyRatesData.items) {
       rates[rate.currency_code.toUpperCase()] = rate.rate_to_usd;
     }
     setCurrencyRates(rates);
-  }
+  }, [currencyRatesData]);
 
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
   const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count

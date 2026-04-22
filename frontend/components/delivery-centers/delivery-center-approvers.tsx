@@ -3,10 +3,10 @@
 import { useState } from "react";
 import {
   useDeliveryCenterApprovers,
-  useEmployeesForDeliveryCenter,
   useAddDeliveryCenterApprover,
   useRemoveDeliveryCenterApprover,
 } from "@/hooks/useDeliveryCenters";
+import { useEmployees } from "@/hooks/useEmployees";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
@@ -24,8 +24,8 @@ export function DeliveryCenterApprovers({
 }: DeliveryCenterApproversProps) {
   const { data: approversData, isLoading: approversLoading, refetch: refetchApprovers } =
     useDeliveryCenterApprovers(deliveryCenterId);
-  const { data: employeesData, isLoading: employeesLoading } =
-    useEmployeesForDeliveryCenter(deliveryCenterId);
+  const { data: employeesListData, isLoading: employeesLoading } = useEmployees({ limit: 1000 });
+  const employeesData = employeesListData?.items ?? [];
   const addApprover = useAddDeliveryCenterApprover();
   const removeApprover = useRemoveDeliveryCenterApprover();
 
@@ -71,7 +71,7 @@ export function DeliveryCenterApprovers({
   }
 
   const approvers = approversData?.items || [];
-  const employees = employeesData || [];
+  const employees = employeesData;
   
   // Filter out employees that are already approvers
   const availableEmployees = employees.filter(
@@ -108,7 +108,7 @@ export function DeliveryCenterApprovers({
             </div>
             {availableEmployees.length === 0 && (
               <p className="text-xs text-gray-500 mt-1">
-                All employees for this delivery center are already approvers.
+                All employees are already approvers, or the employee list is empty.
               </p>
             )}
           </div>

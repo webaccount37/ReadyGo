@@ -5,6 +5,7 @@ import { useQueries } from "@tanstack/react-query";
 import { estimatesApi } from "@/lib/api/estimates";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import type { EstimateDetailResponse } from "@/types/estimate";
+import { startOfWeekSunday } from "@/lib/utils/week";
 
 interface MultiEstimateGanttViewProps {
   estimateIds: string[];
@@ -251,21 +252,17 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
     return { start: earliestStart, end: latestEnd };
   }, [estimateRows]);
 
-  // Generate weekly columns (Monday start)
+  // Generate weekly columns (Sunday start, Sun–Sat — matches calendars elsewhere in the app)
   const weeks = useMemo(() => {
     const weekStarts: Date[] = [];
-    const current = new Date(timelineBounds.start);
-
-    // Find the Monday of the week containing the start date
-    const dayOfWeek = current.getDay();
-    const diff = current.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust for Monday
-    current.setDate(diff);
-
-    while (current <= timelineBounds.end) {
+    let current = startOfWeekSunday(timelineBounds.start);
+    const end = timelineBounds.end;
+    while (current <= end) {
       weekStarts.push(new Date(current));
-      current.setDate(current.getDate() + 7);
+      const next = new Date(current);
+      next.setDate(next.getDate() + 7);
+      current = next;
     }
-
     return weekStarts;
   }, [timelineBounds]);
 
