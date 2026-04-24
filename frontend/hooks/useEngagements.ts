@@ -226,12 +226,14 @@ export function useDeletePhase(
 
 /**
  * Create a new line item.
+ * Matches estimate useCreateLineItem: cancel in-flight detail query, cache-append with dedup by id, rollback on error.
  */
 export function useCreateLineItem(
   options?: UseMutationOptions<
     EngagementLineItemResponse,
     Error,
-    { engagementId: string; data: EngagementLineItemCreate }
+    { engagementId: string; data: EngagementLineItemCreate },
+    { previousDetail: EngagementDetailResponse | undefined }
   >
 ) {
   const queryClient = useQueryClient();
@@ -239,13 +241,55 @@ export function useCreateLineItem(
   return useMutation<
     EngagementLineItemResponse,
     Error,
-    { engagementId: string; data: EngagementLineItemCreate }
+    { engagementId: string; data: EngagementLineItemCreate },
+    { previousDetail: EngagementDetailResponse | undefined }
   >({
     mutationFn: ({ engagementId, data }) => engagementsApi.createLineItem(engagementId, data),
+    onMutate: async ({ engagementId }) => {
+      await queryClient.cancelQueries({
+        queryKey: QUERY_KEYS.detail(engagementId),
+      });
+
+      const previousDetail = queryClient.getQueryData<EngagementDetailResponse>(
+        QUERY_KEYS.detail(engagementId)
+      );
+
+      return { previousDetail };
+    },
     onSuccess: (data, variables) => {
-      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
+      queryClient.setQueryData<EngagementDetailResponse>(
+        QUERY_KEYS.detail(variables.engagementId),
+        (old) => {
+          if (!old) return old;
+          // Merge by id (Map) so parallel onSuccess handlers cannot insert the same id twice.
+          const merged = new Map(
+            (old.line_items || []).map((item) => [item.id, item] as [string, EngagementLineItem])
+          );
+          merged.set(data.id, data);
+          return {
+            ...old,
+            line_items: Array.from(merged.values()),
+          };
+        }
+      );
+      // Mark detail stale without immediate refetch — setQueryData above is authoritative for line_items; avoids racing draft reset.
+      queryClient.invalidateQueries({
+        queryKey: QUERY_KEYS.detail(variables.engagementId),
+        refetchType: "none",
+      });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
+    },
+    onError: (err, variables, context) => {
+      console.error("Create engagement line item error:", err);
+      if (context?.previousDetail) {
+        queryClient.setQueryData(
+          QUERY_KEYS.detail(variables.engagementId),
+          context.previousDetail
+        );
+      }
+      queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
     },
     ...options,
   });
@@ -294,6 +338,7 @@ export function useDeleteLineItem(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -322,6 +367,7 @@ export function useUpdateWeeklyHours(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -361,6 +407,7 @@ export function useImportEngagementExcel(
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
       queryClient.invalidateQueries({ queryKey: ["accounts"] });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });
@@ -443,6 +490,7 @@ export function useAutoFillHours(
     onSuccess: (data, variables) => {
       queryClient.invalidateQueries({ queryKey: QUERY_KEYS.detail(variables.engagementId) });
       queryClient.invalidateQueries({ queryKey: ["timesheets"] });
+      queryClient.invalidateQueries({ queryKey: ["opportunities"] });
     },
     ...options,
   });

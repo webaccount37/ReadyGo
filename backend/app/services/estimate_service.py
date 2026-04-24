@@ -55,6 +55,42 @@ class EstimateService(BaseService):
         self.employee_repo = EmployeeRepository(session)
         self.opportunity_repo = OpportunityRepository(session)
         self.quote_repo = QuoteRepository(session)
+
+    @staticmethod
+    def _as_line_date(d) -> date:
+        """Normalize line start/end from ORM (date, datetime, or YYYY-MM-DD string)."""
+        if isinstance(d, datetime):
+            return d.date()
+        if isinstance(d, date):
+            return d
+        if isinstance(d, str):
+            return datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
+        raise TypeError(f"Unsupported line date type: {type(d)}")
+
+    async def _sync_opportunity_to_estimate_line_items(self, estimate_id: UUID) -> None:
+        """
+        Widen Opportunity start/end when line items extend outside the current range for this
+        estimate only (the active plan on the estimate detail page). Does not shrink the
+        opportunity when rows move inward.
+        """
+        lines = await self.line_item_repo.list_by_estimate(estimate_id)
+        if not lines:
+            return
+        estimate = await self.estimate_repo.get(estimate_id)
+        if not estimate:
+            return
+        op = await self.opportunity_repo.get(estimate.opportunity_id)
+        if not op:
+            return
+        min_s = min(self._as_line_date(li.start_date) for li in lines)
+        max_e = max(self._as_line_date(li.end_date) for li in lines)
+        updates: Dict[str, date] = {}
+        if min_s < op.start_date:
+            updates["start_date"] = min_s
+        if max_e > op.end_date:
+            updates["end_date"] = max_e
+        if updates:
+            await self.opportunity_repo.update(op.id, **updates)
     
     async def create_estimate(self, estimate_data: EstimateCreate) -> EstimateResponse:
         """Create a new estimate."""
@@ -601,7 +637,15 @@ class EstimateService(BaseService):
         
         line_item = await self.line_item_repo.create(**line_item_dict)
         await self.session.flush()  # Flush to get the line item ID
-        
+
+        reloaded = await self.line_item_repo.get(line_item.id)
+        if reloaded:
+            await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                reloaded.id,
+                self._as_line_date(reloaded.start_date),
+                self._as_line_date(reloaded.end_date),
+            )
+        await self._sync_opportunity_to_estimate_line_items(estimate_id)
         await self.session.commit()
         
         line_item = await self.line_item_repo.get(line_item.id)
@@ -781,9 +825,17 @@ class EstimateService(BaseService):
         if opportunity and opportunity.default_currency:
             update_dict["currency"] = (opportunity.default_currency or "").strip() or "USD"
         
-        updated = await self.line_item_repo.update(line_item_id, **update_dict)
+        await self.line_item_repo.update(line_item_id, **update_dict)
         await self.session.flush()  # Flush to get updated values
-        
+
+        reloaded = await self.line_item_repo.get(line_item_id)
+        if reloaded:
+            await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                line_item_id,
+                self._as_line_date(reloaded.start_date),
+                self._as_line_date(reloaded.end_date),
+            )
+        await self._sync_opportunity_to_estimate_line_items(estimate_id)
         await self.session.commit()
         
         updated = await self.line_item_repo.get(line_item_id)
@@ -821,6 +873,7 @@ class EstimateService(BaseService):
         
         if deleted:
             logger.info(f"Line item {line_item_id} deleted successfully, committing transaction")
+            await self._sync_opportunity_to_estimate_line_items(estimate_id)
             await self.session.commit()
             logger.info(f"Transaction committed for line item {line_item_id}")
         else:
@@ -961,6 +1014,14 @@ class EstimateService(BaseService):
             )
             weekly_hours_list.append(weekly_hour)
             logger.info(f"  Created/updated weekly hour: week_start={weekly_hour.week_start_date}, hours={weekly_hour.hours}, id={weekly_hour.id}")
+
+        li_for_purge = await self.line_item_repo.get(line_item_id)
+        if li_for_purge:
+            await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                line_item_id,
+                self._as_line_date(li_for_purge.start_date),
+                self._as_line_date(li_for_purge.end_date),
+            )
         
         await self.session.commit()
         logger.info(f"Committed {len(weekly_hours_list)} weekly hours records to database")

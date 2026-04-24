@@ -4,7 +4,7 @@ Engagement API endpoints.
 
 from datetime import date
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -13,6 +13,7 @@ import os
 
 from app.db.session import get_db
 from app.controllers.engagement_controller import EngagementController
+from app.services.timesheet_service import run_engagement_timesheet_sync_job
 from app.services.engagement_excel_service import EngagementExcelService
 from app.schemas.engagement import (
     EngagementUpdate,
@@ -223,11 +224,14 @@ async def update_expense_approvers(
 async def create_line_item(
     engagement_id: UUID,
     line_item_data: EngagementLineItemCreate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> EngagementLineItemResponse:
     """Create a new line item."""
     controller = EngagementController(db)
-    return await controller.create_line_item(engagement_id, line_item_data)
+    result = await controller.create_line_item(engagement_id, line_item_data)
+    background_tasks.add_task(run_engagement_timesheet_sync_job, engagement_id)
+    return result
 
 
 @router.patch("/{engagement_id}/line-items/{line_item_id}", response_model=EngagementLineItemResponse)
@@ -235,6 +239,7 @@ async def update_line_item(
     engagement_id: UUID,
     line_item_id: UUID,
     line_item_data: EngagementLineItemUpdate,
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> EngagementLineItemResponse:
     """Update a line item."""
@@ -245,6 +250,7 @@ async def update_line_item(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Line item not found",
         )
+    background_tasks.add_task(run_engagement_timesheet_sync_job, engagement_id)
     return line_item
 
 
@@ -269,11 +275,14 @@ async def update_weekly_hours(
     engagement_id: UUID,
     line_item_id: UUID,
     weekly_hours: List[EngagementWeeklyHoursCreate],
+    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ) -> List[EngagementWeeklyHoursResponse]:
     """Update weekly hours for a line item."""
     controller = EngagementController(db)
-    return await controller.update_weekly_hours(engagement_id, line_item_id, weekly_hours)
+    result = await controller.update_weekly_hours(engagement_id, line_item_id, weekly_hours)
+    background_tasks.add_task(run_engagement_timesheet_sync_job, engagement_id)
+    return result
 
 
 @router.post("/{engagement_id}/line-items/{line_item_id}/auto-fill", response_model=List[EngagementLineItemResponse])

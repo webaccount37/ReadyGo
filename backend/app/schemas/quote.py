@@ -168,6 +168,8 @@ class QuoteResponse(QuoteBase):
     snapshot_data: Optional[dict] = None
     opportunity_name: Optional[str] = None
     estimate_name: Optional[str] = None
+    account_name: Optional[str] = None
+    linked_engagement_id: Optional[UUID] = None
     quote_type: Optional[QuoteType] = None
     target_amount: Optional[Decimal] = None
     rate_billing_unit: Optional[RateBillingUnit] = None
@@ -175,7 +177,8 @@ class QuoteResponse(QuoteBase):
     invoice_detail: Optional[InvoiceDetail] = None
     cap_type: Optional[CapType] = None
     cap_amount: Optional[Decimal] = None
-    
+    created_engagement_id: Optional[UUID] = None
+
     class Config:
         from_attributes = True
 

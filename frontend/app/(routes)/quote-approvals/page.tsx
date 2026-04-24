@@ -2,30 +2,25 @@
 
 import { useState, Suspense } from "react";
 import { useQuotesForApproval, useUpdateQuoteStatus } from "@/hooks/useQuotes";
-import { useOpportunities } from "@/hooks/useOpportunities";
-import { useEngagements } from "@/hooks/useEngagements";
 import { useQueryClient } from "@tanstack/react-query";
 import { engagementsApi } from "@/lib/api/engagements";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
-import { CheckCircle2, XCircle, FileText, Search, Briefcase } from "lucide-react";
+import { CheckCircle2, XCircle, FileText, Briefcase, Search } from "lucide-react";
 import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
 import type { Quote } from "@/types/quote";
 
 function QuoteApprovalsPageContent() {
   const [skip] = useState(0);
   const [limit] = useState(1000);
-  const [searchQuery, setSearchQuery] = useState("");
 
   const { data, isLoading, error, refetch } = useQuotesForApproval({
     skip,
     limit,
   });
   const updateQuoteStatus = useUpdateQuoteStatus();
-  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
-  const { data: engagementsData, refetch: refetchEngagements } = useEngagements({ limit: 1000 });
   const queryClient = useQueryClient();
 
   const handleApprove = async (quoteId: string, displayName: string) => {
@@ -34,24 +29,24 @@ function QuoteApprovalsPageContent() {
     }
 
     try {
-      await updateQuoteStatus.mutateAsync({
+      const updated = await updateQuoteStatus.mutateAsync({
         quoteId,
         status: { status: "ACCEPTED" },
       });
       await queryClient.invalidateQueries({ queryKey: ["engagements"] });
-      // Poll for the new engagement (creation runs in the same request; list may lag briefly)
-      let createdEngagementId: string | null = null;
-      for (let i = 0; i < 15; i++) {
-        const res = await engagementsApi.getEngagements({ skip: 0, limit: 100, quote_id: quoteId });
-        const hit = res.items?.find((e) => e.quote_id === quoteId);
-        if (hit?.id) {
-          createdEngagementId = hit.id;
-          break;
+      let createdEngagementId: string | null = updated.created_engagement_id ?? null;
+      if (!createdEngagementId) {
+        for (let i = 0; i < 15; i++) {
+          const res = await engagementsApi.getEngagements({ skip: 0, limit: 100, quote_id: quoteId });
+          const hit = res.items?.find((e) => e.quote_id === quoteId);
+          if (hit?.id) {
+            createdEngagementId = hit.id;
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 300));
         }
-        await new Promise((r) => setTimeout(r, 300));
       }
       await refetch();
-      await refetchEngagements();
       if (createdEngagementId) {
         alert(
           `Quote "${displayName}" approved. Engagement is ready — you can open it from the list or Engagements.`
@@ -84,25 +79,19 @@ function QuoteApprovalsPageContent() {
     }
   };
 
-  // Filter quotes by search query
-  const filteredQuotes = data?.items.filter((quote) => {
+  const [searchQuery, setSearchQuery] = useState("");
+
+  const filteredQuotes = data?.items.filter((quote: Quote) => {
     if (!searchQuery.trim()) return true;
 
-    const query = searchQuery.toLowerCase();
-    const quoteNumber = (quote.quote_number || "").toLowerCase();
-    const displayName = (quote.display_name || "").toLowerCase();
-    const opportunityName =
-      opportunitiesData?.items.find((o) => o.id === quote.opportunity_id)
-        ?.name || "";
-    const accountName =
-      opportunitiesData?.items.find((o) => o.id === quote.opportunity_id)
-        ?.account_name || "";
-
+    const q = searchQuery.toLowerCase();
+    const opportunityName = (quote.opportunity_name || "").toLowerCase();
+    const accountName = (quote.account_name || "").toLowerCase();
     return (
-      quoteNumber.includes(query) ||
-      displayName.includes(query) ||
-      opportunityName.toLowerCase().includes(query) ||
-      accountName.toLowerCase().includes(query)
+      (quote.quote_number || "").toLowerCase().includes(q) ||
+      (quote.display_name || "").toLowerCase().includes(q) ||
+      opportunityName.includes(q) ||
+      accountName.includes(q)
     );
   });
 
@@ -123,9 +112,7 @@ function QuoteApprovalsPageContent() {
       <div className="container mx-auto p-6">
         <Card>
           <CardContent className="p-6">
-            <p className="text-red-500">
-              Error loading quotes: {error.message}
-            </p>
+            <p className="text-red-500">Error loading quotes: {error.message}</p>
           </CardContent>
         </Card>
       </div>
@@ -167,13 +154,7 @@ function QuoteApprovalsPageContent() {
           ) : (
             <div className="space-y-4">
               {filteredQuotes.map((quote) => {
-                const opportunity = opportunitiesData?.items.find(
-                  (o) => o.id === quote.opportunity_id
-                );
-                const engagement = engagementsData?.items.find(
-                  (e) => e.quote_id === quote.id
-                );
-
+                const engagementId = quote.linked_engagement_id;
                 return (
                   <div
                     key={quote.id}
@@ -190,12 +171,10 @@ function QuoteApprovalsPageContent() {
                             {quote.display_name}
                           </Link>
                           <QuoteStatusBadge status={quote.status} />
-                          <span className="text-sm text-gray-500">
-                            Version {quote.version}
-                          </span>
-                          {engagement && (
+                          <span className="text-sm text-gray-500">Version {quote.version}</span>
+                          {engagementId && (
                             <Link
-                              href={`/engagements/${engagement.id}`}
+                              href={`/engagements/${engagementId}`}
                               className="text-sm text-blue-600 hover:underline flex items-center gap-1"
                             >
                               <Briefcase className="h-3 w-3" />
@@ -204,42 +183,39 @@ function QuoteApprovalsPageContent() {
                           )}
                         </div>
 
-                        {opportunity && (
-                          <div className="space-y-1 text-sm text-gray-600">
+                        <div className="space-y-1 text-sm text-gray-600">
+                          {quote.opportunity_name && (
                             <div>
                               <span className="font-medium">Opportunity:</span>{" "}
                               <Link
-                                href={`/opportunities/${opportunity.id}`}
+                                href={`/opportunities/${quote.opportunity_id}`}
                                 className="hover:underline"
                               >
-                                {opportunity.name}
+                                {quote.opportunity_name}
                               </Link>
                             </div>
-                            {opportunity.account_name && (
-                              <div>
-                                <span className="font-medium">Account:</span>{" "}
-                                {opportunity.account_name}
-                              </div>
-                            )}
-                            {quote.created_by_name && (
-                              <div>
-                                <span className="font-medium">Created by:</span>{" "}
-                                {quote.created_by_name}
-                              </div>
-                            )}
-                            {quote.created_at && (
-                              <div>
-                                <span className="font-medium">Created:</span>{" "}
-                                {new Date(quote.created_at).toLocaleDateString()}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                          )}
+                          {quote.account_name && (
+                            <div>
+                              <span className="font-medium">Account:</span> {quote.account_name}
+                            </div>
+                          )}
+                          {quote.created_by_name && (
+                            <div>
+                              <span className="font-medium">Created by:</span> {quote.created_by_name}
+                            </div>
+                          )}
+                          {quote.created_at && (
+                            <div>
+                              <span className="font-medium">Created:</span>{" "}
+                              {new Date(quote.created_at).toLocaleDateString()}
+                            </div>
+                          )}
+                        </div>
 
                         {quote.notes && (
                           <div className="mt-2 text-sm text-gray-600">
-                            <span className="font-medium">Notes:</span>{" "}
-                            {quote.notes}
+                            <span className="font-medium">Notes:</span> {quote.notes}
                           </div>
                         )}
                       </div>

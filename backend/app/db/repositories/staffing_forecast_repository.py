@@ -206,14 +206,11 @@ class StaffingForecastRepository:
         employee_id: Optional[UUID] = None,
     ) -> dict[str, dict]:
         """
-        Fetch date ranges for billable utilization scope: employee start/end and engagement/estimate line item ranges.
-        Returns dict[emp_id_str, {"emp_start": date, "emp_end": date|None, "line_item_ranges": [(start, end), ...]}].
-        A week is in scope if it falls within employee dates OR within any line item (engagement/estimate) range.
+        Employee start/end dates for billable utilization scope.
+        Returns dict[emp_id_str, {"emp_start": date, "emp_end": date|None}].
+        Utilization is only meaningful for calendar weeks whose start falls on or after start_date
+        and on or before end_date when end_date is set.
         """
-        from app.models.employee import EmployeeStatus
-        from app.models.quote import QuoteStatus
-
-        # Employee dates
         emp_query = (
             select(
                 Employee.id.label("employee_id"),
@@ -230,67 +227,10 @@ class StaffingForecastRepository:
         emp_result = await self.session.execute(emp_query)
         emp_rows = emp_result.all()
 
-        out: dict[str, dict] = {}
-        for r in emp_rows:
-            out[str(r.employee_id)] = {
-                "emp_start": r.emp_start,
-                "emp_end": r.emp_end,
-                "line_item_ranges": [],
-            }
-
-        if not out:
-            return out
-
-        emp_ids = list(out.keys())
-
-        # Engagement line item date ranges (employee assigned)
-        eng_query = (
-            select(
-                EngagementLineItem.employee_id,
-                EngagementLineItem.start_date,
-                EngagementLineItem.end_date,
-            )
-            .select_from(EngagementLineItem)
-            .where(
-                EngagementLineItem.employee_id.isnot(None),
-                EngagementLineItem.employee_id.in_([UUID(e) for e in emp_ids]),
-            )
-        )
-        eng_result = await self.session.execute(eng_query)
-        for row in eng_result.all():
-            eid = str(row.employee_id)
-            if eid in out and row.start_date and row.end_date:
-                out[eid]["line_item_ranges"].append((row.start_date, row.end_date))
-
-        # Estimate line item date ranges (employee assigned) - only from estimates without accepted quote
-        no_accepted = ~exists(
-            select(1).where(
-                Quote.opportunity_id == Estimate.opportunity_id,
-                Quote.status == QuoteStatus.ACCEPTED,
-            )
-        )
-        est_query = (
-            select(
-                EstimateLineItem.employee_id,
-                EstimateLineItem.start_date,
-                EstimateLineItem.end_date,
-            )
-            .select_from(EstimateLineItem)
-            .join(Estimate, EstimateLineItem.estimate_id == Estimate.id)
-            .where(
-                Estimate.active_version == True,
-                no_accepted,
-                EstimateLineItem.employee_id.isnot(None),
-                EstimateLineItem.employee_id.in_([UUID(e) for e in emp_ids]),
-            )
-        )
-        est_result = await self.session.execute(est_query)
-        for row in est_result.all():
-            eid = str(row.employee_id)
-            if eid in out and row.start_date and row.end_date:
-                out[eid]["line_item_ranges"].append((row.start_date, row.end_date))
-
-        return out
+        return {
+            str(r.employee_id): {"emp_start": r.emp_start, "emp_end": r.emp_end}
+            for r in emp_rows
+        }
 
     async def fetch_estimate_weekly_data(
         self,

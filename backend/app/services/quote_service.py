@@ -2,8 +2,9 @@
 Quote service with business logic for quote creation, snapshotting, and locking.
 """
 
+import asyncio
 import logging
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 from datetime import date, datetime
 from decimal import Decimal
@@ -13,6 +14,7 @@ from sqlalchemy import select, and_, func
 logger = logging.getLogger(__name__)
 
 from app.services.base_service import BaseService
+from app.services.timesheet_service import run_engagement_timesheet_sync_job
 from app.db.repositories.quote_repository import QuoteRepository
 from app.db.repositories.quote_line_item_repository import QuoteLineItemRepository
 from app.db.repositories.quote_phase_repository import QuotePhaseRepository
@@ -32,6 +34,7 @@ from app.models.quote import (
     TimeType, RevenueType, RateBillingUnit, InvoiceDetail, CapType
 )
 from app.models.estimate import Estimate
+from app.models.engagement import Engagement
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.utils.quote_display import compute_quote_display_name
 from app.schemas.quote import (
@@ -264,9 +267,25 @@ class QuoteService(BaseService):
         quotes = await self.quote_repo.list(skip=skip, limit=limit, **filters)
         total = await self.quote_repo.count(**filters)
         
-        quote_responses = [await self._to_response(quote) for quote in quotes]
+        linked = await self._linked_engagement_ids_by_quote_id([q.id for q in quotes]) if quotes else {}
+        quote_responses = [await self._to_response(quote, linked_engagement_id=linked.get(quote.id)) for quote in quotes]
         return quote_responses, total
-    
+
+    async def _linked_engagement_ids_by_quote_id(
+        self, quote_ids: List[UUID]
+    ) -> Dict[UUID, UUID]:
+        """One query: first engagement id per quote (for list views)."""
+        if not quote_ids:
+            return {}
+        r = await self.session.execute(
+            select(Engagement.id, Engagement.quote_id).where(Engagement.quote_id.in_(quote_ids))
+        )
+        by_quote: Dict[UUID, UUID] = {}
+        for eid, qid in r.all():
+            if qid not in by_quote:
+                by_quote[qid] = eid
+        return by_quote
+
     async def list_quotes_for_approval(
         self,
         employee_id: UUID,
@@ -322,10 +341,11 @@ class QuoteService(BaseService):
         )
         count_result = await self.session.execute(count_query)
         total = count_result.scalar_one()
-        
-        quote_responses = [await self._to_response(quote) for quote in quotes]
+
+        linked = await self._linked_engagement_ids_by_quote_id([q.id for q in quotes]) if quotes else {}
+        quote_responses = [await self._to_response(quote, linked_engagement_id=linked.get(quote.id)) for quote in quotes]
         return quote_responses, total
-    
+
     async def update_quote_status(
         self,
         quote_id: UUID,
@@ -347,7 +367,8 @@ class QuoteService(BaseService):
             "status": status_data.status,
             "sent_date": status_data.sent_date,
         }
-        
+        created_engagement_id: Optional[UUID] = None
+
         # If status is REJECTED or INVALID, delete associated Engagement and unlock opportunity
         if status_data.status in [QuoteStatus.REJECTED, QuoteStatus.INVALID]:
             update_dict["is_active"] = False
@@ -373,10 +394,15 @@ class QuoteService(BaseService):
             engagement_service = EngagementService(self.session)
             opportunity_service = OpportunityService(self.session)
 
-            # Update Opportunity: status=NEGOTIATION, deal_value=Quote Total Revenue
+            estimate_for_approval = await self.estimate_repo.get_with_line_items(quote.estimate_id)
+            if not estimate_for_approval:
+                raise ValueError("Estimate not found for this quote; cannot accept.")
+
             # get_quote_total_revenue uses scoped weekly hours (aligned with estimate UI). Opportunities
             # whose deal_value was set under older logic may still show stale amounts until corrected.
-            quote_total = await engagement_service.get_quote_total_revenue(quote_id)
+            quote_total = await engagement_service.get_quote_total_revenue(
+                quote_id, estimate=estimate_for_approval
+            )
             if quote_total is not None:
                 opportunity = await self.opportunity_repo.get(quote.opportunity_id)
                 if opportunity and opportunity.status != OpportunityStatus.WON:
@@ -399,9 +425,14 @@ class QuoteService(BaseService):
                     )
 
             try:
-                await engagement_service.create_engagement_from_quote(
+                engagement = await engagement_service.create_engagement_from_quote(
                     quote_id=quote_id,
-                    created_by=None,  # Could be passed from context if available
+                    created_by=None,
+                    estimate=estimate_for_approval,
+                )
+                created_engagement_id = engagement.id
+                asyncio.create_task(
+                    run_engagement_timesheet_sync_job(engagement.id)
                 )
                 logger.info(f"Created engagement for approved quote {quote_id}")
             except Exception as e:
@@ -418,7 +449,11 @@ class QuoteService(BaseService):
         updated = await self.quote_repo.get(quote_id)
         if not updated:
             return None
-        return await self._to_response(updated)
+        return await self._to_response(
+            updated,
+            created_engagement_id=created_engagement_id,
+            linked_engagement_id=created_engagement_id,
+        )
     
     async def _has_blocking_timesheets_for_quote(self, quote_id: UUID) -> bool:
         """Check if any SUBMITTED/APPROVED/INVOICED timesheet entry with hours > 0 exists for this quote's engagements."""
@@ -615,7 +650,21 @@ class QuoteService(BaseService):
             quote_created_at=quote.created_at,
         )
 
-    async def _to_response(self, quote: Quote) -> QuoteResponse:
+    def _account_name_for_response(self, quote: Quote) -> Optional[str]:
+        if quote.opportunity and quote.opportunity.account:
+            return quote.opportunity.account.company_name
+        snap = quote.snapshot_data
+        if isinstance(snap, dict) and snap.get("account_name"):
+            return str(snap["account_name"])
+        return None
+
+    async def _to_response(
+        self,
+        quote: Quote,
+        *,
+        created_engagement_id: Optional[UUID] = None,
+        linked_engagement_id: Optional[UUID] = None,
+    ) -> QuoteResponse:
         """Convert Quote model to QuoteResponse schema."""
         return QuoteResponse(
             id=quote.id,
@@ -634,6 +683,7 @@ class QuoteService(BaseService):
             snapshot_data=quote.snapshot_data,
             opportunity_name=quote.opportunity.name if quote.opportunity else None,
             estimate_name=quote.estimate.name if quote.estimate else None,
+            account_name=self._account_name_for_response(quote),
             quote_type=quote.quote_type,
             target_amount=quote.target_amount,
             rate_billing_unit=quote.rate_billing_unit,
@@ -641,6 +691,8 @@ class QuoteService(BaseService):
             invoice_detail=quote.invoice_detail,
             cap_type=quote.cap_type,
             cap_amount=quote.cap_amount,
+            created_engagement_id=created_engagement_id,
+            linked_engagement_id=linked_engagement_id,
         )
     
     async def _to_detail_response(self, quote: Quote) -> QuoteDetailResponse:

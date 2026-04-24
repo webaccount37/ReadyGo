@@ -8,6 +8,7 @@ from app.utils.planning_week_hours import (
     resolve_opportunity_scope_for_estimate,
     sum_billable_counted_hours_for_estimate,
     sum_counted_weekly_hours_for_line,
+    week_does_not_overlap_line_range,
     week_interval_overlaps_range,
     weekly_row_counts_toward_totals,
 )
@@ -32,6 +33,15 @@ def test_week_interval_overlaps_range_partial_after():
 def test_week_interval_overlaps_range_no_overlap():
     week_start = date(2024, 3, 3)
     assert not week_interval_overlaps_range(week_start, date(2024, 4, 1), date(2024, 4, 30))
+
+
+def test_week_does_not_overlap_line_range_matches_inversion_of_overlap():
+    week = date(2024, 3, 3)
+    ls, le = date(2024, 2, 1), date(2024, 5, 31)
+    assert week_does_not_overlap_line_range(week, ls, le) == (not week_interval_overlaps_range(week, ls, le))
+    before = date(2024, 1, 7)
+    assert week_does_not_overlap_line_range(before, date(2024, 2, 1), date(2024, 3, 1))
+    assert not week_does_not_overlap_line_range(before, date(2024, 1, 1), date(2024, 1, 31))
 
 
 def test_weekly_row_counts_line_only_excludes_orphan_week():

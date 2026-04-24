@@ -13,6 +13,8 @@ import { convertCurrency } from "@/lib/utils/currency";
 import { fingerprintRoleRates } from "@/lib/utils/role-rate-fingerprint";
 import { pickRoleRateForOpportunityInvoiceCenter } from "@/lib/utils/role-rate-picker";
 import { engagementsApi } from "@/lib/api/engagements";
+import { logResourcePlanServerCall } from "@/lib/engagement-resource-plan-server-log";
+import { weekColumnOverlapsLineRange } from "@/lib/utils/week-column-line-range";
 import { useQueryClient } from "@tanstack/react-query";
 import { EngagementAutoFillDialog } from "./auto-fill-dialog";
 
@@ -154,6 +156,9 @@ export function EngagementLineItemRow({
       return prev !== newValue ? newValue : prev;
     });
     setBillableValue((prev) => {
+      if (!invoiceCustomer) {
+        return prev !== false ? false : prev;
+      }
       const newValue = lineItem.billable ?? true;
       return prev !== newValue ? newValue : prev;
     });
@@ -173,6 +178,7 @@ export function EngagementLineItemRow({
     lineItem.employee_id,
     lineItem.billable,
     lineItem.billable_expense_percentage,
+    invoiceCustomer,
   ]);
 
   // Weekly hours editing state
@@ -418,6 +424,9 @@ export function EngagementLineItemRow({
     value: string | undefined,
     originalValue: string
   ) => {
+    if (field === "billable" && !invoiceCustomer) {
+      return;
+    }
     if (value === originalValue) {
       return;
     }
@@ -454,149 +463,8 @@ export function EngagementLineItemRow({
           updateData.rate = value;
         } else if (field === "start_date") {
           updateData.start_date = value;
-          
-          // If start_date is moved later, clear hours for weeks before the new start date
-          if (value && prevStartDateRef.current) {
-            const parseLocalDate = (dateStr: string): Date => {
-              const datePart = dateStr.split("T")[0];
-              const [year, month, day] = datePart.split("-").map(Number);
-              return new Date(year, month - 1, day);
-            };
-            
-            const oldStartDate = parseLocalDate(prevStartDateRef.current);
-            const newStartDate = parseLocalDate(value);
-            
-            // Only clear if the new start date is later than the old one
-            if (newStartDate > oldStartDate) {
-              // Find all weeks before the new start date that have hours
-              const weeksToClear: Record<string, string> = {};
-              
-              // Check all weeks in the spreadsheet
-              weeks.forEach((week) => {
-                const weekKey = getWeekKey(week);
-                const weekDate = week;
-                
-                // If week is before the new start date and has hours, mark it for clearing
-                if (weekDate < newStartDate) {
-                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
-                  if (hours && parseFloat(hours) > 0) {
-                    weeksToClear[weekKey] = "0";
-                  }
-                }
-              });
-              
-              // Clear hours for weeks before the new start date
-              if (Object.keys(weeksToClear).length > 0) {
-                console.log(`Clearing ${Object.keys(weeksToClear).length} weeks before new start date:`, weeksToClear);
-                
-                // Use autoFillHours API to set hours to 0
-                engagementsApi.autoFillHours(engagementId, lineItem.id, {
-                  pattern: "custom",
-                  custom_hours: weeksToClear,
-                }).then(() => {
-                  // Update local state to reflect cleared hours
-                  setWeeklyHoursValues((prev) => {
-                    const next = new Map(prev);
-                    Object.keys(weeksToClear).forEach((weekKey) => {
-                      next.set(weekKey, "0");
-                    });
-                    return next;
-                  });
-                  
-                  // Invalidate cache to trigger refetch
-                  queryClient.invalidateQueries({
-                    queryKey: ["engagements", "detail", engagementId],
-                  });
-                }).catch((err) => {
-                  console.error("Failed to clear hours for weeks before new start date:", err);
-                });
-              }
-            }
-            
-            // Update the ref to track the new start date
-            prevStartDateRef.current = value;
-          }
         } else if (field === "end_date") {
           updateData.end_date = value;
-          
-          // If end_date changed, clear hours for weeks outside the date range
-          if (value && prevEndDateRef.current) {
-            const parseLocalDate = (dateStr: string): Date => {
-              const datePart = dateStr.split("T")[0];
-              const [year, month, day] = datePart.split("-").map(Number);
-              return new Date(year, month - 1, day);
-            };
-            
-            const oldEndDate = parseLocalDate(prevEndDateRef.current);
-            const newEndDate = parseLocalDate(value);
-            const startDate = parseLocalDate(startDateValue);
-            
-            // Find weeks to clear
-            const weeksToClear: Record<string, string> = {};
-            
-            // If end date moved earlier, clear weeks after new end
-            if (newEndDate < oldEndDate) {
-              weeks.forEach((week) => {
-                const weekKey = getWeekKey(week);
-                const weekDate = week;
-                const weekEnd = new Date(weekDate);
-                weekEnd.setDate(weekEnd.getDate() + 6); // Saturday
-                
-                // If week ends after new end date and has hours, mark it for clearing
-                if (weekEnd > newEndDate) {
-                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
-                  if (hours && parseFloat(hours) > 0) {
-                    weeksToClear[weekKey] = "0";
-                  }
-                }
-              });
-            }
-            
-            // Also clear weeks before start date (if start date exists)
-            if (startDate) {
-              weeks.forEach((week) => {
-                const weekKey = getWeekKey(week);
-                const weekDate = week;
-                
-                // If week is before start date and has hours, mark it for clearing
-                if (weekDate < startDate) {
-                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
-                  if (hours && parseFloat(hours) > 0) {
-                    weeksToClear[weekKey] = "0";
-                  }
-                }
-              });
-            }
-            
-            // Clear hours for weeks outside date range
-            if (Object.keys(weeksToClear).length > 0) {
-              console.log(`Clearing ${Object.keys(weeksToClear).length} weeks outside date range (end date change):`, weeksToClear);
-              
-              engagementsApi.autoFillHours(engagementId, lineItem.id, {
-                pattern: "custom",
-                custom_hours: weeksToClear,
-              }).then(() => {
-                // Update local state to reflect cleared hours
-                setWeeklyHoursValues((prev) => {
-                  const next = new Map(prev);
-                  Object.keys(weeksToClear).forEach((weekKey) => {
-                    next.set(weekKey, "0");
-                  });
-                  return next;
-                });
-                
-                // Invalidate cache to trigger refetch
-                queryClient.invalidateQueries({
-                  queryKey: ["engagements", "detail", engagementId],
-                });
-              }).catch((err) => {
-                console.error("Failed to clear hours for weeks outside date range:", err);
-              });
-            }
-            
-            // Update the ref to track the new end date
-            prevEndDateRef.current = value;
-          }
         } else if (field === "payable_center_id") {
           updateData.payable_center_id = value;
         } else if (field === "role_id") {
@@ -609,11 +477,23 @@ export function EngagementLineItemRow({
           updateData.row_order = value ? parseInt(value, 10) : undefined;
         }
 
+        logResourcePlanServerCall("updateLineItem", `lineItemRow: handleFieldUpdate (debounced) field=${field}`, {
+          engagementId,
+          lineItemId: lineItem.id,
+          body: updateData,
+        });
         await updateLineItem.mutateAsync({
           engagementId,
           lineItemId: lineItem.id,
           data: updateData,
         });
+
+        if (field === "start_date" && value) {
+          prevStartDateRef.current = value;
+        }
+        if (field === "end_date" && value) {
+          prevEndDateRef.current = value;
+        }
         
         // Clear updating flag after successful update
         // Use a small delay to allow the query invalidation to complete
@@ -647,7 +527,7 @@ export function EngagementLineItemRow({
         else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");
       }
     }, 500); // 500ms debounce
-  }, [engagementId, lineItem.id, updateLineItem]);
+  }, [engagementId, lineItem.id, updateLineItem, invoiceCustomer]);
   
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -673,6 +553,16 @@ export function EngagementLineItemRow({
     }
     prevBillableExpensesRef.current = billableExpenses;
   }, [billableExpenses, billableExpensePercentageValue, lineItem.billable_expense_percentage, handleFieldUpdate]);
+
+  useEffect(() => {
+    if (invoiceCustomer) {
+      return;
+    }
+    if (lineItem.billable) {
+      handleFieldUpdate("billable", "false", lineItem.billable ? "true" : "false");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceCustomer, lineItem.id, lineItem.billable]);
 
   // Track previous role and employee to detect changes
   const prevRoleRef = useRef<string | undefined>(roleValue);
@@ -938,8 +828,7 @@ export function EngagementLineItemRow({
     const startDate = parseLocalDate(startDateValue);
     const endDate = parseLocalDate(endDateValue);
 
-    // Only update if within date range
-    if (weekDate < startDate || weekDate > endDate) {
+    if (!weekColumnOverlapsLineRange(weekDate, startDate, endDate)) {
       return;
     }
 
@@ -950,8 +839,12 @@ export function EngagementLineItemRow({
 
     hoursSaveTimeoutRef.current = setTimeout(async () => {
       try {
-        console.log(`Saving weekly hours to database: weekKey=${weekKey}, hours=${hours}, lineItemId=${lineItem.id}`);
-        
+        logResourcePlanServerCall("engagementsApi.autoFillHours", "lineItemRow: handleWeeklyHoursUpdate (custom_hours single week)", {
+          engagementId,
+          lineItemId: lineItem.id,
+          weekKey,
+          hours,
+        });
         // Save to database immediately
         const response = await engagementsApi.autoFillHours(engagementId, lineItem.id, {
           pattern: "custom",
@@ -1195,26 +1088,22 @@ export function EngagementLineItemRow({
             <button
               onClick={async () => {
                 if (deleteLineItemMutation.isPending) {
-                  console.log("Delete already in progress, ignoring click");
                   return; // Prevent multiple clicks
                 }
-                console.log("Delete button clicked for line item:", lineItem.id);
                 if (confirm("Are you sure you want to delete this line item and all its weekly hours?")) {
-                  console.log("User confirmed deletion");
                   try {
-                    console.log("Calling mutateAsync with:", { engagementId, lineItemId: lineItem.id });
+                    logResourcePlanServerCall("deleteLineItem", "lineItemRow: user confirmed delete", {
+                      engagementId,
+                      lineItemId: lineItem.id,
+                    });
                     await deleteLineItemMutation.mutateAsync({
                       engagementId,
                       lineItemId: lineItem.id,
                     });
-                    // Success - the optimistic update already removed it from UI
-                    console.log("Line item deleted successfully, ID:", lineItem.id);
                   } catch (err) {
                     console.error("Failed to delete line item:", err);
                     alert(`Failed to delete line item: ${err instanceof Error ? err.message : String(err)}`);
                   }
-                } else {
-                  console.log("User cancelled deletion");
                 }
               }}
               disabled={deleteLineItemMutation.isPending}
@@ -1230,12 +1119,13 @@ export function EngagementLineItemRow({
         <td className="border border-gray-300 px-2 py-1 text-xs text-center">
           <input
             type="checkbox"
-            checked={billableValue}
+            checked={!invoiceCustomer ? false : billableValue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               const newValue = e.target.checked;
               setBillableValue(newValue);
               handleFieldUpdate("billable", newValue ? "true" : "false", String(lineItem.billable ?? true));
             }}
+            disabled={!invoiceCustomer}
             className="h-4 w-4"
           />
         </td>

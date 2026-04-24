@@ -2,7 +2,6 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useEngagementDetail } from "@/hooks/useEngagements";
-import type { ExpenseReceipt } from "@/types/expense";
 import type { ExpenseCategory } from "@/types/expense-category";
 import type { ClientExpenseLine } from "@/lib/expenseLineValidation";
 import { Select } from "@/components/ui/select";

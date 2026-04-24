@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect } from "react";
 import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { useRole } from "@/hooks/useRoles";
@@ -9,12 +9,64 @@ import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
 import { useEmployees, useEmployee } from "@/hooks/useEmployees";
 import { useCreateLineItem, useUpdateLineItem, useDeleteLineItem, useEstimateDetail } from "@/hooks/useEstimates";
 import { estimatesApi } from "@/lib/api/estimates";
+import { rolesApi } from "@/lib/api/roles";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EstimateLineItemCreate, EstimateLineItem, EstimateLineItemUpdate } from "@/types/estimate";
+import type { RoleResponse } from "@/types/role";
 import { convertCurrency } from "@/lib/utils/currency";
 import { fingerprintRoleRates } from "@/lib/utils/role-rate-fingerprint";
 import { pickRoleRateForOpportunityInvoiceCenter } from "@/lib/utils/role-rate-picker";
+import { weekColumnOverlapsLineRange } from "@/lib/utils/week-column-line-range";
 import { AutoFillDialog } from "./auto-fill-dialog";
+
+/** Same shape as `useRole` in `@/hooks/useRoles` so `fetchQuery` populates that cache. */
+const rolesDetailQueryKey = (id: string) => ["roles", "detail", id] as const;
+
+function computeRateCostFromRoleDetail(
+  roleDetail: RoleResponse,
+  opportunityDeliveryCenterId: string | undefined,
+  invoiceCenterDefaultCurrency: string | undefined,
+  currency: string
+): { newRate: string; newCost: string } | null {
+  if (!opportunityDeliveryCenterId) {
+    return null;
+  }
+
+  const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+    roleDetail.role_rates,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency
+  );
+
+  let newCost: string;
+  let newRate: string;
+
+  if (matchingRate) {
+    let baseCost = matchingRate.internal_cost_rate || 0;
+    let baseRate = matchingRate.external_rate || 0;
+    const roleRateCurrency =
+      matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
+
+    if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+      baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+      baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+      if (!Number.isFinite(baseCost) || !Number.isFinite(baseRate)) {
+        return null;
+      }
+    }
+
+    newCost = parseFloat(baseCost.toFixed(2)).toString();
+    newRate = parseFloat(baseRate.toFixed(2)).toString();
+  } else {
+    const firstRate = roleDetail.role_rates?.[0];
+    const fallbackCost = firstRate?.internal_cost_rate ?? 0;
+    const fallbackRate = firstRate?.external_rate ?? 0;
+    newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+    newRate = parseFloat(fallbackRate.toFixed(2)).toString();
+  }
+
+  return { newRate, newCost };
+}
 
 interface EstimateEmptyRowProps {
   estimateId: string;
@@ -124,6 +176,7 @@ export function EstimateEmptyRow({
             merged.role_id = "";
             merged.rate = "";
             merged.cost = "";
+            merged.employee_id = undefined;
           }
           return merged;
         } catch {
@@ -220,16 +273,16 @@ export function EstimateEmptyRow({
   
   // Clear formData and lineItemId ONLY if this specific row's lineItemId is already rendered
   // This prevents the empty row from showing duplicate data when the line item is rendered as EstimateLineItemRow
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (isRenderedAsLineItemRow && lineItemId) {
       // This specific line item is now rendered as EstimateLineItemRow, so clear this empty row
       console.log("Clearing empty row because its line item is already rendered as EstimateLineItemRow:", lineItemId);
-      setLineItemId(null);
-      setFormData(getInitialFormData());
       if (typeof window !== "undefined") {
         localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
         localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
       }
+      setLineItemId(null);
+      setFormData(getInitialFormData());
     }
   }, [isRenderedAsLineItemRow, lineItemId, stableId, estimateId, estimateDetail]);
   
@@ -237,12 +290,12 @@ export function EstimateEmptyRow({
   useEffect(() => {
     if (hasStaleLineItemId && lineItemId) {
       console.log("Detected stale lineItemId in localStorage that doesn't exist in database, clearing:", lineItemId);
-      setLineItemId(null);
-      setFormData(getInitialFormData());
       if (typeof window !== "undefined") {
         localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
         localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
       }
+      setLineItemId(null);
+      setFormData(getInitialFormData());
     }
   }, [hasStaleLineItemId, lineItemId, stableId, estimateId]);
   
@@ -296,11 +349,11 @@ export function EstimateEmptyRow({
                 employee_id: formData.employee_id,
                 database_line_items_count: estimateDetail.line_items.length
               });
-              setFormData(getInitialFormData());
               if (typeof window !== "undefined") {
                 localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
                 localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
               }
+              setFormData(getInitialFormData());
             }
           }
         }, 2000); // 2 second delay to allow saves to complete
@@ -345,11 +398,11 @@ export function EstimateEmptyRow({
                   formData: { role_id: formData.role_id, employee_id: formData.employee_id, rate: formData.rate, cost: formData.cost },
                   database_count: estimateDetail.line_items.length
                 });
-                setFormData(getInitialFormData());
                 if (typeof window !== "undefined") {
                   localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
                   localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
                 }
+                setFormData(getInitialFormData());
               }
             }
           }, 2000); // 2 second delay
@@ -401,12 +454,12 @@ export function EstimateEmptyRow({
   }, [lineItemId, stableId, estimateId]);
 
   // Fetch role details when role is selected (to get role rates)
-  const { data: selectedRoleData, isLoading: isLoadingRole, isFetching: isFetchingRole } = useRole(formData.role_id || "", true, {
+  const { data: selectedRoleData } = useRole(formData.role_id || "", true, {
     enabled: !!formData.role_id,
   });
 
   // Fetch employee details when employee is selected (to get employee rates)
-  const { data: selectedEmployeeData, isLoading: isLoadingEmployee, isFetching: isFetchingEmployee } = useEmployee(formData.employee_id || "", false, {
+  const { data: selectedEmployeeData } = useEmployee(formData.employee_id || "", false, {
     enabled: !!formData.employee_id,
   });
 
@@ -451,6 +504,31 @@ export function EstimateEmptyRow({
   // Track previous billableExpenses to detect when it changes from true to false
   const prevBillableExpensesRef = useRef<boolean>(billableExpenses);
 
+  /** After a line is created, the real row appears in the list; clear this slot so we never show a duplicate (empty + line). */
+  const resetEmptyRowSlot = useCallback(() => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
+      localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
+    }
+    const blank = getInitialFormData();
+    setFormData(blank);
+    setLineItemId(null);
+    setWeeklyHoursValues(new Map());
+    prevStartDateRef.current = blank.start_date;
+    prevSavedDataRef.current = {
+      role_id: blank.role_id,
+      delivery_center_id: blank.delivery_center_id,
+      employee_id: blank.employee_id,
+      rate: blank.rate,
+      cost: blank.cost,
+      start_date: blank.start_date,
+      end_date: blank.end_date,
+    };
+    lastSavedDataRef.current = { ...blank };
+  // getInitialFormData is recreated each render; same inputs as that helper
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableId, estimateId, opportunityStartDate, opportunityEndDate, opportunityDeliveryCenterId, currency, invoiceCustomer, billableExpenses]);
+
   // Clear billable expense percentage when billableExpenses changes from true to false
   useEffect(() => {
     if (prevBillableExpensesRef.current && !billableExpenses) {
@@ -474,6 +552,306 @@ export function EstimateEmptyRow({
     }
     prevBillableExpensesRef.current = billableExpenses;
   }, [billableExpenses, formData.billable_expense_percentage, lineItemId, estimateId, updateLineItem, isSaving]);
+
+  // Track previous role and employee to detect changes
+  const prevRoleIdRef = useRef<string>(formData.role_id || "");
+  const prevEmployeeIdRef = useRef<string>(formData.employee_id || "");
+  const lastPopulatedEmployeeRef = useRef<string>("");
+  const lastPopulatedRoleDataRef = useRef<string>("");
+  const lastCalculationSignatureRef = useRef<string>("");
+
+  const handleRoleSelect = useCallback(
+    async (newRoleId: string) => {
+      if (!newRoleId) {
+        setFormData((prev) => ({ ...prev, role_id: "" }));
+        prevRoleIdRef.current = "";
+        lastPopulatedRoleDataRef.current = "";
+        return;
+      }
+
+      let roleDetail: RoleResponse;
+      try {
+        roleDetail = await queryClient.fetchQuery({
+          queryKey: rolesDetailQueryKey(newRoleId),
+          queryFn: () => rolesApi.getRole(newRoleId, true),
+        });
+      } catch (err) {
+        console.error("Failed to fetch role for spreadsheet row:", err);
+        setFormData((prev) => ({ ...prev, role_id: newRoleId }));
+        return;
+      }
+
+      const computed = computeRateCostFromRoleDetail(
+        roleDetail,
+        opportunityDeliveryCenterId,
+        invoiceCenterDefaultCurrency,
+        currency
+      );
+
+      setFormData((prev) => {
+        const next: EstimateLineItemCreate = { ...prev, role_id: newRoleId };
+        if (!computed) {
+          return next;
+        }
+        const hasEmployee = !!prev.employee_id;
+        return {
+          ...next,
+          rate: computed.newRate,
+          ...(hasEmployee ? {} : { cost: computed.newCost }),
+        };
+      });
+
+      const currentKey = `${newRoleId}-${opportunityDeliveryCenterId ?? ""}-${currency}`;
+      prevRoleIdRef.current = newRoleId;
+      lastPopulatedRoleDataRef.current = computed ? currentKey : "";
+    },
+    [queryClient, opportunityDeliveryCenterId, invoiceCenterDefaultCurrency, currency]
+  );
+
+  // When Role is selected, update Cost and Rate from RoleRate.
+  // useLayoutEffect so rate/cost flush before the auto-save useEffect runs in the same commit
+  // (otherwise create/update can run once with the employee rate still in formData).
+  useLayoutEffect(() => {
+    if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
+      return;
+    }
+
+    if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData) {
+      return;
+    }
+
+    if (selectedRoleData.id !== formData.role_id) {
+      return;
+    }
+
+    const currentKey = `${formData.role_id}-${opportunityDeliveryCenterId}-${currency}`;
+    const roleChanged = formData.role_id !== prevRoleIdRef.current;
+
+    if (roleChanged) {
+      lastPopulatedRoleDataRef.current = "";
+    }
+
+    if (!roleChanged && lastPopulatedRoleDataRef.current === currentKey) {
+      return;
+    }
+
+    const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+      selectedRoleData.role_rates,
+      opportunityDeliveryCenterId,
+      invoiceCenterDefaultCurrency
+    );
+
+    let newCost: string;
+    let newRate: string;
+    let roleRateCurrency: string = currency;
+
+    if (matchingRate) {
+      let baseCost = matchingRate.internal_cost_rate || 0;
+      let baseRate = matchingRate.external_rate || 0;
+      roleRateCurrency =
+        matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
+
+      if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+        baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+        baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
+        if (!Number.isFinite(baseCost) || !Number.isFinite(baseRate)) {
+          return;
+        }
+      }
+
+      newCost = parseFloat(baseCost.toFixed(2)).toString();
+      newRate = parseFloat(baseRate.toFixed(2)).toString();
+    } else {
+      if (selectedRoleData) {
+        const firstRate = selectedRoleData.role_rates?.[0];
+        const fallbackCost = firstRate?.internal_cost_rate ?? 0;
+        const fallbackRate = firstRate?.external_rate ?? 0;
+        newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+        newRate = parseFloat(fallbackRate.toFixed(2)).toString();
+      } else {
+        prevRoleIdRef.current = formData.role_id || "";
+        return;
+      }
+    }
+
+    const hasEmployee = !!formData.employee_id;
+
+    setFormData((prev) => {
+      const updates: Partial<EstimateLineItemCreate> = {
+        rate: newRate,
+      };
+      if (!hasEmployee) {
+        updates.cost = newCost;
+      }
+      return { ...prev, ...updates };
+    });
+
+    prevRoleIdRef.current = formData.role_id || "";
+    lastPopulatedRoleDataRef.current = currentKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    formData.role_id,
+    formData.employee_id,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedRoleData?.id,
+    roleRatesFingerprint,
+    isSaving,
+    isCreatingRef,
+  ]);
+
+  // When Employee is selected or cleared, update Cost (and Rate if no role).
+  useLayoutEffect(() => {
+    if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
+      return;
+    }
+
+    const currentEmployeeId = formData.employee_id || "";
+    const employeeChanged = currentEmployeeId !== prevEmployeeIdRef.current;
+
+    const calculationSignature = `${currentEmployeeId}|${currency}|${opportunityDeliveryCenterId}|${!!deliveryCentersData}`;
+    const signatureChanged = calculationSignature !== lastCalculationSignatureRef.current;
+
+    if (employeeChanged) {
+      lastPopulatedEmployeeRef.current = "";
+      lastCalculationSignatureRef.current = "";
+    }
+
+    if (!employeeChanged && !signatureChanged && lastPopulatedEmployeeRef.current === currentEmployeeId) {
+      return;
+    }
+
+    if (!currentEmployeeId) {
+      if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData) {
+        if (selectedRoleData.id !== formData.role_id) {
+          return;
+        }
+
+        const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
+          selectedRoleData.role_rates,
+          opportunityDeliveryCenterId,
+          invoiceCenterDefaultCurrency
+        );
+
+        let newCost: string;
+        if (matchingRate) {
+          let baseCost = matchingRate.internal_cost_rate || 0;
+          const roleRateCurrency =
+            matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
+
+          if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
+            baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
+            if (!Number.isFinite(baseCost)) {
+              return;
+            }
+          }
+
+          newCost = parseFloat(baseCost.toFixed(2)).toString();
+        } else {
+          if (selectedRoleData) {
+            const firstRate = selectedRoleData.role_rates?.[0];
+            const fallbackCost = firstRate?.internal_cost_rate ?? 0;
+            newCost = parseFloat(fallbackCost.toFixed(2)).toString();
+          } else {
+            return;
+          }
+        }
+
+        if (newCost !== formData.cost) {
+          setFormData((prev) => ({
+            ...prev,
+            cost: newCost,
+          }));
+        }
+      }
+      prevEmployeeIdRef.current = currentEmployeeId;
+      return;
+    }
+
+    if (!selectedEmployeeData || selectedEmployeeData.id !== currentEmployeeId) {
+      return;
+    }
+
+    if (!deliveryCentersData || isLoadingDeliveryCenters || isFetchingDeliveryCenters) {
+      return;
+    }
+
+    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center
+      ? deliveryCentersData.items.find((dc) => dc.code === selectedEmployeeData.delivery_center)?.id
+      : null;
+
+    const centersMatch =
+      opportunityDeliveryCenterId && employeeDeliveryCenterId
+        ? String(opportunityDeliveryCenterId) === String(employeeDeliveryCenterId)
+        : false;
+
+    let employeeCost: number;
+    let employeeRate = 0;
+    const employeeCurrency = selectedEmployeeData.default_currency || "USD";
+    const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
+    const hasRole = !!formData.role_id;
+
+    if (centersMatch) {
+      employeeCost = selectedEmployeeData.internal_cost_rate || 0;
+    } else {
+      employeeCost = selectedEmployeeData.internal_bill_rate || 0;
+    }
+
+    if (!hasRole) {
+      employeeRate = selectedEmployeeData.external_bill_rate || 0;
+    }
+
+    if (!currenciesMatch) {
+      employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
+      if (!Number.isFinite(employeeCost)) {
+        return;
+      }
+      employeeCost = parseFloat(employeeCost.toFixed(2));
+      if (!hasRole) {
+        employeeRate = convertCurrency(employeeRate, employeeCurrency, currency);
+        if (!Number.isFinite(employeeRate)) {
+          return;
+        }
+        employeeRate = parseFloat(employeeRate.toFixed(2));
+      }
+    }
+
+    const newCost = parseFloat(employeeCost.toFixed(2)).toString();
+    const newRate = !hasRole ? parseFloat(employeeRate.toFixed(2)).toString() : formData.rate;
+
+    const updates: Partial<EstimateLineItemCreate> = {
+      cost: newCost,
+    };
+    if (!hasRole && formData.rate !== newRate) {
+      updates.rate = newRate;
+    }
+
+    setFormData((prev) => ({
+      ...prev,
+      ...updates,
+    }));
+
+    lastPopulatedEmployeeRef.current = currentEmployeeId;
+    lastCalculationSignatureRef.current = `${currentEmployeeId}|${currency}|${opportunityDeliveryCenterId}|${!!deliveryCentersData}`;
+
+    prevEmployeeIdRef.current = currentEmployeeId;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    formData.employee_id,
+    formData.role_id,
+    opportunityDeliveryCenterId,
+    invoiceCenterDefaultCurrency,
+    currency,
+    selectedEmployeeData,
+    selectedRoleData,
+    rolesData,
+    deliveryCentersData,
+    isSaving,
+    isCreatingRef,
+    isLoadingDeliveryCenters,
+    isFetchingDeliveryCenters,
+  ]);
 
   // SIMPLE: Save immediately when ANY field changes - no debounce, no complex logic
   const saveToDatabase = useCallback(async () => {
@@ -581,16 +959,10 @@ export function EstimateEmptyRow({
         });
         
         console.log("Line item created:", newLineItem.id);
-        setLineItemId(newLineItem.id);
-        // Initialize the ref with the current start_date when line item is created
-        prevStartDateRef.current = formData.start_date;
-        prevSavedDataRef.current = { ...currentData };
-        lastSavedDataRef.current = { ...formData };
-        
-        // Only invalidate on create (not update) to prevent refetch loops
         await queryClient.invalidateQueries({
           queryKey: ["estimates", "detail", estimateId, true],
         });
+        resetEmptyRowSlot();
       } catch (err) {
         console.error("Failed to create line item:", err);
         // CRITICAL: Update saved data ref even on error to prevent infinite retry loop
@@ -606,7 +978,7 @@ export function EstimateEmptyRow({
     }
     // Narrow deps: full formData would retrigger save loop; isSaving checked inside callback
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lineItemId, formData.role_id, formData.delivery_center_id, formData.employee_id, formData.rate, formData.cost, formData.start_date, formData.end_date, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, opportunityDeliveryCenterId, currency, invoiceCustomer, billableExpenses]);
+  }, [lineItemId, formData.role_id, formData.delivery_center_id, formData.employee_id, formData.rate, formData.cost, formData.start_date, formData.end_date, estimateId, createLineItem, updateLineItem, queryClient, isSaving, estimateDetail, opportunityDeliveryCenterId, currency, invoiceCustomer, billableExpenses, resetEmptyRowSlot]);
 
   // SIMPLE: Save to database immediately when ANY field in formData changes
   useEffect(() => {
@@ -629,320 +1001,17 @@ export function EstimateEmptyRow({
     }
     // isSaving intentionally omitted — effect gates on it internally via saveToDatabase
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.role_id, formData.delivery_center_id, formData.employee_id, formData.cost, formData.rate, formData.start_date, formData.end_date, lineItemId, saveToDatabase]);
-
-  // REMOVED: Separate cost/rate handler - now handled by main auto-save useEffect
-  // This was preventing saves when lineItemId didn't exist yet
-
-  // Track previous role and employee to detect changes
-  const prevRoleIdRef = useRef<string>(formData.role_id || "");
-  const prevEmployeeIdRef = useRef<string>(formData.employee_id || "");
-  const lastPopulatedEmployeeRef = useRef<string>("");
-  const lastPopulatedRoleDataRef = useRef<string>("");
-  // Track the "signature" of what we calculated with to prevent unnecessary re-runs
-  // This includes employee_id, currency, and deliveryCentersData state
-  const lastCalculationSignatureRef = useRef<string>("");
-
-  // When Role is selected, update Cost and Rate based on Opportunity Invoice Center & Role
-  useEffect(() => {
-    if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      return;
-    }
-
-    if (!formData.role_id || !opportunityDeliveryCenterId || !selectedRoleData || isLoadingRole || isFetchingRole) {
-      return;
-    }
-
-    if (selectedRoleData.id !== formData.role_id) {
-      return;
-    }
-
-    // Check if we've already populated for this role+opportunity+currency combination
-    const currentKey = `${formData.role_id}-${opportunityDeliveryCenterId}-${currency}`;
-    const roleChanged = formData.role_id !== prevRoleIdRef.current;
-    
-    // If role changed, reset the populated flag
-    if (roleChanged) {
-      lastPopulatedRoleDataRef.current = "";
-    }
-    
-    // Skip if we've already populated for this exact combination (and role hasn't changed)
-    if (!roleChanged && lastPopulatedRoleDataRef.current === currentKey) {
-      return;
-    }
-
-    console.log("Role effect running - populating Cost & Rate", {
-      role_id: formData.role_id,
-      opportunityDeliveryCenterId,
-      currency,
-      roleChanged,
-      currentKey,
-      lastPopulated: lastPopulatedRoleDataRef.current,
-      role_rates_count: selectedRoleData?.role_rates?.length || 0,
-    });
-
-    const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
-      selectedRoleData.role_rates,
-      opportunityDeliveryCenterId,
-      invoiceCenterDefaultCurrency
-    );
-
-    let newCost: string;
-    let newRate: string;
-    let roleRateCurrency: string = currency;
-
-    if (matchingRate) {
-      // Get rates from role rate
-      let baseCost = matchingRate.internal_cost_rate || 0;
-      let baseRate = matchingRate.external_rate || 0;
-      roleRateCurrency =
-        matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
-      
-      // Check if currency conversion is needed: Role Rate Default Currency <> Opportunity Invoice Currency
-      if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
-        baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
-        baseRate = convertCurrency(baseRate, roleRateCurrency, currency);
-        if (!Number.isFinite(baseCost) || !Number.isFinite(baseRate)) {
-          return;
-        }
-      }
-
-      newCost = parseFloat(baseCost.toFixed(2)).toString();
-      newRate = parseFloat(baseRate.toFixed(2)).toString();
-    } else {
-      // Fallback to role default rates if no matching rate found
-      // Use selectedRoleData which has full role info including defaults
-      if (selectedRoleData) {
-        const firstRate = selectedRoleData.role_rates?.[0];
-        const fallbackCost = firstRate?.internal_cost_rate ?? 0;
-        const fallbackRate = firstRate?.external_rate ?? 0;
-        // Round to 2 decimal places
-        newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-        newRate = parseFloat(fallbackRate.toFixed(2)).toString();
-      } else {
-        prevRoleIdRef.current = formData.role_id || "";
-        return;
-      }
-    }
-
-    // Update Rate always (Rate always comes from Role)
-    // Update Cost only if NO employee is selected (if employee selected, Cost comes from employee)
-    const hasEmployee = !!formData.employee_id;
-    
-    console.log("Updating Cost & Rate:", {
-      newCost,
-      newRate,
-      hasEmployee,
-      willUpdateCost: !hasEmployee,
-      currentCost: formData.cost,
-      currentRate: formData.rate,
-    });
-    
-    setFormData((prev) => {
-      const updates: Partial<EstimateLineItemCreate> = {
-        rate: newRate,
-      };
-      
-      // Only update cost if no employee is selected
-      if (!hasEmployee) {
-        updates.cost = newCost;
-      }
-      
-      return { ...prev, ...updates };
-    });
-    
-    prevRoleIdRef.current = formData.role_id || "";
-    lastPopulatedRoleDataRef.current = currentKey; // Mark as populated
-    // formData.cost / formData.rate updated via setFormData in this effect; listing them retriggers unnecessarily
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     formData.role_id,
+    formData.delivery_center_id,
     formData.employee_id,
-    opportunityDeliveryCenterId,
-    invoiceCenterDefaultCurrency,
-    currency,
-    selectedRoleData?.id,
-    roleRatesFingerprint,
-    isSaving,
-    isCreatingRef,
-    isLoadingRole,
-    isFetchingRole,
+    formData.cost,
+    formData.rate,
+    formData.start_date,
+    formData.end_date,
+    lineItemId,
+    saveToDatabase,
   ]);
-
-  // When Employee is selected or cleared, update Cost accordingly
-  // When Employee is selected, update Cost (and Rate if no role) from employee's rates
-  useEffect(() => {
-    if (isSaving || isCreatingRef.current || isReceivingBackendUpdateRef.current) {
-      return;
-    }
-
-    const currentEmployeeId = formData.employee_id || "";
-    const employeeChanged = currentEmployeeId !== prevEmployeeIdRef.current;
-    
-    // Create a signature of the current calculation inputs
-    // This includes employee_id, currency, opportunityDeliveryCenterId, and whether deliveryCentersData is loaded
-    const calculationSignature = `${currentEmployeeId}|${currency}|${opportunityDeliveryCenterId}|${!!deliveryCentersData}`;
-    const signatureChanged = calculationSignature !== lastCalculationSignatureRef.current;
-    
-    if (employeeChanged) {
-      lastPopulatedEmployeeRef.current = "";
-      lastCalculationSignatureRef.current = "";
-    }
-    
-    // Skip if we've already populated cost for this exact combination of inputs
-    // This prevents re-running when nothing relevant has changed, but allows re-running
-    // when currency, deliveryCentersData, or opportunityDeliveryCenterId changes
-    if (!employeeChanged && !signatureChanged && lastPopulatedEmployeeRef.current === currentEmployeeId) {
-      return;
-    }
-
-    // If employee was cleared (set to empty), revert Cost to Role-based cost
-    if (!currentEmployeeId) {
-      // Need role and opportunity delivery center to get role-based cost
-      // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
-      if (formData.role_id && opportunityDeliveryCenterId && selectedRoleData && !isLoadingRole && !isFetchingRole) {
-        // CRITICAL: Verify that selectedRoleData matches the current role_id
-        // This prevents using stale role data when role changes but React Query hasn't finished fetching yet
-        if (selectedRoleData.id !== formData.role_id) {
-          return;
-        }
-        
-        const matchingRate = pickRoleRateForOpportunityInvoiceCenter(
-          selectedRoleData.role_rates,
-          opportunityDeliveryCenterId,
-          invoiceCenterDefaultCurrency
-        );
-
-        let newCost: string;
-        if (matchingRate) {
-          let baseCost = matchingRate.internal_cost_rate || 0;
-          const roleRateCurrency =
-            matchingRate.default_currency || invoiceCenterDefaultCurrency || "USD";
-          
-          // Apply currency conversion: convert if currencies don't match
-          if (roleRateCurrency.toUpperCase() !== currency.toUpperCase()) {
-            baseCost = convertCurrency(baseCost, roleRateCurrency, currency);
-            if (!Number.isFinite(baseCost)) {
-              return;
-            }
-          }
-
-          newCost = parseFloat(baseCost.toFixed(2)).toString();
-        } else {
-          // Fallback to role default rates if no matching rate found
-          // Use selectedRoleData which has full role info including defaults
-          if (selectedRoleData) {
-            const firstRate = selectedRoleData.role_rates?.[0];
-            const fallbackCost = firstRate?.internal_cost_rate ?? 0;
-            // Round to 2 decimal places
-            newCost = parseFloat(fallbackCost.toFixed(2)).toString();
-          } else {
-            return;
-          }
-        }
-
-        // Update cost to role-based cost
-        if (newCost !== formData.cost) {
-          setFormData((prev) => ({
-            ...prev,
-            cost: newCost,
-            // Rate is NOT updated - it stays based on Role
-          }));
-        }
-      }
-      prevEmployeeIdRef.current = currentEmployeeId;
-      return;
-    }
-
-    // Employee was selected - update cost from employee's rates based on delivery center matching
-    // CRITICAL: Also check if React Query is still loading/fetching to avoid using stale data
-    if (!selectedEmployeeData || isLoadingEmployee || isFetchingEmployee) {
-      return;
-    }
-
-    if (selectedEmployeeData.id !== currentEmployeeId) {
-      return;
-    }
-
-    if (!deliveryCentersData || isLoadingDeliveryCenters || isFetchingDeliveryCenters) {
-      return;
-    }
-
-    // Get employee's delivery center ID from code
-    const employeeDeliveryCenterId = selectedEmployeeData.delivery_center 
-      ? deliveryCentersData.items.find(dc => dc.code === selectedEmployeeData.delivery_center)?.id
-      : null;
-    
-    // Compare Opportunity Invoice Center with Employee Delivery Center
-    // Convert to strings for comparison to handle UUID type differences
-    const centersMatch = opportunityDeliveryCenterId && employeeDeliveryCenterId 
-      ? String(opportunityDeliveryCenterId) === String(employeeDeliveryCenterId)
-      : false;
-    
-    // Determine which rate to use and whether to convert currency
-    let employeeCost: number;
-    let employeeRate: number = 0; // Initialize to avoid TypeScript error
-    const employeeCurrency = selectedEmployeeData.default_currency || "USD";
-    const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
-    const hasRole = !!formData.role_id;
-    
-    // Apply currency conversion rules for Employee Cost
-    // Centers match AND currencies match → use internal_cost_rate, NO conversion
-    // Centers match BUT currencies mismatch → use internal_cost_rate, WITH conversion
-    // Centers don't match BUT currencies match → use internal_bill_rate, NO conversion
-    // Centers don't match AND currencies mismatch → use internal_bill_rate, WITH conversion
-    if (centersMatch) {
-      // Centers match: use internal_cost_rate
-      employeeCost = selectedEmployeeData.internal_cost_rate || 0;
-    } else {
-      // Centers don't match: use internal_bill_rate
-      employeeCost = selectedEmployeeData.internal_bill_rate || 0;
-    }
-    
-    // If no role selected, also get Rate from employee's external_bill_rate
-    if (!hasRole) {
-      employeeRate = selectedEmployeeData.external_bill_rate || 0;
-    }
-    
-    if (!currenciesMatch) {
-      employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
-      if (!Number.isFinite(employeeCost)) {
-        return;
-      }
-      employeeCost = parseFloat(employeeCost.toFixed(2));
-      if (!hasRole) {
-        employeeRate = convertCurrency(employeeRate, employeeCurrency, currency);
-        if (!Number.isFinite(employeeRate)) {
-          return;
-        }
-        employeeRate = parseFloat(employeeRate.toFixed(2));
-      }
-    }
-
-    const newCost = parseFloat(employeeCost.toFixed(2)).toString();
-    const newRate = !hasRole ? parseFloat(employeeRate.toFixed(2)).toString() : formData.rate;
-
-    // Update cost always, and rate only if no role selected
-    const updates: Partial<EstimateLineItemCreate> = {
-      cost: newCost,
-    };
-    if (!hasRole && formData.rate !== newRate) {
-      updates.rate = newRate;
-    }
-    
-    setFormData((prev) => ({
-      ...prev,
-      ...updates,
-    }));
-    
-    // Mark as populated and update signature
-    lastPopulatedEmployeeRef.current = currentEmployeeId;
-    lastCalculationSignatureRef.current = `${currentEmployeeId}|${currency}|${opportunityDeliveryCenterId}|${!!deliveryCentersData}`;
-
-    prevEmployeeIdRef.current = currentEmployeeId;
-    // formData.cost / formData.rate read for logging and setFormData; not stable effect deps
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formData.employee_id, formData.role_id, opportunityDeliveryCenterId, invoiceCenterDefaultCurrency, currency, selectedEmployeeData, selectedRoleData, rolesData, deliveryCentersData, isSaving, isCreatingRef, isLoadingEmployee, isFetchingEmployee, isLoadingRole, isFetchingRole, isLoadingDeliveryCenters, isFetchingDeliveryCenters]);
 
   const parseLocalDate = (dateStr: string): Date => {
     const datePart = dateStr.split("T")[0];
@@ -969,8 +1038,7 @@ export function EstimateEmptyRow({
     const startDate = parseLocalDate(formData.start_date);
     const endDate = parseLocalDate(formData.end_date);
 
-    // Only update if within date range (weekDate is Sunday of column; compare to inclusive line range)
-    if (weekDate < startDate || weekDate > endDate) {
+    if (!weekColumnOverlapsLineRange(weekDate, startDate, endDate)) {
       return;
     }
 
@@ -1001,12 +1069,10 @@ export function EstimateEmptyRow({
           data: createData,
         });
         currentLineItemId = newLineItem.id;
-        setLineItemId(newLineItem.id);
-        // Initialize the ref with the current start_date when line item is created
-        prevStartDateRef.current = formData.start_date;
-        queryClient.invalidateQueries({
+        await queryClient.invalidateQueries({
           queryKey: ["estimates", "detail", estimateId, true],
         });
+        resetEmptyRowSlot();
       } catch (err) {
         console.error("Failed to create line item for hours:", err);
         isCreatingRef.current = false;
@@ -1065,80 +1131,6 @@ export function EstimateEmptyRow({
     }, 500);
   };
 
-  // Clear hours for weeks before new start date when start_date is moved later
-  useEffect(() => {
-    // Skip if we don't have a line item yet or if we're saving/creating
-    if (!lineItemId || isSaving || isCreatingRef.current) {
-      return;
-    }
-
-    // Skip if start_date hasn't changed
-    if (formData.start_date === prevStartDateRef.current) {
-      return;
-    }
-
-    const oldStartDateStr = prevStartDateRef.current;
-    const newStartDateStr = formData.start_date;
-
-    if (!oldStartDateStr || !newStartDateStr) {
-      prevStartDateRef.current = newStartDateStr;
-      return;
-    }
-
-    const oldStartDate = parseLocalDate(oldStartDateStr);
-    const newStartDate = parseLocalDate(newStartDateStr);
-
-    // Only clear if the new start date is later than the old one
-    if (newStartDate > oldStartDate) {
-      // Find all weeks before the new start date that have hours
-      const weeksToClear: Record<string, string> = {};
-
-      // Check all weeks in the spreadsheet
-      weeks.forEach((week) => {
-        const weekKey = getWeekKey(week);
-        const weekDate = week;
-
-        // If week is before the new start date and has hours, mark it for clearing
-        if (weekDate < newStartDate) {
-          const hours = weeklyHoursValues.get(weekKey);
-          if (hours && parseFloat(hours) > 0) {
-            weeksToClear[weekKey] = "0";
-          }
-        }
-      });
-
-      // Clear hours for weeks before the new start date
-      if (Object.keys(weeksToClear).length > 0) {
-        console.log(`Clearing ${Object.keys(weeksToClear).length} weeks before new start date:`, weeksToClear);
-
-        // Use autoFillHours API to set hours to 0
-        estimatesApi.autoFillHours(estimateId, lineItemId, {
-          pattern: "custom",
-          custom_hours: weeksToClear,
-        }).then(() => {
-          // Update local state to reflect cleared hours
-          setWeeklyHoursValues((prev) => {
-            const next = new Map(prev);
-            Object.keys(weeksToClear).forEach((weekKey) => {
-              next.set(weekKey, "0");
-            });
-            return next;
-          });
-
-          // Invalidate cache to trigger refetch
-          queryClient.invalidateQueries({
-            queryKey: ["estimates", "detail", estimateId, true],
-          });
-        }).catch((err) => {
-          console.error("Failed to clear hours for weeks before new start date:", err);
-        });
-      }
-    }
-
-    // Update the ref to track the new start date
-    prevStartDateRef.current = newStartDateStr;
-  }, [formData.start_date, lineItemId, weeks, weeklyHoursValues, estimateId, isSaving, queryClient]);
-
   // Calculate totals
   const totalHours: number = Array.from(weeklyHoursValues.values()).reduce(
     (sum, hours) => sum + parseFloat(hours || "0"),
@@ -1160,6 +1152,10 @@ export function EstimateEmptyRow({
   const marginPercentageWithoutExpenses: number = totalRevenue > 0 
     ? (marginAmount / totalRevenue) * 100 
     : 0;
+
+  if (isRenderedAsLineItemRow) {
+    return null;
+  }
 
   return (
     <tr
@@ -1188,11 +1184,8 @@ export function EstimateEmptyRow({
       <td className="sticky left-0 z-10 bg-white border border-gray-300 px-2 py-1">
         <Select
           value={formData.role_id}
-          onChange={async (e) => {
-            const newRoleId = e.target.value;
-            console.log("Role onChange - setting role_id:", newRoleId, "hasLineItemId:", !!lineItemId);
-            setFormData({ ...formData, role_id: newRoleId });
-            // The useEffect will detect the change and call saveToDatabase automatically
+          onChange={(e) => {
+            void handleRoleSelect(e.target.value);
           }}
           className="text-xs h-7 w-full"
         >
@@ -1381,15 +1374,11 @@ export function EstimateEmptyRow({
                         estimateId,
                         data: createData,
                       });
-                      setLineItemId(newLineItem.id);
-                      // Initialize the ref with the current start_date when line item is created
-                      prevStartDateRef.current = formData.start_date;
                       lineItemToUse = newLineItem;
-                      // Wait for the query to update, then open dialog
                       await queryClient.invalidateQueries({
                         queryKey: ["estimates", "detail", estimateId, true],
                       });
-                      // Open dialog with the newly created line item
+                      resetEmptyRowSlot();
                       setIsAutoFillOpen(true);
                     } catch (err) {
                       console.error("Failed to create line item for Fill:", err);
@@ -1420,13 +1409,12 @@ export function EstimateEmptyRow({
                       lineItemId: recordIdForDelete,
                     });
                     // Reset the row state after successful deletion
-                    setLineItemId(null);
-                    setFormData(getInitialFormData());
-                    // Clear localStorage
                     if (typeof window !== "undefined") {
                       localStorage.removeItem(`line-item-id-${stableId}-${estimateId}`);
                       localStorage.removeItem(`empty-row-${stableId}-${estimateId}`);
                     }
+                    setLineItemId(null);
+                    setFormData(getInitialFormData());
                   } catch (err: unknown) {
                     console.error("Failed to delete line item:", err);
                     const status =

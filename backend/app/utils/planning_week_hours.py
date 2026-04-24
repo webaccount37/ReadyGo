@@ -26,6 +26,11 @@ def week_interval_overlaps_range(week_start: date, range_start: date, range_end:
     return week_start <= range_end and week_end >= range_start
 
 
+def week_does_not_overlap_line_range(week_start: date, line_start: date, line_end: date) -> bool:
+    """True if the Sunday week [week_start, week_start+6] does not intersect the line [line_start, line_end]."""
+    return not week_interval_overlaps_range(week_start, line_start, line_end)
+
+
 def _add_calendar_months(d: date, months: int) -> date:
     """Add calendar months (matches JS Date.setMonth semantics for typical business dates)."""
     month_index = d.month - 1 + months

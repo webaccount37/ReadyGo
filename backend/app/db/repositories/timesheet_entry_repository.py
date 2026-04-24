@@ -70,6 +70,13 @@ class TimesheetEntryRepository(BaseRepository[TimesheetEntry]):
         await self.session.refresh(instance)
         return instance
 
+    async def add_all_with_flush(self, entries: List[TimesheetEntry]) -> None:
+        """Add many entries with a single flush (no per-row refresh)."""
+        if not entries:
+            return
+        self.session.add_all(entries)
+        await self.session.flush()
+
     async def update(self, id: UUID, **kwargs) -> Optional[TimesheetEntry]:
         """Update a timesheet entry."""
         await self.session.execute(

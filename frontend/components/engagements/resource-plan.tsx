@@ -7,9 +7,20 @@ import { EngagementTotalsRow } from "./engagement-totals-row";
 import { EngagementEmptyRow } from "./engagement-empty-row";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useExportEngagementExcel, useImportEngagementExcel, useApprovedHoursByWeek } from "@/hooks/useEngagements";
+import {
+  useCreateLineItem,
+  useUpdateLineItem,
+  useExportEngagementExcel,
+  useImportEngagementExcel,
+  useApprovedHoursByWeek,
+} from "@/hooks/useEngagements";
 import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { setCurrencyRates } from "@/lib/utils/currency";
+import { logResourcePlanServerCall } from "@/lib/engagement-resource-plan-server-log";
+import {
+  DEFAULT_DRAFT_ROW_COUNT,
+  spreadsheetDraftRowStableId,
+} from "@/lib/utils/spreadsheet-draft-rows";
 
 interface ResourcePlanProps {
   engagement: EngagementDetailResponse;
@@ -39,7 +50,7 @@ export function ResourcePlan({
   }, [currencyRatesData]);
 
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [emptyRowsCount, setEmptyRowsCount] = useState(20);
+  const [draftRowCount, setDraftRowCount] = useState(DEFAULT_DRAFT_ROW_COUNT);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportExcel = useExportEngagementExcel({
     onSuccess: (blob) => {
@@ -76,6 +87,8 @@ export function ResourcePlan({
   });
   const [emptyRowIds] = useState<Set<string>>(new Set());
   const { data: approvedHoursData } = useApprovedHoursByWeek(engagement.id);
+  const createLineItem = useCreateLineItem();
+  const updateLineItem = useUpdateLineItem();
 
   // Helper functions (must be defined before useMemo that uses them)
   const parseLocalDate = (dateStr: string): Date => {
@@ -197,10 +210,21 @@ export function ResourcePlan({
   }, [engagement.line_items]);
 
   const existingLineItems = useMemo(() => {
-    return (engagement.line_items || []).filter(item => !emptyRowIds.has(item.id));
+    const items = engagement.line_items || [];
+    const seen = new Set<string>();
+    const out: typeof items = [];
+    for (const item of items) {
+      if (emptyRowIds.has(item.id) || seen.has(item.id)) continue;
+      seen.add(item.id);
+      out.push(item);
+    }
+    return out;
   }, [engagement.line_items, emptyRowIds]);
 
   const handleExportClick = () => {
+    logResourcePlanServerCall("exportExcel", "resourcePlan: user clicked Export", {
+      engagementId: engagement.id,
+    });
     exportExcel.mutate(engagement.id);
   };
 
@@ -211,6 +235,11 @@ export function ResourcePlan({
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      logResourcePlanServerCall("importExcel", "resourcePlan: user selected file for import", {
+        engagementId: engagement.id,
+        fileName: file.name,
+        fileSize: file.size,
+      });
       importExcel.mutate({ engagementId: engagement.id, file });
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
@@ -482,25 +511,45 @@ export function ResourcePlan({
                     approvedHoursByWeek={approvedHoursData?.by_line_item?.[lineItem.id]}
                   />
                 ))}
-                {Array.from({ length: emptyRowsCount }).map((_, index) => (
-                  <EngagementEmptyRow
-                    key={`empty-${index}`}
-                    engagementId={engagement.id}
-                    weeks={weeks}
-                    currency={currency}
-                    rowIndex={existingLineItems.length + index}
-                    stableId={`empty-${index}`}
-                    opportunityDeliveryCenterId={opportunityDeliveryCenterId}
-                    invoiceCustomer={invoiceCustomer}
-                    billableExpenses={billableExpenses}
-                  />
-                ))}
+                {Array.from({ length: draftRowCount }).map((_, index) => {
+                  const stableId = spreadsheetDraftRowStableId(index);
+                  return (
+                    <EngagementEmptyRow
+                      key={stableId}
+                      engagementId={engagement.id}
+                      engagement={engagement}
+                      weeks={weeks}
+                      currency={currency}
+                      rowIndex={existingLineItems.length + index}
+                      stableId={stableId}
+                      opportunityDeliveryCenterId={opportunityDeliveryCenterId}
+                      invoiceCustomer={invoiceCustomer}
+                      billableExpenses={billableExpenses}
+                      createLineItem={createLineItem}
+                      updateLineItem={updateLineItem}
+                    />
+                  );
+                })}
                 <EngagementTotalsRow
                   lineItems={existingLineItems}
                   weeks={weeks}
                   currency={currency}
                   approvedHoursByWeek={approvedHoursData?.by_week}
                 />
+                <tr>
+                  <td
+                    colSpan={12 + weeks.length + 7}
+                    className="border border-gray-300 px-2 py-2 text-center"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setDraftRowCount((c) => c + 1)}
+                      className="text-sm text-blue-600 hover:underline"
+                    >
+                      + Add Row
+                    </button>
+                  </td>
+                </tr>
               </tbody>
             </table>
           </div>

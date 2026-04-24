@@ -18,8 +18,9 @@ from app.db.repositories.engagement_repository import EngagementRepository
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate, OpportunityResponse
 from app.models.opportunity import OpportunityStatus
 from app.utils.currency_converter import convert_to_usd
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update
 from app.models.estimate import Estimate, EstimateLineItem
+from app.models.engagement import Engagement, EngagementLineItem
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.integrations.sharepoint_graph import SharePointProjectFolderService
@@ -515,6 +516,25 @@ class OpportunityService(BaseService):
             del update_dict['end_date']
         
         updated = await self.opportunity_repo.update(opportunity_id, **update_dict)
+        effective_invoice_customer = (
+            update_dict["invoice_customer"]
+            if "invoice_customer" in update_dict
+            else opportunity.invoice_customer
+        )
+        if effective_invoice_customer is False:
+            est_subq = select(Estimate.id).where(Estimate.opportunity_id == opportunity_id)
+            await self.session.execute(
+                update(EstimateLineItem)
+                .where(EstimateLineItem.estimate_id.in_(est_subq))
+                .values(billable=False)
+            )
+            eng_subq = select(Engagement.id).where(Engagement.opportunity_id == opportunity_id)
+            await self.session.execute(
+                update(EngagementLineItem)
+                .where(EngagementLineItem.engagement_id.in_(eng_subq))
+                .values(billable=False)
+            )
+            await self.session.flush()
         await self.session.commit()
         # Reload with account relationship
         updated = await self.opportunity_repo.get(opportunity_id)

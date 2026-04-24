@@ -3,7 +3,8 @@ Engagement service with business logic.
 """
 
 import logging
-from typing import List, Optional, Tuple
+import uuid
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -30,7 +31,7 @@ from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.models.delivery_center import DeliveryCenter
 from app.models.engagement import Engagement, EngagementLineItem, EngagementWeeklyHours, EngagementPhase
 from app.models.quote import Quote, QuoteStatus, QuoteType
-from app.models.estimate import Estimate
+from app.models.estimate import Estimate, EstimateLineItem
 from app.models.role_rate import RoleRate
 from app.utils.currency_converter import convert_currency
 from app.utils.quote_display import compute_quote_display_name
@@ -67,40 +68,75 @@ class EngagementService(BaseService):
         self.role_repo = RoleRepository(session)
         self.employee_repo = EmployeeRepository(session)
         self.opportunity_repo = OpportunityRepository(session)
+
+    @staticmethod
+    def _as_line_date(d) -> date:
+        """Normalize line start/end from ORM (date, datetime, or YYYY-MM-DD string)."""
+        if isinstance(d, datetime):
+            return d.date()
+        if isinstance(d, date):
+            return d
+        if isinstance(d, str):
+            return datetime.strptime(d.split("T")[0], "%Y-%m-%d").date()
+        raise TypeError(f"Unsupported line date type: {type(d)}")
+
+    async def _sync_opportunity_to_engagement_line_items(self, engagement_id: UUID) -> None:
+        """
+        Widen Opportunity start/end when line items extend outside the current range for this
+        engagement (resource plan rows only, not a union of other plans). Does not shrink the
+        opportunity when rows move inward.
+        """
+        lines = await self.line_item_repo.list_by_engagement(engagement_id)
+        if not lines:
+            return
+        engagement = await self.engagement_repo.get(engagement_id)
+        if not engagement:
+            return
+        op = await self.opportunity_repo.get(engagement.opportunity_id)
+        if not op:
+            return
+        min_s = min(self._as_line_date(li.start_date) for li in lines)
+        max_e = max(self._as_line_date(li.end_date) for li in lines)
+        updates: Dict[str, date] = {}
+        if min_s < op.start_date:
+            updates["start_date"] = min_s
+        if max_e > op.end_date:
+            updates["end_date"] = max_e
+        if updates:
+            await self.opportunity_repo.update(op.id, **updates)
     
     async def create_engagement_from_quote(
         self,
         quote_id: UUID,
         created_by: Optional[UUID] = None,
+        estimate: Optional[Estimate] = None,
     ) -> EngagementResponse:
         """Create an engagement when a quote is approved.
-        
+
         Copies all phases, line items, and weekly hours from the associated Estimate.
+        Uses batched inserts for weekly hours. Pass ``estimate`` (from
+        ``get_with_line_items``) when the caller already loaded it to avoid a duplicate query.
         """
-        # Get quote
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             raise ValueError("Quote not found")
-        
-        # Check if engagement already exists for this quote
+
         existing_engagements = await self.engagement_repo.list_by_quote(quote_id)
         if existing_engagements:
             logger.warning(f"Engagement already exists for quote {quote_id}")
             return await self._to_response(existing_engagements[0], include_line_items=False)
-        
-        # Get estimate
-        estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
+
+        if estimate is None:
+            estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
         if not estimate:
             raise ValueError("Estimate not found")
-        
-        # Get opportunity
+
         opportunity = await self.opportunity_repo.get(quote.opportunity_id)
         if not opportunity:
             raise ValueError("Opportunity not found")
-        
+
         engagement_name = f"Engagement - {opportunity.name}"
 
-        # Compute quote display name for description
         snapshot = quote.snapshot_data or {}
         if not snapshot.get("account_name") and not snapshot.get("name"):
             from app.utils.quote_display import _format_date_mmddyyyy
@@ -116,7 +152,6 @@ class EngagementService(BaseService):
                 quote_created_at=quote.created_at,
             )
 
-        # Create engagement
         engagement_dict = {
             "quote_id": quote_id,
             "opportunity_id": quote.opportunity_id,
@@ -126,96 +161,103 @@ class EngagementService(BaseService):
             "attributes": {},
         }
         engagement = await self.engagement_repo.create(**engagement_dict)
-        
-        # Copy phases from estimate
+        engagement_id = engagement.id
+
+        line_items_to_copy: List[EstimateLineItem] = list(estimate.line_items) if estimate.line_items else []
+        line_items_to_copy.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
+
         if estimate.phases:
-            for phase in estimate.phases:
-                await self.phase_repo.create(
-                    engagement_id=engagement.id,
+            phase_rows: List[EngagementPhase] = [
+                EngagementPhase(
+                    id=uuid.uuid4(),
+                    engagement_id=engagement_id,
                     name=phase.name,
                     start_date=phase.start_date,
                     end_date=phase.end_date,
                     color=phase.color,
                     row_order=phase.row_order,
                 )
-        
-        # Copy line items and weekly hours from estimate
-        # Ensure line items are sorted by row_order
-        line_items_to_copy = list(estimate.line_items) if estimate.line_items else []
-        line_items_to_copy.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
-        
-        if line_items_to_copy:
-            for line_item in line_items_to_copy:
-                # Copy line item (keep original dates - not tied to Opportunity dates)
-                new_line_item_dict = {
-                    "engagement_id": engagement.id,
-                    "role_rates_id": line_item.role_rates_id,
-                    "payable_center_id": line_item.payable_center_id,
-                    "employee_id": line_item.employee_id,
-                    "rate": line_item.rate,
-                    "cost": line_item.cost,
-                    "currency": line_item.currency,
-                    "start_date": line_item.start_date,  # Keep original dates
-                    "end_date": line_item.end_date,  # Keep original dates
-                    "row_order": line_item.row_order,
-                    "billable": line_item.billable,
-                    "billable_expense_percentage": line_item.billable_expense_percentage,
-                }
-                new_line_item = await self.line_item_repo.create(**new_line_item_dict)
-                
-                # Copy weekly hours - CRITICAL: Query directly from database to ensure we get all records
-                # Don't trust the relationship-loaded collection - it may be incomplete
-                from app.models.estimate import EstimateWeeklyHours
-                weekly_hours_query = select(EstimateWeeklyHours).where(
-                    EstimateWeeklyHours.estimate_line_item_id == line_item.id
+                for phase in sorted(estimate.phases, key=lambda p: p.row_order if p.row_order is not None else 0)
+            ]
+            self.session.add_all(phase_rows)
+            await self.session.flush()
+
+        new_line_by_estimate_id: Dict[UUID, UUID] = {}
+        line_item_rows: List[EngagementLineItem] = []
+        for li in line_items_to_copy:
+            new_id = uuid.uuid4()
+            new_line_by_estimate_id[li.id] = new_id
+            line_item_rows.append(
+                EngagementLineItem(
+                    id=new_id,
+                    engagement_id=engagement_id,
+                    role_rates_id=li.role_rates_id,
+                    payable_center_id=li.payable_center_id,
+                    employee_id=li.employee_id,
+                    rate=li.rate,
+                    cost=li.cost,
+                    currency=li.currency,
+                    start_date=li.start_date,
+                    end_date=li.end_date,
+                    row_order=li.row_order,
+                    billable=li.billable,
+                    billable_expense_percentage=li.billable_expense_percentage,
                 )
-                weekly_hours_result = await self.session.execute(weekly_hours_query)
-                weekly_hours_list = weekly_hours_result.scalars().all()
-                
-                logger.info(f"Copying {len(weekly_hours_list)} weekly hours from estimate line item {line_item.id} to engagement line item {new_line_item.id}")
-                
-                if weekly_hours_list:
-                    for weekly_hour in weekly_hours_list:
-                        await self.weekly_hours_repo.create(
-                            engagement_line_item_id=new_line_item.id,
-                            week_start_date=weekly_hour.week_start_date,
-                            hours=weekly_hour.hours,
-                        )
-                    logger.info(f"Successfully copied {len(weekly_hours_list)} weekly hours")
-                else:
-                    logger.warning(f"No weekly hours found for estimate line item {line_item.id}")
-        
+            )
+        if line_item_rows:
+            self.session.add_all(line_item_rows)
+            await self.session.flush()
+
+        est_line_ids = [li.id for li in line_items_to_copy]
+        all_ewh = await self.estimate_weekly_hours_repo.list_by_estimate_line_item_ids(est_line_ids)
+        ewh_count = len(all_ewh)
+        if all_ewh and new_line_by_estimate_id:
+            weekly_rows: List[EngagementWeeklyHours] = [
+                EngagementWeeklyHours(
+                    id=uuid.uuid4(),
+                    engagement_line_item_id=new_line_by_estimate_id[ew.estimate_line_item_id],
+                    week_start_date=ew.week_start_date,
+                    hours=ew.hours,
+                )
+                for ew in all_ewh
+                if ew.estimate_line_item_id in new_line_by_estimate_id
+            ]
+            if len(weekly_rows) != ewh_count:
+                logger.warning(
+                    "Some estimate weekly hours skipped (missing line map): "
+                    f"source={ewh_count} inserted={len(weekly_rows)}"
+                )
+            if weekly_rows:
+                await self.weekly_hours_repo.bulk_add_all(weekly_rows)
+        elif line_items_to_copy and not all_ewh:
+            logger.warning("No weekly hours in estimate for copied line items; resource plan may be empty")
+
         await self.session.commit()
-        
-        # CRITICAL: Capture engagement_id BEFORE expire_all - accessing engagement.id after
-        # expire_all() triggers a sync refresh in async context, causing MissingGreenlet.
-        engagement_id = engagement.id
-        
-        # Expire all objects to force fresh load from database
-        # This ensures weekly_hours are properly loaded after creation
-        self.session.expire_all()
-        
-        # Reload engagement with all relationships
-        engagement = await self.engagement_repo.get_with_line_items(engagement_id)
+
+        cnt_result = await self.session.execute(
+            select(func.count())
+            .select_from(EngagementWeeklyHours)
+            .join(
+                EngagementLineItem,
+                EngagementLineItem.id == EngagementWeeklyHours.engagement_line_item_id,
+            )
+            .where(EngagementLineItem.engagement_id == engagement_id)
+        )
+        copied = int(cnt_result.scalar_one() or 0)
+        if copied != ewh_count and ewh_count > 0:
+            logger.warning(
+                f"Weekly hours copy count mismatch for engagement {engagement_id}: "
+                f"expected {ewh_count} from estimate, found {copied} in DB"
+            )
+        logger.info(
+            f"Engagement {engagement_id}: {len(line_items_to_copy)} line item(s), "
+            f"{copied} engagement weekly hour row(s)"
+        )
+
+        engagement = await self.engagement_repo.get(engagement_id)
         if not engagement:
             raise ValueError("Failed to retrieve created engagement")
-        
-        # Log weekly hours count for debugging
-        total_weekly_hours = 0
-        for line_item in engagement.line_items:
-            weekly_hours_count = len(line_item.weekly_hours) if line_item.weekly_hours else 0
-            total_weekly_hours += weekly_hours_count
-            if weekly_hours_count > 0:
-                logger.info(f"Line item {line_item.id} has {weekly_hours_count} weekly hours")
-        
-        logger.info(f"Engagement {engagement.id} has {total_weekly_hours} total weekly hours across {len(engagement.line_items)} line items")
-        
-        # Sync engagement to timesheets so employees see it on their timesheets
-        from app.services.timesheet_service import TimesheetService
-        timesheet_svc = TimesheetService(self.session)
-        await timesheet_svc.sync_engagement_to_timesheets(engagement.id)
-        
-        return await self._to_detail_response(engagement)
+        return await self._to_response(engagement, include_line_items=False)
     
     async def delete_engagements_by_quote(self, quote_id: UUID) -> int:
         """Delete all engagements associated with a quote.
@@ -509,8 +551,7 @@ class EngagementService(BaseService):
         # Calculate Estimate summary (from Estimate line items)
         estimate_summary = await self._calculate_estimate_summary(estimate)
         
-        # Calculate Quote amount
-        quote_amount = await self._calculate_quote_amount(quote, estimate_summary)
+        quote_amount = await self._calculate_quote_amount(quote, estimate_summary, estimate=estimate)
         
         # Calculate deviations
         revenue_deviation = None
@@ -612,30 +653,42 @@ class EngagementService(BaseService):
             "margin_percentage": margin_percentage,
         }
     
-    async def get_quote_total_revenue(self, quote_id: UUID) -> Optional[Decimal]:
+    async def get_quote_total_revenue(
+        self,
+        quote_id: UUID,
+        *,
+        estimate: Optional[Estimate] = None,
+    ) -> Optional[Decimal]:
         """Calculate Quote total revenue (for opportunity deal_value on approval)."""
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return None
-        estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
+        if estimate is None:
+            estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
         if not estimate:
             return None
         estimate_summary = await self._calculate_estimate_summary(estimate)
-        return await self._calculate_quote_amount(quote, estimate_summary)
+        return await self._calculate_quote_amount(quote, estimate_summary, estimate=estimate)
 
-    async def _calculate_quote_amount(self, quote: Quote, estimate_summary: dict) -> Optional[Decimal]:
+    async def _calculate_quote_amount(
+        self,
+        quote: Quote,
+        estimate_summary: dict,
+        *,
+        estimate: Optional[Estimate] = None,
+    ) -> Optional[Decimal]:
         """Calculate Quote amount based on quote type."""
         if not quote.quote_type:
             return None
-        
+
         if quote.quote_type == QuoteType.FIXED_BID:
             return Decimal(str(quote.target_amount)) if quote.target_amount else None
         elif quote.quote_type == QuoteType.TIME_MATERIALS:
-            # If blended rate, calculate: total hours * blended rate
             from app.models.quote import RateBillingUnit
             if quote.rate_billing_unit in [RateBillingUnit.HOURLY_BLENDED, RateBillingUnit.DAILY_BLENDED]:
                 if quote.blended_rate_amount:
-                    estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
+                    if estimate is None:
+                        estimate = await self.estimate_repo.get_with_line_items(quote.estimate_id)
                     opportunity = (
                         getattr(estimate, "opportunity", None) if estimate else None
                     )
@@ -978,12 +1031,17 @@ class EngagementService(BaseService):
         line_item_dict["row_order"] = max_order + 1
         
         line_item = await self.line_item_repo.create(**line_item_dict)
+        await self.session.flush()
+
+        reloaded = await self.line_item_repo.get(line_item.id)
+        if reloaded:
+            await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                reloaded.id,
+                self._as_line_date(reloaded.start_date),
+                self._as_line_date(reloaded.end_date),
+            )
+        await self._sync_opportunity_to_engagement_line_items(engagement_id)
         await self.session.commit()
-        
-        # Sync engagement to timesheets so the new line item appears
-        from app.services.timesheet_service import TimesheetService
-        timesheet_svc = TimesheetService(self.session)
-        await timesheet_svc.sync_engagement_to_timesheets(engagement_id)
         
         # Reload with relationships
         line_item = await self.line_item_repo.get(line_item.id)
@@ -1228,15 +1286,18 @@ class EngagementService(BaseService):
         if opportunity and opportunity.default_currency:
             update_dict["currency"] = (opportunity.default_currency or "").strip() or "USD"
         
-        updated = await self.line_item_repo.update(line_item_id, **update_dict)
+        await self.line_item_repo.update(line_item_id, **update_dict)
         await self.session.flush()  # Flush to get updated values
-        
+
+        reloaded = await self.line_item_repo.get(line_item_id)
+        if reloaded:
+            await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                line_item_id,
+                self._as_line_date(reloaded.start_date),
+                self._as_line_date(reloaded.end_date),
+            )
+        await self._sync_opportunity_to_engagement_line_items(engagement_id)
         await self.session.commit()
-        
-        # Sync engagement to timesheets (employee/dates may have changed)
-        from app.services.timesheet_service import TimesheetService
-        timesheet_svc = TimesheetService(self.session)
-        await timesheet_svc.sync_engagement_to_timesheets(engagement_id)
         
         updated = await self.line_item_repo.get(line_item_id)
         if not updated:
@@ -1261,6 +1322,8 @@ class EngagementService(BaseService):
             )
         
         result = await self.line_item_repo.delete(line_item_id)
+        if result:
+            await self._sync_opportunity_to_engagement_line_items(engagement_id)
         await self.session.commit()
         return result
     
@@ -1288,11 +1351,6 @@ class EngagementService(BaseService):
         
         await self.session.commit()
 
-        # Sync engagement to timesheets (weekly hours changed - add/update entries)
-        from app.services.timesheet_service import TimesheetService
-        timesheet_svc = TimesheetService(self.session)
-        await timesheet_svc.sync_engagement_to_timesheets(engagement_id)
-
         return results
     
     async def auto_fill_hours(
@@ -1308,6 +1366,35 @@ class EngagementService(BaseService):
         line_item = await self.line_item_repo.get(line_item_id)
         if not line_item or line_item.engagement_id != engagement_id:
             raise ValueError("Line item not found")
+
+        # CUSTOM: patch per-week (upsert) without deleting unrelated weeks; then purge OOB
+        if auto_fill_data.pattern == AutoFillPattern.CUSTOM:
+            if auto_fill_data.custom_hours:
+                for k, v in auto_fill_data.custom_hours.items():
+                    week_start = date.fromisoformat(k)
+                    hours_dec = Decimal(str(v))
+                    if hours_dec == 0:
+                        existing = await self.weekly_hours_repo.get_by_line_item_and_week(
+                            line_item_id, week_start
+                        )
+                        if existing:
+                            await self.weekly_hours_repo.delete(existing.id)
+                    else:
+                        await self.weekly_hours_repo.upsert(
+                            line_item_id, week_start, float(hours_dec)
+                        )
+            li = await self.line_item_repo.get(line_item_id)
+            if li:
+                await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                    line_item_id,
+                    self._as_line_date(li.start_date),
+                    self._as_line_date(li.end_date),
+                )
+            await self.session.commit()
+            updated_line_item = await self.line_item_repo.get(line_item_id)
+            if not updated_line_item:
+                raise ValueError("Line item not found after update")
+            return [await self._to_line_item_response(updated_line_item)]
         
         # Generate weeks between start_date and end_date
         weeks = self._generate_weeks(line_item.start_date, line_item.end_date)
@@ -1372,12 +1459,6 @@ class EngagementService(BaseService):
                         calculated_hours = end_hours - (intervals_to_subtract * interval_hours)
                         hours_by_week[week_start] = max(calculated_hours, start_hours)
         
-        elif auto_fill_data.pattern == AutoFillPattern.CUSTOM:
-            if auto_fill_data.custom_hours:
-                hours_by_week = {date.fromisoformat(k): v for k, v in auto_fill_data.custom_hours.items()}
-            else:
-                hours_by_week = {}
-        
         # Delete existing weekly hours for this line item
         await self.weekly_hours_repo.delete_by_line_item(line_item_id)
         
@@ -1387,6 +1468,14 @@ class EngagementService(BaseService):
                 engagement_line_item_id=line_item_id,
                 week_start_date=week_start,
                 hours=hours,
+            )
+
+        li_purge = await self.line_item_repo.get(line_item_id)
+        if li_purge:
+            await self.weekly_hours_repo.delete_for_line_item_outside_inclusive_date_range(
+                line_item_id,
+                self._as_line_date(li_purge.start_date),
+                self._as_line_date(li_purge.end_date),
             )
         
         await self.session.commit()

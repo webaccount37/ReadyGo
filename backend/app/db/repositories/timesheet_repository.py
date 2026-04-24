@@ -2,11 +2,11 @@
 Timesheet repository for database operations.
 """
 
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Tuple, Sequence
 from uuid import UUID
 from datetime import date, timedelta, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_
+from sqlalchemy import select, func, and_, or_, tuple_
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.timesheet import Timesheet, TimesheetStatus, TimesheetStatusHistory
@@ -65,6 +65,20 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             )
         )
         return result.scalar_one_or_none()
+
+    async def list_by_employee_week_keys(
+        self,
+        keys: Sequence[Tuple[UUID, date]],
+    ) -> List[Timesheet]:
+        """All timesheets matching (employee_id, week_start_date) pairs (one query, no entry eager load)."""
+        if not keys:
+            return []
+        result = await self.session.execute(
+            select(Timesheet).where(
+                tuple_(Timesheet.employee_id, Timesheet.week_start_date).in_(list(keys))
+            )
+        )
+        return list(result.scalars().all())
 
     async def get_or_create(
         self,

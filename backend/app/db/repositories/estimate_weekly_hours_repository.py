@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.estimate import EstimateWeeklyHours
+from app.utils.planning_week_hours import week_does_not_overlap_line_range
 
 
 class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
@@ -51,6 +52,23 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
             select(EstimateWeeklyHours)
             .where(EstimateWeeklyHours.estimate_line_item_id == line_item_id)
             .order_by(EstimateWeeklyHours.week_start_date)
+        )
+        return list(result.scalars().all())
+
+    async def list_by_estimate_line_item_ids(
+        self,
+        line_item_ids: List[UUID],
+    ) -> List[EstimateWeeklyHours]:
+        """All weekly hour rows for any of the given estimate line items (one query)."""
+        if not line_item_ids:
+            return []
+        result = await self.session.execute(
+            select(EstimateWeeklyHours)
+            .where(EstimateWeeklyHours.estimate_line_item_id.in_(line_item_ids))
+            .order_by(
+                EstimateWeeklyHours.estimate_line_item_id,
+                EstimateWeeklyHours.week_start_date,
+            )
         )
         return list(result.scalars().all())
     
@@ -139,7 +157,26 @@ class EstimateWeeklyHoursRepository(BaseRepository[EstimateWeeklyHours]):
         )
         await self.session.flush()
         return result.rowcount
-    
+
+    async def delete_for_line_item_outside_inclusive_date_range(
+        self,
+        line_item_id: UUID,
+        line_start: date,
+        line_end: date,
+    ) -> int:
+        """
+        Remove weekly rows whose Sunday week does not overlap [line_start, line_end] (inclusive),
+        same rule as the estimate grid / planning_week_hours.week_interval_overlaps_range.
+        """
+        rows = await self.list_by_line_item(line_item_id)
+        deleted = 0
+        for row in rows:
+            ws = row.week_start_date
+            if week_does_not_overlap_line_range(ws, line_start, line_end):
+                if await self.delete(row.id):
+                    deleted += 1
+        return deleted
+
     async def delete_duplicate_monday_for_sunday(
         self,
         line_item_id: UUID,

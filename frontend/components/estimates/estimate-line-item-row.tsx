@@ -15,6 +15,7 @@ import { convertCurrency } from "@/lib/utils/currency";
 import { fingerprintRoleRates } from "@/lib/utils/role-rate-fingerprint";
 import { pickRoleRateForOpportunityInvoiceCenter } from "@/lib/utils/role-rate-picker";
 import { estimatesApi } from "@/lib/api/estimates";
+import { weekColumnOverlapsLineRange } from "@/lib/utils/week-column-line-range";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface EstimateLineItemRowProps {
@@ -35,7 +36,7 @@ export function EstimateLineItemRow({
   currency,
   estimateId,
   opportunityDeliveryCenterId,
-  invoiceCustomer: _invoiceCustomer = true,
+  invoiceCustomer = true,
   billableExpenses = true,
   onContextMenu,
   readOnly = false,
@@ -91,18 +92,11 @@ export function EstimateLineItemRow({
   
   // Update local state when lineItem prop changes (from refetch)
   // Only update if values actually changed to prevent unnecessary re-renders and feedback loops
+  // (Same order as EngagementLineItemRow: rate/cost first, then bail on isUpdatingRef for other fields.)
   useEffect(() => {
-    // Skip updates if we're currently in the middle of an update to prevent feedback loops
-    if (isUpdatingRef.current) {
-      return;
-    }
-    
     const startDateStr = lineItem.start_date.split("T")[0];
     const endDateStr = lineItem.end_date.split("T")[0];
-    
-    // Only update state if values actually changed
-    // CRITICAL: Don't sync rate/cost from backend if we're updating them from role change
-    // This prevents backend data from overwriting the calculated role-based rates
+
     if (!isUpdatingRatesFromRoleRef.current) {
       setCostValue((prev) => {
         const newValue = lineItem.cost || "0";
@@ -112,9 +106,12 @@ export function EstimateLineItemRow({
         const newValue = lineItem.rate || "0";
         return prev !== newValue ? newValue : prev;
       });
-    } else {
-      console.log("Skipping rate/cost sync - updating from role change");
     }
+
+    if (isUpdatingRef.current) {
+      return;
+    }
+
     setStartDateValue((prev) => {
       const newValue = startDateStr;
       if (prev !== newValue) {
@@ -148,6 +145,9 @@ export function EstimateLineItemRow({
       return prev !== newValue ? newValue : prev;
     });
     setBillableValue((prev) => {
+      if (!invoiceCustomer) {
+        return prev !== false ? false : prev;
+      }
       const newValue = lineItem.billable ?? true;
       return prev !== newValue ? newValue : prev;
     });
@@ -169,6 +169,7 @@ export function EstimateLineItemRow({
     lineItem.employee_id,
     lineItem.billable,
     lineItem.billable_expense_percentage,
+    invoiceCustomer,
   ]);
 
   // Weekly hours editing state
@@ -426,7 +427,40 @@ export function EstimateLineItemRow({
     if (readOnly) {
       return; // Don't allow updates when read-only
     }
+    if (field === "billable" && !invoiceCustomer) {
+      return;
+    }
     if (value === originalValue) {
+      return;
+    }
+
+    // role_id must not share the debounced timer with rate/cost/other fields: a follow-up
+    // handleFieldUpdate("rate") from the role effect clears this timer and would drop the role save
+    // (Engagement avoids this by not debouncing role_id the same way — mirror with an immediate save).
+    if (field === "role_id") {
+      isUpdatingRoleIdRef.current = true;
+      isUpdatingRef.current = true;
+      void (async () => {
+        try {
+          await updateLineItem.mutateAsync({
+            estimateId,
+            lineItemId: lineItem.id,
+            data: { role_id: value },
+          });
+        } catch (err) {
+          console.error(`Failed to update ${field}:`, err);
+          setRoleValue(originalValue);
+          isUpdatingRef.current = false;
+          isUpdatingRoleIdRef.current = false;
+          return;
+        }
+        setTimeout(() => {
+          isUpdatingRef.current = false;
+          setTimeout(() => {
+            isUpdatingRoleIdRef.current = false;
+          }, 500);
+        }, 100);
+      })();
       return;
     }
 
@@ -458,76 +492,10 @@ export function EstimateLineItemRow({
           updateData.rate = value;
         } else if (field === "start_date") {
           updateData.start_date = value;
-          
-          // If start_date is moved later, clear hours for weeks before the new start date
-          if (value && prevStartDateRef.current) {
-            const parseLocalDate = (dateStr: string): Date => {
-              const datePart = dateStr.split("T")[0];
-              const [year, month, day] = datePart.split("-").map(Number);
-              return new Date(year, month - 1, day);
-            };
-            
-            const oldStartDate = parseLocalDate(prevStartDateRef.current);
-            const newStartDate = parseLocalDate(value);
-            
-            // Only clear if the new start date is later than the old one
-            if (newStartDate > oldStartDate) {
-              // Find all weeks before the new start date that have hours
-              const weeksToClear: Record<string, string> = {};
-              
-              // Check all weeks in the spreadsheet
-              weeks.forEach((week) => {
-                const weekKey = getWeekKey(week);
-                const weekDate = week;
-                
-                // If week is before the new start date and has hours, mark it for clearing
-                if (weekDate < newStartDate) {
-                  const hours = weeklyHoursValues.get(weekKey) || weeklyHoursMap.get(weekKey);
-                  if (hours && parseFloat(hours) > 0) {
-                    weeksToClear[weekKey] = "0";
-                  }
-                }
-              });
-              
-              // Clear hours for weeks before the new start date
-              if (Object.keys(weeksToClear).length > 0) {
-                console.log(`Clearing ${Object.keys(weeksToClear).length} weeks before new start date:`, weeksToClear);
-                
-                // Use autoFillHours API to set hours to 0
-                estimatesApi.autoFillHours(estimateId, lineItem.id, {
-                  pattern: "custom",
-                  custom_hours: weeksToClear,
-                }).then(() => {
-                  // Update local state to reflect cleared hours
-                  setWeeklyHoursValues((prev) => {
-                    const next = new Map(prev);
-                    Object.keys(weeksToClear).forEach((weekKey) => {
-                      next.set(weekKey, "0");
-                    });
-                    return next;
-                  });
-                  
-                  // Invalidate cache to trigger refetch
-                  queryClient.invalidateQueries({
-                    queryKey: ["estimates", "detail", estimateId, true],
-                  });
-                }).catch((err) => {
-                  console.error("Failed to clear hours for weeks before new start date:", err);
-                });
-              }
-            }
-            
-            // Update the ref to track the new start date
-            prevStartDateRef.current = value;
-          }
         } else if (field === "end_date") {
           updateData.end_date = value;
         } else if (field === "delivery_center_id") {
           updateData.delivery_center_id = value;
-        } else if (field === "role_id") {
-          updateData.role_id = value;
-          // Set flag to prevent sync effect from overwriting role_id during update
-          isUpdatingRoleIdRef.current = true;
         } else if (field === "currency") {
           updateData.currency = value;
         } else if (field === "row_order") {
@@ -539,34 +507,26 @@ export function EstimateLineItemRow({
           lineItemId: lineItem.id,
           data: updateData,
         });
+
+        if (field === "start_date" && value) {
+          prevStartDateRef.current = value;
+        }
         
         // Clear updating flag after successful update
         // Use a small delay to allow the query invalidation to complete
         setTimeout(() => {
           isUpdatingRef.current = false;
-          // Clear role_id update flag after backend has processed and refetched
-          if (field === "role_id") {
-            // Give extra time for the backend to update and refetch
-            setTimeout(() => {
-              isUpdatingRoleIdRef.current = false;
-            }, 500);
-          }
         }, 100);
       } catch (err) {
         console.error(`Failed to update ${field}:`, err);
         // Clear updating flag on error
         isUpdatingRef.current = false;
-        // Clear role_id update flag on error
-        if (field === "role_id") {
-          isUpdatingRoleIdRef.current = false;
-        }
         // Revert on error
         if (field === "cost") setCostValue(originalValue);
         else if (field === "rate") setRateValue(originalValue);
         else if (field === "start_date") setStartDateValue(originalValue.split("T")[0]);
         else if (field === "end_date") setEndDateValue(originalValue.split("T")[0]);
         else if (field === "delivery_center_id") setDeliveryCenterValue(originalValue);
-        else if (field === "role_id") setRoleValue(originalValue);
         else if (field === "employee_id") setEmployeeValue(originalValue || "");
         else if (field === "billable") setBillableValue(originalValue === "true" || originalValue === "True");
         else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");
@@ -574,7 +534,7 @@ export function EstimateLineItemRow({
     }, 500); // 500ms debounce
     // Intentionally narrow deps: debounced handler uses refs + latest closures from render
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [estimateId, lineItem.id, updateLineItem, readOnly]);
+  }, [estimateId, lineItem.id, updateLineItem, readOnly, invoiceCustomer]);
   
   // Cleanup timeouts on unmount
   useEffect(() => {
@@ -628,8 +588,19 @@ export function EstimateLineItemRow({
     prevBillableExpensesRef.current = billableExpenses;
   }, [billableExpenses, billableExpensePercentageValue, lineItem.billable_expense_percentage, handleFieldUpdate, readOnly]);
 
-  // Track previous role and employee to detect changes
-  const prevRoleRef = useRef<string>(roleValue);
+  // Persist non-billable when opportunity is not invoice customer (DB may still be true until cascade)
+  useEffect(() => {
+    if (readOnly || invoiceCustomer) {
+      return;
+    }
+    if (lineItem.billable) {
+      handleFieldUpdate("billable", "false", String(lineItem.billable));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readOnly, invoiceCustomer, lineItem.id, lineItem.billable]);
+
+  // Track previous role and employee to detect changes (align with Engagement row)
+  const prevRoleRef = useRef<string | undefined>(roleValue);
   const prevEmployeeRef = useRef<string>(employeeValue);
   const lastPopulatedRoleDataRef = useRef<string>("");
   const roleRatesFingerprint = fingerprintRoleRates(selectedRoleData);
@@ -821,40 +792,56 @@ export function EstimateLineItemRow({
     
     // Determine which rate to use and whether to convert currency
     let employeeCost: number;
+    let employeeRate = 0;
     const employeeCurrency = selectedEmployeeData.default_currency || "USD";
     const currenciesMatch = employeeCurrency.toUpperCase() === currency.toUpperCase();
-    
+    const hasRole = !!roleValue;
+
     // Apply currency conversion rules for Employee Cost
     // Centers match AND currencies match → use internal_cost_rate, NO conversion
     // Centers match BUT currencies mismatch → use internal_cost_rate, WITH conversion
     // Centers don't match BUT currencies match → use internal_bill_rate, NO conversion
     // Centers don't match AND currencies mismatch → use internal_bill_rate, WITH conversion
     if (centersMatch) {
-      // Centers match: use internal_cost_rate
       employeeCost = selectedEmployeeData.internal_cost_rate || 0;
     } else {
-      // Centers don't match: use internal_bill_rate
       employeeCost = selectedEmployeeData.internal_bill_rate || 0;
     }
-    
+
+    // No role yet: Rate follows employee (Engagement Resource Plan); once Role exists, Rate comes from Role.
+    if (!hasRole) {
+      employeeRate = selectedEmployeeData.external_bill_rate || 0;
+    }
+
     if (!currenciesMatch) {
       employeeCost = convertCurrency(employeeCost, employeeCurrency, currency);
       if (!Number.isFinite(employeeCost)) {
         return;
       }
+      if (!hasRole) {
+        employeeRate = convertCurrency(employeeRate, employeeCurrency, currency);
+        if (!Number.isFinite(employeeRate)) {
+          return;
+        }
+      }
     }
 
     const newCost = parseFloat(employeeCost.toFixed(2)).toString();
+    const newRate = !hasRole ? parseFloat(employeeRate.toFixed(2)).toString() : rateValue;
 
-    // Always update cost from employee (don't check if changed, as it should update when employee changes)
     setCostValue(newCost);
-    // Trigger save - only cost, NOT rate (use original value from lineItem)
     handleFieldUpdate("cost", newCost, lineItem.cost || "0");
+
+    if (!hasRole && newRate !== rateValue) {
+      setRateValue(newRate);
+      handleFieldUpdate("rate", newRate, lineItem.rate || "0");
+    }
 
     prevEmployeeRef.current = employeeValue;
   }, [
     employeeValue,
     roleValue,
+    rateValue,
     opportunityDeliveryCenterId,
     invoiceCenterDefaultCurrency,
     currency,
@@ -884,8 +871,7 @@ export function EstimateLineItemRow({
     const startDate = parseLocalDate(startDateValue);
     const endDate = parseLocalDate(endDateValue);
 
-    // Only update if within date range
-    if (weekDate < startDate || weekDate > endDate) {
+    if (!weekColumnOverlapsLineRange(weekDate, startDate, endDate)) {
       return;
     }
 
@@ -985,10 +971,10 @@ export function EstimateLineItemRow({
                 newRoleId,
                 lineItemRoleId: lineItem.role_id,
               });
-              // Set flag immediately to prevent sync effect from reverting the change
-              isUpdatingRoleIdRef.current = true;
               setRoleValue(newRoleId);
-              handleFieldUpdate("role_id", newRoleId, lineItem.role_id);
+              if (!readOnly) {
+                handleFieldUpdate("role_id", newRoleId, lineItem.role_id ?? "");
+              }
             }}
             className="text-xs h-7 w-full"
           >
@@ -1036,7 +1022,11 @@ export function EstimateLineItemRow({
               value={costValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setCostValue(e.target.value);
-                handleFieldUpdate("cost", e.target.value, lineItem.cost || "0");
+              }}
+              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                if (!readOnly && e.target.value !== (lineItem.cost || "0")) {
+                  handleFieldUpdate("cost", e.target.value, lineItem.cost || "0");
+                }
               }}
               placeholder="Auto"
               className="text-xs h-7 flex-1"
@@ -1054,7 +1044,11 @@ export function EstimateLineItemRow({
               value={rateValue}
               onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
                 setRateValue(e.target.value);
-                handleFieldUpdate("rate", e.target.value, lineItem.rate || "0");
+              }}
+              onBlur={(e: React.FocusEvent<HTMLInputElement>) => {
+                if (!readOnly && e.target.value !== (lineItem.rate || "0")) {
+                  handleFieldUpdate("rate", e.target.value, lineItem.rate || "0");
+                }
               }}
               placeholder="Auto"
               className="text-xs h-7 flex-1"
@@ -1160,12 +1154,13 @@ export function EstimateLineItemRow({
         <td className="border border-gray-300 px-2 py-1 text-xs text-center">
           <input
             type="checkbox"
-            checked={billableValue}
+            checked={!invoiceCustomer ? false : billableValue}
             onChange={(e: React.ChangeEvent<HTMLInputElement>) => {
               const newValue = e.target.checked;
               setBillableValue(newValue);
               handleFieldUpdate("billable", newValue ? "true" : "false", String(lineItem.billable ?? true));
             }}
+            disabled={readOnly || !invoiceCustomer}
             className="h-4 w-4"
           />
         </td>

@@ -93,6 +93,19 @@ class StaffingForecastService:
             delivery_center_id=delivery_center_id,
             employee_id=employee_id,
         )
+
+        def _week_in_employee_tenure(week_date: date, ranges: dict) -> bool:
+            """True if week_start falls on or after start_date and on or before end_date (when set)."""
+            emp_start = ranges.get("emp_start")
+            emp_end = ranges.get("emp_end")
+            if not emp_start:
+                return False
+            if week_date < emp_start:
+                return False
+            if emp_end is not None and week_date > emp_end:
+                return False
+            return True
+
         holiday_by_dc_week, pto_by_emp_week = await self.repo.fetch_holiday_and_pto_hours(
             start_week=start_week,
             end_week=end_week,
@@ -197,7 +210,12 @@ class StaffingForecastService:
 
             row_defs[row_key] = row_def
 
-            week_key = row["week_start"].isoformat() if hasattr(row["week_start"], "isoformat") else str(row["week_start"])
+            ws = row["week_start"]
+            week_key = ws.isoformat() if hasattr(ws, "isoformat") else str(ws)
+            week_date = ws if isinstance(ws, date) else date.fromisoformat(str(ws))
+            if emp_id and emp_name and not _week_in_employee_tenure(week_date, utilization_ranges.get(emp_id, {})):
+                continue
+
             hours_val = row.get("hours_weighted", 0)
             if "revenue" in row and "cost_amount" in row:
                 revenue_val = row["revenue"]
@@ -326,18 +344,8 @@ class StaffingForecastService:
                             "billable_utilization_pct": None,
                         }
 
-        # Compute billable_utilization_pct only for weeks in scope (employee or engagement/estimate date range)
-        def _week_in_utilization_scope(week_date: date, ranges: dict) -> bool:
-            emp_start = ranges.get("emp_start")
-            emp_end = ranges.get("emp_end")
-            line_ranges = ranges.get("line_item_ranges", [])
-            if emp_start and week_date >= emp_start and (emp_end is None or week_date <= emp_end):
-                return True
-            for (s, e) in line_ranges:
-                if week_date >= s and week_date <= e:
-                    return True
-            return False
-
+        # Billable utilization % and billable/available hours; Hours/Margin for employee rows are already
+        # filtered at merge time — clear out-of-tenure cells (placeholders and edge cases).
         AVAILABLE_PER_WEEK = 40.0
         for rk, week_cells in cells.items():
             if not rk.startswith("emp|"):
@@ -345,16 +353,18 @@ class StaffingForecastService:
                     c["billable_utilization_pct"] = None
                 continue
             parts = rk.split("|")
-            if len(parts) < 4:
+            if len(parts) < 3:
                 for c in week_cells.values():
                     c["billable_utilization_pct"] = None
                 continue
-            emp_id, dc_id = parts[1], parts[3]
+            emp_id, dc_id = parts[1], parts[-1]
             ranges = utilization_ranges.get(emp_id, {})
             for wk, c in week_cells.items():
                 week_date = date.fromisoformat(wk)
-                if not _week_in_utilization_scope(week_date, ranges):
+                if not _week_in_employee_tenure(week_date, ranges):
                     c["billable_utilization_pct"] = None
+                    c["billable_hours"] = None
+                    c["available_hours"] = None
                     c["hours"] = None
                     c["revenue"] = None
                     c["cost"] = None
@@ -433,11 +443,11 @@ class StaffingForecastService:
 
                     if rk.startswith("emp|"):
                         parts = rk.split("|")
-                        if len(parts) >= 4:
-                            emp_id, dc_id = parts[1], parts[3]
+                        if len(parts) >= 3:
+                            emp_id, dc_id = parts[1], parts[-1]
                             ranges = utilization_ranges.get(emp_id, {})
                             week_date = date.fromisoformat(wk)
-                            if _week_in_utilization_scope(week_date, ranges):
+                            if _week_in_employee_tenure(week_date, ranges):
                                 billable_h = _billable_hours_for_util(emp_id, dc_id, wk)
                                 holiday_h = holiday_by_dc_week.get((dc_id, wk), 0.0)
                                 pto_h = pto_by_emp_week.get((emp_id, wk), 0.0)

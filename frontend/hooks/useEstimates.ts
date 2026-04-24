@@ -323,10 +323,6 @@ export function useUpdateLineItem(
         queryClient.invalidateQueries({
           queryKey: QUERY_KEYS.totals(variables.estimateId),
         });
-        // Invalidate opportunities since line items affect opportunity employee relationships
-        queryClient.invalidateQueries({
-          queryKey: ["opportunities"],
-        });
       }, 100);
     },
     ...options,

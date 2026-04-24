@@ -10,6 +10,10 @@ import { Button } from "@/components/ui/button";
 import { useExportEstimateExcel, useImportEstimateExcel, useEstimateDetail } from "@/hooks/useEstimates";
 import { useCurrencyRates } from "@/hooks/useCurrencyRates";
 import { setCurrencyRates } from "@/lib/utils/currency";
+import {
+  DEFAULT_DRAFT_ROW_COUNT,
+  spreadsheetDraftRowStableId,
+} from "@/lib/utils/spreadsheet-draft-rows";
 
 interface EstimateSpreadsheetProps {
   estimate: EstimateDetailResponse;
@@ -43,7 +47,8 @@ export function EstimateSpreadsheet({
   }, [currencyRatesData]);
 
   const [zoomLevel, setZoomLevel] = useState(100); // Percentage zoom
-  const [emptyRowsCount, setEmptyRowsCount] = useState(20); // Dynamic empty rows count
+  /** Trailing draft row slots (Excel-style: at least one new row; + Add Row appends more). */
+  const [draftRowCount, setDraftRowCount] = useState(DEFAULT_DRAFT_ROW_COUNT);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const exportExcel = useExportEstimateExcel({
     onSuccess: (blob) => {
@@ -83,14 +88,6 @@ export function EstimateSpreadsheet({
     refetchOnMount: "always",
     staleTime: 0,
   });
-  const [emptyRowIds] = useState<Set<string>>(() => {
-    // Generate stable IDs for empty rows that persist across refetches
-    const ids = new Set<string>();
-    for (let i = 0; i < 100; i++) {
-      ids.add(`empty-row-${i}`);
-    }
-    return ids;
-  });
   // Context menu state reserved for future functionality
   const [, setContextMenu] = useState<{
     x: number;
@@ -109,10 +106,7 @@ export function EstimateSpreadsheet({
       .filter(item => item && item.id) // Ensure item exists and has an ID
       .sort((a, b) => (a.row_order || 0) - (b.row_order || 0));
   }, [estimate.line_items]);
-  // Calculate empty rows needed - maintain a minimum number of empty rows
-  // When items are created, we don't want to immediately add a new empty row
-  // So we show empty rows based on the initial count, not dynamically adding more
-  const emptyRowsNeeded = Math.max(0, emptyRowsCount - existingLineItems.length);
+  // Draft rows are not subtracted from line item count: they always render after all saved lines
   
   const handleContextMenu = (e: React.MouseEvent, rowIndex: number) => {
     e.preventDefault();
@@ -608,10 +602,8 @@ export function EstimateSpreadsheet({
                     readOnly={readOnly}
                   />
                 ))}
-                {Array.from({ length: emptyRowsNeeded }).map((_, index) => {
-                  // Use stable ID from the set to prevent remounting on refetch
-                  const stableIdArray = Array.from(emptyRowIds);
-                  const stableId = stableIdArray[index] || `empty-row-${index}`;
+                {Array.from({ length: draftRowCount }).map((_, index) => {
+                  const stableId = spreadsheetDraftRowStableId(index);
                   return (
                     <EstimateEmptyRow
                       key={stableId}
@@ -642,7 +634,7 @@ export function EstimateSpreadsheet({
                 <tr>
                   <td colSpan={12 + weeks.length + 5} className="border border-gray-300 px-2 py-2 text-center">
                     <button
-                      onClick={() => setEmptyRowsCount(emptyRowsCount + 1)}
+                      onClick={() => setDraftRowCount((c) => c + 1)}
                       className="text-sm text-blue-600 hover:underline"
                     >
                       + Add Row

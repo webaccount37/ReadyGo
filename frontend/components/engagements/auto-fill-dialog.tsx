@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { logResourcePlanServerCall } from "@/lib/engagement-resource-plan-server-log";
 import { useAutoFillHours } from "@/hooks/useEngagements";
 import type { EngagementLineItem, AutoFillPattern } from "@/types/engagement";
 
@@ -65,6 +66,12 @@ export function EngagementAutoFillDialog({
     }
 
     try {
+      logResourcePlanServerCall("autoFillHours", "autoFillDialog: user submitted pattern", {
+        engagementId: lineItem.engagement_id,
+        lineItemId: lineItem.id,
+        pattern: request.pattern,
+        request,
+      });
       await autoFillHours.mutateAsync({
         engagementId: lineItem.engagement_id,
         lineItemId: lineItem.id,

@@ -5,7 +5,8 @@ Timesheet service with business logic.
 import logging
 from datetime import date, timedelta, datetime
 from decimal import Decimal
-from typing import List, Optional, Tuple
+import uuid
+from typing import Dict, List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,7 +31,7 @@ from app.models.timesheet import (
     TimesheetEntryType,
     HOLIDAY_DISMISSED_SENTINEL,
 )
-from app.models.engagement import EngagementLineItem, EngagementPhase, EngagementWeeklyHours
+from app.models.engagement import Engagement, EngagementLineItem, EngagementPhase, EngagementWeeklyHours
 from app.models.employee import Employee, EmployeeStatus
 from app.models.quote import InvoiceDetail
 from app.utils.currency_converter import convert_currency
@@ -79,6 +80,20 @@ class TimesheetService(BaseService):
         self.engagement_repo = EngagementRepository(session)
         self.quote_repo = QuoteRepository(session)
         self.calendar_repo = CalendarRepository(session)
+
+    async def _engagement_for_line_item(
+        self,
+        line_item: EngagementLineItem,
+        cache: Dict[UUID, Engagement],
+    ) -> Optional[Engagement]:
+        """Load engagement (phases + opportunity) with per-request cache; uses get, not get_with_line_items."""
+        eid = line_item.engagement_id
+        if eid in cache:
+            return cache[eid]
+        eng = await self.engagement_repo.get(eid)
+        if eng:
+            cache[eid] = eng
+        return eng
 
     async def get_or_create_timesheet(
         self,
@@ -231,13 +246,22 @@ class TimesheetService(BaseService):
         future_weeks: int = 52,
     ) -> None:
         """Sync an engagement to all relevant timesheets (NOT_SUBMITTED/REOPENED only).
-        
-        When an engagement is created or changed, adds timesheet entries for employees
+
+        When an engagement is created or changes, adds timesheet entries for employees
         on that engagement for overlapping weeks. Skips APPROVED and INVOICED timesheets.
         """
         line_items = await self.line_item_repo.list_by_engagement(engagement_id)
         if not line_items:
             return
+        engagement = await self.engagement_repo.get(engagement_id)
+        if not engagement or not engagement.opportunity:
+            return
+        li_ids = [li.id for li in line_items]
+        all_ewh = await self.weekly_hours_repo.list_by_engagement_line_item_ids(li_ids)
+        plan_index: Dict[Tuple[UUID, date], Decimal] = {}
+        for ewh in all_ewh:
+            plan_index[(ewh.engagement_line_item_id, ewh.week_start_date)] = Decimal(str(ewh.hours))
+        engagement_cache: Dict[UUID, Engagement] = {engagement_id: engagement}
 
         today = date.today()
         end_of_current_week = _get_week_start(today) + timedelta(days=6)
@@ -251,39 +275,48 @@ class TimesheetService(BaseService):
             end_date = line_item.end_date or end_of_current_week
             if end_date > future_cutoff:
                 end_date = future_cutoff
-
             week_start = _get_week_start(start_date)
             week_end = week_start + timedelta(days=6)
             while week_start <= end_date:
                 if week_end >= start_date:
-                    key = (line_item.employee_id, week_start)
-                    if key not in seen:
-                        seen.add(key)
-                        timesheet = await self.timesheet_repo.get_by_employee_and_week(
-                            line_item.employee_id, week_start
-                        )
-                        if not timesheet:
-                            timesheet = await self.timesheet_repo.create(
-                                employee_id=line_item.employee_id,
-                                week_start_date=week_start,
-                                status=TimesheetStatus.NOT_SUBMITTED,
-                            )
-                            await self._default_entries_from_resource_plan(timesheet)
-                            await self._add_holiday_entries(timesheet)
-                        elif timesheet.status in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
-                            await self._add_missing_engagement_entries(timesheet)
+                    seen.add((line_item.employee_id, week_start))
                 week_start += timedelta(days=7)
                 week_end = week_start + timedelta(days=6)
+        if not seen:
+            return
+        keys = list(seen)
+        existing_ts = await self.timesheet_repo.list_by_employee_week_keys(keys)
+        timesheet_by_key = {(t.employee_id, t.week_start_date): t for t in existing_ts}
+        for emp_id, week_start in keys:
+            timesheet = timesheet_by_key.get((emp_id, week_start))
+            if not timesheet:
+                timesheet = await self.timesheet_repo.create(
+                    employee_id=emp_id,
+                    week_start_date=week_start,
+                    status=TimesheetStatus.NOT_SUBMITTED,
+                )
+                await self._default_entries_from_resource_plan(
+                    timesheet,
+                    plan_hours_by_line_and_week=plan_index,
+                    engagement_cache=engagement_cache,
+                )
+                await self._add_holiday_entries(timesheet)
+            elif timesheet.status in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
+                await self._add_missing_engagement_entries(
+                    timesheet,
+                    plan_hours_by_line_and_week=plan_index,
+                    engagement_cache=engagement_cache,
+                )
+        await self.session.commit()
+        logger.info("Synced engagement %s to %d timesheet(s)", engagement_id, len(seen))
 
-        if seen:
-            await self.session.commit()
-            logger.info(
-                "Synced engagement %s to %d timesheet(s)",
-                engagement_id,
-                len(seen),
-            )
-
-    async def _add_missing_engagement_entries(self, timesheet: Timesheet) -> None:
+    async def _add_missing_engagement_entries(
+        self,
+        timesheet: Timesheet,
+        *,
+        plan_hours_by_line_and_week: Optional[Dict[Tuple[UUID, date], Decimal]] = None,
+        engagement_cache: Optional[Dict[UUID, Engagement]] = None,
+    ) -> None:
         """Add timesheet entries for engagement line items that don't already have an entry.
         Only affects NOT_SUBMITTED/REOPENED timesheets. Uses resource plan hours.
         Skips line items that the user has permanently dismissed."""
@@ -293,7 +326,7 @@ class TimesheetService(BaseService):
         )
         if not line_items:
             return
-
+        cache: Dict[UUID, Engagement] = engagement_cache if engagement_cache is not None else {}
         dismissed = await self.dismissed_repo.list_dismissed_keys(timesheet.id)
         existing_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
         existing_line_item_ids = {
@@ -301,50 +334,55 @@ class TimesheetService(BaseService):
         }
         max_row = max((e.row_order for e in existing_entries), default=-1)
 
-        rows_with_hours = []
+        rows_with_hours: List[Tuple[EngagementLineItem, Decimal]] = []
         for li in line_items:
             if li.id in dismissed or li.id in existing_line_item_ids:
                 continue
-            plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(li.id, week_start)
-            h = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
+            if plan_hours_by_line_and_week is not None:
+                h = plan_hours_by_line_and_week.get((li.id, week_start), Decimal("0"))
+            else:
+                plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(li.id, week_start)
+                h = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
             if h > 0:
                 rows_with_hours.append((li, h))
-            # Skip 0-hour engagements - user must add manually via Add Row
 
-        sorted_rows = rows_with_hours
-        for line_item, plan_weekly_hours in sorted_rows:
-            engagement = await self.engagement_repo.get_with_line_items(line_item.engagement_id)
-            if not engagement or not engagement.opportunity:
+        new_entries: List[TimesheetEntry] = []
+        for line_item, plan_weekly_hours in rows_with_hours:
+            eng = await self._engagement_for_line_item(line_item, cache)
+            if not eng or not eng.opportunity:
                 continue
-            account_id = engagement.opportunity.account_id
+            account_id = eng.opportunity.account_id
             week_end = week_start + timedelta(days=6)
             overlapping_phases = [
                 p
-                for p in (engagement.phases or [])
+                for p in (eng.phases or [])
                 if p.start_date <= week_end and p.end_date >= week_start
             ]
             phase = min(overlapping_phases, key=lambda p: p.start_date) if overlapping_phases else None
             sun, mon, tue, wed, thu, fri, sat = _distribute_weekly_to_weekdays(plan_weekly_hours)
             max_row += 1
-            await self.entry_repo.create(
-                timesheet_id=timesheet.id,
-                row_order=max_row,
-                entry_type=TimesheetEntryType.ENGAGEMENT,
-                account_id=account_id,
-                engagement_id=line_item.engagement_id,
-                opportunity_id=engagement.opportunity_id,
-                engagement_line_item_id=line_item.id,
-                engagement_phase_id=phase.id if phase else None,
-                billable=line_item.billable,
-                sun_hours=sun,
-                mon_hours=mon,
-                tue_hours=tue,
-                wed_hours=wed,
-                thu_hours=thu,
-                fri_hours=fri,
-                sat_hours=sat,
+            new_entries.append(
+                TimesheetEntry(
+                    id=uuid.uuid4(),
+                    timesheet_id=timesheet.id,
+                    row_order=max_row,
+                    entry_type=TimesheetEntryType.ENGAGEMENT,
+                    account_id=account_id,
+                    engagement_id=line_item.engagement_id,
+                    opportunity_id=eng.opportunity_id,
+                    engagement_line_item_id=line_item.id,
+                    engagement_phase_id=phase.id if phase else None,
+                    billable=line_item.billable,
+                    sun_hours=sun,
+                    mon_hours=mon,
+                    tue_hours=tue,
+                    wed_hours=wed,
+                    thu_hours=thu,
+                    fri_hours=fri,
+                    sat_hours=sat,
+                )
             )
-        await self.session.flush()
+        await self.entry_repo.add_all_with_flush(new_entries)
 
     async def _refresh_entry_hours_from_plan(self, timesheet: Timesheet) -> None:
         """Sync timesheet entry hours from resource plan. Updates entries to match plan.
@@ -375,7 +413,13 @@ class TimesheetService(BaseService):
             )
         await self.session.flush()
 
-    async def _default_entries_from_resource_plan(self, timesheet: Timesheet) -> None:
+    async def _default_entries_from_resource_plan(
+        self,
+        timesheet: Timesheet,
+        *,
+        plan_hours_by_line_and_week: Optional[Dict[Tuple[UUID, date], Decimal]] = None,
+        engagement_cache: Optional[Dict[UUID, Engagement]] = None,
+    ) -> None:
         """Populate timesheet entries from engagement resource plan."""
         week_start = timesheet.week_start_date
         line_items = await self.line_item_repo.list_by_employee_and_week(
@@ -383,26 +427,24 @@ class TimesheetService(BaseService):
         )
         if not line_items:
             return
+        cache: Dict[UUID, Engagement] = engagement_cache if engagement_cache is not None else {}
 
-        # Only include engagements with plan hours > 0 for this week
-        rows_with_hours = []
+        rows_with_hours: List[Tuple[EngagementLineItem, Decimal]] = []
         for li in line_items:
-            plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(li.id, week_start)
-            h = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
+            if plan_hours_by_line_and_week is not None:
+                h = plan_hours_by_line_and_week.get((li.id, week_start), Decimal("0"))
+            else:
+                plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(li.id, week_start)
+                h = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
             if h > 0:
                 rows_with_hours.append((li, h))
-            # Skip 0-hour engagements - user must add manually via Add Row
 
-        sorted_rows = rows_with_hours
-
-        # Get engagement + phases for each line item
-        for row_order, (line_item, plan_weekly_hours) in enumerate(sorted_rows):
-            engagement = await self.engagement_repo.get_with_line_items(line_item.engagement_id)
+        new_entries: List[TimesheetEntry] = []
+        for row_order, (line_item, plan_weekly_hours) in enumerate(rows_with_hours):
+            engagement = await self._engagement_for_line_item(line_item, cache)
             if not engagement or not engagement.opportunity:
                 continue
             account_id = engagement.opportunity.account_id
-
-            # Phase: overlap with week, pick earliest start_date
             week_end = week_start + timedelta(days=6)
             overlapping_phases = [
                 p
@@ -412,28 +454,29 @@ class TimesheetService(BaseService):
             phase = None
             if overlapping_phases:
                 phase = min(overlapping_phases, key=lambda p: p.start_date)
-
             sun, mon, tue, wed, thu, fri, sat = _distribute_weekly_to_weekdays(plan_weekly_hours)
-
-            await self.entry_repo.create(
-                timesheet_id=timesheet.id,
-                row_order=row_order,
-                entry_type=TimesheetEntryType.ENGAGEMENT,
-                account_id=account_id,
-                engagement_id=line_item.engagement_id,
-                opportunity_id=engagement.opportunity_id,
-                engagement_line_item_id=line_item.id,
-                engagement_phase_id=phase.id if phase else None,
-                billable=line_item.billable,
-                sun_hours=sun,
-                mon_hours=mon,
-                tue_hours=tue,
-                wed_hours=wed,
-                thu_hours=thu,
-                fri_hours=fri,
-                sat_hours=sat,
+            new_entries.append(
+                TimesheetEntry(
+                    id=uuid.uuid4(),
+                    timesheet_id=timesheet.id,
+                    row_order=row_order,
+                    entry_type=TimesheetEntryType.ENGAGEMENT,
+                    account_id=account_id,
+                    engagement_id=line_item.engagement_id,
+                    opportunity_id=engagement.opportunity_id,
+                    engagement_line_item_id=line_item.id,
+                    engagement_phase_id=phase.id if phase else None,
+                    billable=line_item.billable,
+                    sun_hours=sun,
+                    mon_hours=mon,
+                    tue_hours=tue,
+                    wed_hours=wed,
+                    thu_hours=thu,
+                    fri_hours=fri,
+                    sat_hours=sat,
+                )
             )
-        await self.session.flush()
+        await self.entry_repo.add_all_with_flush(new_entries)
 
     async def _add_holiday_entries(
         self, timesheet: Timesheet, ignore_dismissed: bool = False
@@ -1081,4 +1124,26 @@ class TimesheetService(BaseService):
         end_date = this_sunday + timedelta(weeks=future_weeks)
         return await self.timesheet_repo.get_week_statuses(
             employee_id, start_date, end_date
+        )
+
+
+async def run_engagement_timesheet_sync_job(engagement_id: UUID) -> None:
+    """Run sync_engagement_to_timesheets in a fresh session.
+
+    Use from FastAPI BackgroundTasks or asyncio.create_task so the HTTP request returns
+    immediately after the engagement/line data is committed; full timesheet fan-out can
+    touch thousands of rows and exceed client/proxy timeouts.
+    """
+    from app.db.session import async_session_maker, create_sessionmaker
+
+    if async_session_maker is None:
+        create_sessionmaker()
+    try:
+        async with async_session_maker() as session:
+            svc = TimesheetService(session)
+            await svc.sync_engagement_to_timesheets(engagement_id)
+    except Exception:
+        logger.exception(
+            "Background sync_engagement_to_timesheets failed for engagement %s",
+            engagement_id,
         )

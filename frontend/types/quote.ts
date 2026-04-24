@@ -87,6 +87,8 @@ export interface Quote {
   snapshot_data?: Record<string, unknown>;
   opportunity_name?: string;
   estimate_name?: string;
+  account_name?: string | null;
+  linked_engagement_id?: string | null;
   quote_type?: QuoteType;
   target_amount?: string;
   rate_billing_unit?: RateBillingUnit;
@@ -94,6 +96,8 @@ export interface Quote {
   invoice_detail?: InvoiceDetail;
   cap_type?: CapType;
   cap_amount?: string;
+  /** Set when a new engagement is created (e.g. status ACCEPTED). */
+  created_engagement_id?: string | null;
   line_items?: QuoteLineItem[];
   phases?: QuotePhase[];
   payment_triggers?: PaymentTrigger[];
