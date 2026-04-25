@@ -59,9 +59,9 @@ class TimesheetEntry(Base):
     row_order = Column(Integer, nullable=False, default=0)
     
     entry_type = Column(SQLEnum(TimesheetEntryType), nullable=False, default=TimesheetEntryType.ENGAGEMENT)
-    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True)  # Null for Holiday rows (use account_display_name)
-    account_display_name = Column(String(255), nullable=True)  # Display-only for Holiday: "Ready"
-    engagement_display_name = Column(String(255), nullable=True)  # Display-only for Holiday: "PTO"
+    account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True, index=True)  # HOLIDAY: internal account when INTERNAL_COMPANY_ACCOUNT_ID is set
+    account_display_name = Column(String(255), nullable=True)  # HOLIDAY: display "Ready" when useful for UI/legacy
+    engagement_display_name = Column(String(255), nullable=True)  # HOLIDAY: display "PTO" when useful for UI/legacy
     engagement_id = Column(UUID(as_uuid=True), ForeignKey("engagements.id"), nullable=True, index=True)
     opportunity_id = Column(UUID(as_uuid=True), ForeignKey("opportunities.id"), nullable=True, index=True)
     engagement_line_item_id = Column(UUID(as_uuid=True), ForeignKey("engagement_line_items.id"), nullable=True, index=True)

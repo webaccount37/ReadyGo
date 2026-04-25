@@ -97,6 +97,27 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         await self.session.refresh(timesheet)
         return timesheet
 
+    async def list_open_by_delivery_center_and_week_starts(
+        self,
+        delivery_center_id: UUID,
+        week_starts: List[date],
+    ) -> List[Timesheet]:
+        """NOT_SUBMITTED/REOPENED timesheets whose week_start_date is in week_starts for employees at DC."""
+        if not week_starts:
+            return []
+        from app.models.employee import Employee
+
+        result = await self.session.execute(
+            select(Timesheet).where(
+                Timesheet.status.in_((TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED)),
+                Timesheet.week_start_date.in_(week_starts),
+                Timesheet.employee_id.in_(
+                    select(Employee.id).where(Employee.delivery_center_id == delivery_center_id)
+                ),
+            )
+        )
+        return list(result.scalars().all())
+
     async def create(self, **kwargs) -> Timesheet:
         """Create a new timesheet."""
         instance = Timesheet(**kwargs)

@@ -120,9 +120,9 @@ class TimesheetEntryResponse(TimesheetDayHours):
     timesheet_id: UUID
     row_order: int
     entry_type: str
-    account_id: Optional[UUID] = None  # Null for Holiday rows (use account_display_name)
-    account_display_name: Optional[str] = None  # Display-only for Holiday: "Ready"
-    engagement_display_name: Optional[str] = None  # Display-only for Holiday: "PTO"
+    account_id: Optional[UUID] = None  # HOLIDAY: internal company account when configured
+    account_display_name: Optional[str] = None  # HOLIDAY: "Ready" (supplemental)
+    engagement_display_name: Optional[str] = None  # HOLIDAY: "PTO" (supplemental)
     is_holiday_row: bool = False
     engagement_id: Optional[UUID] = None
     opportunity_id: Optional[UUID] = None

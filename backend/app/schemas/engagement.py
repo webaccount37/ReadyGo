@@ -186,7 +186,10 @@ class EngagementResponse(EngagementBase):
     actuals_amount: Optional[Decimal] = None  # Actuals from approved timesheets (for list view)
     revenue_deviation_percentage: Optional[Decimal] = None  # Quote vs Plan % (for list view)
     plan_vs_actuals_revenue_deviation_percentage: Optional[Decimal] = None  # Plan vs Actuals % (for list view)
-    
+    # Populated when listing engagements filtered by employee (timesheet project picker)
+    timesheet_employee_line_item_id: Optional[UUID] = None
+    timesheet_employee_line_item_billable: Optional[bool] = None
+
     class Config:
         from_attributes = True
 

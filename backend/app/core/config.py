@@ -7,7 +7,8 @@ from pathlib import Path
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Optional
+from uuid import UUID
 import json
 
 # backend/app/core/config.py -> parents[2] == backend/
@@ -29,6 +30,16 @@ class Settings(BaseSettings):
     VERSION: str = "0.1.0"
     API_V1_PREFIX: str = "/api/v1"
     
+    # Internal company account (e.g. "Ready") — used to link HOLIDAY timesheet rows to real CRM rows
+    INTERNAL_COMPANY_ACCOUNT_ID: Optional[UUID] = None
+
+    @field_validator("INTERNAL_COMPANY_ACCOUNT_ID", mode="before")
+    @classmethod
+    def parse_internal_company_account_id(cls, v):
+        if v is None or v == "":
+            return None
+        return v
+
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/readygo"
     

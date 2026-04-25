@@ -59,6 +59,8 @@ services:
         condition: service_healthy
     volumes:
       - ../backend:/app
+      # Calendar Excel sync: `docker compose exec backend python -m scripts.sync_calendars_from_uploads --uploads-dir /uploads --execute`
+      - ../uploads:/uploads:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Frontend: put NEXT_PUBLIC_AZURE_* in ../frontend/.env.local — it is included in the build

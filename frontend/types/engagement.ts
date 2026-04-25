@@ -85,6 +85,9 @@ export interface Engagement {
   actuals_amount?: string | number;
   revenue_deviation_percentage?: string | number;
   plan_vs_actuals_revenue_deviation_percentage?: string | number;
+  /** Set when listing engagements by employee (timesheet project picker) */
+  timesheet_employee_line_item_id?: string;
+  timesheet_employee_line_item_billable?: boolean;
 }
 
 export interface EngagementTimesheetApprover {

@@ -49,6 +49,25 @@ from app.schemas.engagement import (
 )
 
 
+def pick_timesheet_line_item_for_employee(
+    engagement: Engagement,
+    employee_id: UUID,
+    week_start_date: Optional[date],
+) -> tuple[Optional[UUID], Optional[bool]]:
+    """Pick this employee's resource-plan line on the engagement for timesheet linking (optional week overlap)."""
+    items = [li for li in (engagement.line_items or []) if li.employee_id == employee_id]
+    if not items:
+        return None, None
+    if week_start_date is not None:
+        week_end = week_start_date + timedelta(days=6)
+        items = [li for li in items if li.start_date <= week_end and li.end_date >= week_start_date]
+    if not items:
+        return None, None
+    items.sort(key=lambda x: x.row_order if x.row_order is not None else 0)
+    li = items[0]
+    return li.id, li.billable
+
+
 class EngagementService(BaseService):
     """Service for engagement operations."""
     
@@ -858,6 +877,15 @@ class EngagementService(BaseService):
             base_dict["actuals_amount"] = actuals_summary.get("total_revenue")
             base_dict["revenue_deviation_percentage"] = comparative.revenue_deviation_percentage
             base_dict["plan_vs_actuals_revenue_deviation_percentage"] = comparative.plan_vs_actuals_revenue_deviation_percentage
+            if employee_id and e.line_items:
+                li_id, li_billable = pick_timesheet_line_item_for_employee(
+                    e, employee_id, week_start_date
+                )
+                base_dict["timesheet_employee_line_item_id"] = li_id
+                base_dict["timesheet_employee_line_item_billable"] = li_billable
+            else:
+                base_dict["timesheet_employee_line_item_id"] = None
+                base_dict["timesheet_employee_line_item_billable"] = None
             responses.append(EngagementResponse(**base_dict))
         return responses, total
     

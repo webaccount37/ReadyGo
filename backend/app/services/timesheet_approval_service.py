@@ -59,6 +59,8 @@ class TimesheetApprovalService(BaseService):
         from app.models.engagement import Engagement
 
         for entry in timesheet.entries or []:
+            if entry.entry_type == TimesheetEntryType.HOLIDAY:
+                continue
             if not entry.engagement_id:
                 continue
             eng = self.session.get(Engagement, entry.engagement_id)
@@ -86,9 +88,12 @@ class TimesheetApprovalService(BaseService):
         labels: set[str] = set()
         for e in ts.entries or []:
             if e.entry_type == TimesheetEntryType.HOLIDAY:
-                label = e.engagement_display_name or e.account_display_name or "PTO"
-                if label:
-                    labels.add(label)
+                if e.engagement and getattr(e.engagement, "name", None):
+                    labels.add(e.engagement.name)
+                else:
+                    label = e.engagement_display_name or e.account_display_name or "PTO"
+                    if label:
+                        labels.add(label)
             elif e.entry_type == TimesheetEntryType.SALES:
                 if e.account and getattr(e.account, "company_name", None):
                     labels.add(e.account.company_name)
@@ -124,6 +129,8 @@ class TimesheetApprovalService(BaseService):
 
         # Snapshot cost/rate for each entry (Engagement type only)
         for entry in timesheet.entries or []:
+            if entry.entry_type == TimesheetEntryType.HOLIDAY:
+                continue
             if not entry.engagement_line_item_id or not entry.engagement_id:
                 continue
             line_item = await line_item_repo.get(entry.engagement_line_item_id)
@@ -178,6 +185,8 @@ class TimesheetApprovalService(BaseService):
         if not timesheet or not timesheet.entries:
             return
         for entry in timesheet.entries:
+            if entry.entry_type == TimesheetEntryType.HOLIDAY:
+                continue
             entry_total = sum(
                 Decimal(str(getattr(entry, f"{d}_hours") or 0))
                 for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
@@ -204,6 +213,8 @@ class TimesheetApprovalService(BaseService):
             return
         opp_ids = set()
         for entry in timesheet.entries:
+            if entry.entry_type == TimesheetEntryType.HOLIDAY:
+                continue
             entry_total = sum(
                 Decimal(str(getattr(entry, f"{d}_hours") or 0))
                 for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
@@ -232,6 +243,8 @@ class TimesheetApprovalService(BaseService):
             return
         opp_ids = set()
         for entry in timesheet.entries:
+            if entry.entry_type == TimesheetEntryType.HOLIDAY:
+                continue
             if entry.engagement_id:
                 eng = await self.engagement_repo.get(entry.engagement_id)
                 if eng:
@@ -250,6 +263,7 @@ class TimesheetApprovalService(BaseService):
                 .select_from(TimesheetEntry)
                 .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
                 .where(TimesheetEntry.engagement_id.in_(eng_ids_subq))
+                .where(TimesheetEntry.entry_type != TimesheetEntryType.HOLIDAY)
                 .where(Timesheet.status.in_(self.BLOCKING_STATUSES))
                 .where(hours_expr > 0)
             )

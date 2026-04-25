@@ -42,6 +42,7 @@ import { cn } from "@/lib/utils";
 import { FetchError } from "@/lib/fetchClient";
 import { WeekCarousel, getWeekStart, getWeekRange, formatWeekLabel } from "@/components/timesheets/week-carousel";
 import type { TimesheetEntry, TimesheetEntryUpsert } from "@/types/timesheet";
+import type { Opportunity } from "@/types/opportunity";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -778,6 +779,9 @@ interface EngagementItem {
   account_name?: string;
   opportunity_name?: string;
   name?: string;
+  opportunity_id?: string;
+  timesheet_employee_line_item_id?: string;
+  timesheet_employee_line_item_billable?: boolean;
 }
 
 function TimesheetEntryRow({
@@ -796,7 +800,7 @@ function TimesheetEntryRow({
   employeeId?: string;
   engagementsSource: EngagementItem[];
   accountsData?: { items?: { id: string; company_name?: string }[] };
-  opportunitiesData?: { items?: { id: string; name?: string; account_id?: string }[] };
+  opportunitiesData?: { items?: Opportunity[] };
   canEdit: boolean;
   weekRange: { start: Date; end: Date };
   onDelete?: () => void;
@@ -1008,10 +1012,13 @@ function TimesheetEntryRow({
               onChange={(e) => {
                 const oppId = e.target.value;
                 const opp = opportunitiesForAccount.find((o) => o.id === oppId);
+                const inv = opp?.invoice_customer;
                 onChange({
                   ...entry,
                   opportunity_id: oppId || undefined,
                   opportunity_name: opp?.name,
+                  billable:
+                    oppId && typeof inv === "boolean" ? inv : entry.billable,
                 });
               }}
               className="w-full max-w-[148px] rounded border-slate-200 text-xs py-1 h-7 min-h-0"
@@ -1047,11 +1054,17 @@ function TimesheetEntryRow({
               onChange={(e) => {
                 const engId = e.target.value;
                 const eng = projectsForEngagement.find((g) => g.id === engId);
+                const lineBillable = eng?.timesheet_employee_line_item_billable;
+                const billableFromPlan =
+                  typeof lineBillable === "boolean" ? lineBillable : entry.billable;
                 onChange({
                   ...entry,
                   engagement_id: engId || undefined,
+                  opportunity_id: eng?.opportunity_id || entry.opportunity_id,
+                  engagement_line_item_id: eng?.timesheet_employee_line_item_id || undefined,
                   opportunity_name: eng?.opportunity_name || eng?.name,
                   engagement_phase_id: undefined,
+                  billable: engId ? billableFromPlan : entry.billable,
                 });
               }}
               className="w-full max-w-[148px] rounded border-slate-200 text-xs py-1 h-7 min-h-0"
