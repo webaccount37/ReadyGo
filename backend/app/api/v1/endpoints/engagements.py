@@ -54,6 +54,10 @@ async def list_engagements(
         description="name, account, opportunity, quote, created_at",
     ),
     sort_order: str = Query("asc"),
+    include_financial_summary: bool = Query(
+        True,
+        description="When false, skip plan/actuals/comparative revenue summaries (faster for timesheet pickers).",
+    ),
     db: AsyncSession = Depends(get_db),
 ) -> EngagementListResponse:
     """List engagements with optional filters."""
@@ -68,6 +72,7 @@ async def list_engagements(
         search=search,
         sort_by=sort_by,
         sort_order=sort_order,
+        include_financial_summary=include_financial_summary,
     )
 
 

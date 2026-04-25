@@ -20,7 +20,8 @@ import type {
 const QUERY_KEYS = {
   all: ["timesheets"] as const,
   my: (week?: string) => [...QUERY_KEYS.all, "me", week] as const,
-  incompleteCount: () => [...QUERY_KEYS.all, "me", "incomplete-count"] as const,
+  /** Shared by incomplete count + weeks list (one API round-trip). */
+  incompleteSummary: () => [...QUERY_KEYS.all, "me", "incomplete-summary"] as const,
   weekStatuses: (params?: Record<string, unknown>) =>
     [...QUERY_KEYS.all, "me", "week-statuses", params] as const,
   detail: (id: string) => [...QUERY_KEYS.all, "detail", id] as const,
@@ -38,7 +39,8 @@ export function useMyTimesheet(
   return useQuery<Timesheet>({
     queryKey: QUERY_KEYS.my(week),
     queryFn: () => timesheetsApi.getMyTimesheet(week),
-    refetchOnMount: "always",
+    staleTime: 30_000,
+    refetchOnMount: false,
     ...options,
   });
 }
@@ -47,11 +49,13 @@ export function useMyTimesheet(
  * Get count of incomplete past weeks.
  */
 export function useTimesheetIncompleteCount(
-  options?: Omit<UseQueryOptions<{ count: number }>, "queryKey" | "queryFn">
+  options?: Omit<UseQueryOptions<{ count: number; weeks: string[] }, Error, { count: number }>, "queryKey" | "queryFn" | "select">
 ) {
-  return useQuery<{ count: number }>({
-    queryKey: QUERY_KEYS.incompleteCount(),
-    queryFn: () => timesheetsApi.getMyIncompleteCount(),
+  return useQuery({
+    queryKey: QUERY_KEYS.incompleteSummary(),
+    queryFn: () => timesheetsApi.getMyIncompleteSummary(52),
+    select: (data) => ({ count: data.count }),
+    staleTime: 60_000,
     ...options,
   });
 }
@@ -60,11 +64,16 @@ export function useTimesheetIncompleteCount(
  * List incomplete past weeks (for backlog banner).
  */
 export function useTimesheetIncompleteWeeks(
-  options?: Omit<UseQueryOptions<{ count: number; weeks: string[] }>, "queryKey" | "queryFn">
+  options?: Omit<
+    UseQueryOptions<{ count: number; weeks: string[] }, Error, { count: number; weeks: string[] }>,
+    "queryKey" | "queryFn" | "select"
+  >
 ) {
-  return useQuery<{ count: number; weeks: string[] }>({
-    queryKey: [...QUERY_KEYS.incompleteCount(), "weeks"] as const,
-    queryFn: () => timesheetsApi.getMyIncompleteWeeks(52),
+  return useQuery({
+    queryKey: QUERY_KEYS.incompleteSummary(),
+    queryFn: () => timesheetsApi.getMyIncompleteSummary(52),
+    select: (data) => ({ count: data.count, weeks: data.weeks }),
+    staleTime: 60_000,
     ...options,
   });
 }
@@ -79,6 +88,7 @@ export function useWeekStatuses(
   return useQuery<Record<string, string>>({
     queryKey: QUERY_KEYS.weekStatuses(params),
     queryFn: () => timesheetsApi.getMyWeekStatuses(params),
+    staleTime: 120_000,
     ...options,
   });
 }

@@ -57,6 +57,7 @@ export function useEngagements(
     search?: string;
     sort_by?: string;
     sort_order?: "asc" | "desc";
+    include_financial_summary?: boolean;
   },
   options?: Omit<UseQueryOptions<EngagementListResponse>, "queryKey" | "queryFn">
 ) {

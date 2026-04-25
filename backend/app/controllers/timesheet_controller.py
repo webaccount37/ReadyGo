@@ -74,9 +74,10 @@ class TimesheetController(BaseController):
         timesheet_id: UUID,
         current_employee_id: UUID,
         force: bool = False,
+        allow_short_week: bool = False,
     ) -> tuple[TimesheetResponse, Optional[str]]:
         return await self.timesheet_service.submit_timesheet(
-            timesheet_id, current_employee_id, force
+            timesheet_id, current_employee_id, force, allow_short_week
         )
 
     async def approve_timesheet(
@@ -154,6 +155,16 @@ class TimesheetController(BaseController):
     ) -> List[date]:
         return await self.timesheet_service.list_incomplete_past_weeks(
             employee_id, employee_start_date, limit
+        )
+
+    async def incomplete_past_weeks_snapshot(
+        self,
+        employee_id: UUID,
+        employee_start_date: date,
+        lookback_weeks: int = 52,
+    ) -> dict:
+        return await self.timesheet_service.incomplete_past_weeks_snapshot(
+            employee_id, employee_start_date, lookback_weeks
         )
 
     async def get_week_statuses(

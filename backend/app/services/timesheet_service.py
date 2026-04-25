@@ -1079,6 +1079,7 @@ class TimesheetService(BaseService):
         timesheet_id: UUID,
         current_employee_id: UUID,
         force: bool = False,
+        allow_short_week: bool = False,
     ) -> Tuple[TimesheetResponse, Optional[str]]:
         """Submit timesheet. Returns (response, warning_message).
         Submission is allowed for any week including before employee start_date; only incomplete
@@ -1134,7 +1135,7 @@ class TimesheetService(BaseService):
                         f"{name}: Plan {plan.hours}h vs Actual {entry_total}h"
                     )
 
-        if total < MIN_HOURS_TO_SUBMIT:
+        if total < MIN_HOURS_TO_SUBMIT and not allow_short_week:
             raise ValueError(f"Total hours must be at least {MIN_HOURS_TO_SUBMIT} to submit")
 
         if plan_vs_actual_warnings and not force:
@@ -1305,6 +1306,19 @@ class TimesheetService(BaseService):
         return await self.timesheet_repo.list_incomplete_past_weeks(
             employee_id, today, employee_start_date, limit
         )
+
+    async def incomplete_past_weeks_snapshot(
+        self,
+        employee_id: UUID,
+        employee_start_date: date,
+        lookback_weeks: int = 52,
+    ) -> dict:
+        """Single DB round-trip for backlog count + week list (matches 52-week lookback semantics)."""
+        today = date.today()
+        count, weeks = await self.timesheet_repo.incomplete_past_weeks_snapshot(
+            employee_id, today, employee_start_date, lookback_weeks
+        )
+        return {"count": count, "weeks": [w.isoformat() for w in weeks]}
 
     async def get_week_statuses(
         self,

@@ -7,9 +7,6 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/useAuth";
 import { useTimesheetIncompleteCount } from "@/hooks/useTimesheets";
-import { useAccounts } from "@/hooks/useAccounts";
-import { useOpportunities } from "@/hooks/useOpportunities";
-import { useEngagements } from "@/hooks/useEngagements";
 import { useTimesheetPendingApprovals } from "@/hooks/useTimesheets";
 import { useExpensePendingApprovals } from "@/hooks/useExpenses";
 import { useQuotesForApproval } from "@/hooks/useQuotes";
@@ -57,9 +54,6 @@ export function SidebarContent({ onNavigate }: SidebarContentProps) {
     { limit: 1 },
     { enabled: isAuthenticated }
   );
-  useAccounts({ limit: 500 }, { enabled: isAuthenticated });
-  useOpportunities({ limit: 500 }, { enabled: isAuthenticated });
-  useEngagements({ limit: 500 }, { enabled: isAuthenticated });
   const badgeCounts = {
     "timesheet-incomplete": incompleteData?.count ?? 0,
     "timesheet-pending": pendingData?.total ?? 0,

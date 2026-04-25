@@ -62,6 +62,9 @@ build/
 *.tsbuildinfo
 next-env.d.ts
 
+# Replicon migration cache (large CSV extracts)
+uploads/replicon_cache/
+
 # Testing
 .pytest_cache/
 .coverage

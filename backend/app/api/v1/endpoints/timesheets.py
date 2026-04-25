@@ -19,6 +19,7 @@ from app.schemas.timesheet import (
     TimesheetApprovalListResponse,
     RejectTimesheetRequest,
     ManageableEmployeesResponse,
+    IncompleteWeeksSnapshot,
 )
 
 router = APIRouter()
@@ -83,6 +84,20 @@ async def get_my_incomplete_weeks(
     return {"count": len(weeks), "weeks": [w.isoformat() for w in weeks]}
 
 
+@router.get("/me/incomplete-summary", response_model=IncompleteWeeksSnapshot)
+async def get_my_incomplete_summary(
+    lookback_weeks: int = Query(52, ge=1, le=104),
+    db: AsyncSession = Depends(get_db),
+    current_employee: Employee = Depends(require_authentication),
+):
+    """Incomplete backlog count and week list in one round-trip (same semantics as count + list for lookback)."""
+    controller = TimesheetController(db)
+    data = await controller.incomplete_past_weeks_snapshot(
+        current_employee.id, current_employee.start_date, lookback_weeks
+    )
+    return IncompleteWeeksSnapshot(**data)
+
+
 @router.get("/by-employee", response_model=TimesheetResponse)
 async def get_timesheet_by_employee(
     employee_id: UUID = Query(..., description="Employee ID"),
@@ -104,7 +119,7 @@ async def get_timesheet_by_employee(
 @router.get("/me/week-statuses")
 async def get_my_week_statuses(
     past_weeks: int = Query(52, ge=1, le=104),
-    future_weeks: int = Query(12, ge=0, le=52),
+    future_weeks: int = Query(12, ge=0, le=104),
     db: AsyncSession = Depends(get_db),
     current_employee: Employee = Depends(require_authentication),
 ):

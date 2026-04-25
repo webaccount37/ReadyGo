@@ -229,6 +229,60 @@ class TimesheetRepository(BaseRepository[Timesheet]):
             employee_id, today, employee_start_date, limit
         )
 
+    async def incomplete_past_weeks_snapshot(
+        self,
+        employee_id: UUID,
+        today: date,
+        employee_start_date: date,
+        lookback_weeks: int = 52,
+    ) -> Tuple[int, List[date]]:
+        """Single-query snapshot: incomplete week count and list (earliest first) for backlog links.
+
+        Matches ``count_incomplete_weeks`` + ``list_incomplete_weeks`` for the same ``lookback_weeks``,
+        using one SELECT and one backward walk over Sundays.
+        """
+        from datetime import timedelta
+
+        def _sunday_of(d: date) -> date:
+            days_back = (d.weekday() + 1) % 7
+            return d - timedelta(days=days_back)
+
+        current_sunday = _sunday_of(today)
+        walk_weeks = lookback_weeks
+        oldest_sunday = current_sunday - timedelta(days=7 * walk_weeks)
+        first_required_week_start = _sunday_of(employee_start_date)
+
+        result = await self.session.execute(
+            select(Timesheet.week_start_date, Timesheet.status)
+            .where(
+                Timesheet.employee_id == employee_id,
+                Timesheet.week_start_date >= oldest_sunday,
+                Timesheet.week_start_date <= current_sunday,
+            )
+        )
+        submitted_weeks = {
+            row[0]
+            for row in result.fetchall()
+            if row[1] not in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED)
+        }
+
+        incomplete_newest_first: List[date] = []
+        cursor = current_sunday
+        for _ in range(walk_weeks + 1):
+            if cursor > today:
+                cursor -= timedelta(days=7)
+                continue
+            if cursor < first_required_week_start:
+                cursor -= timedelta(days=7)
+                continue
+            if cursor not in submitted_weeks:
+                incomplete_newest_first.append(cursor)
+            cursor -= timedelta(days=7)
+
+        count_in_window = len(incomplete_newest_first)
+        weeks_asc = list(reversed(incomplete_newest_first))
+        return count_in_window, weeks_asc
+
     async def get_week_statuses(
         self,
         employee_id: UUID,

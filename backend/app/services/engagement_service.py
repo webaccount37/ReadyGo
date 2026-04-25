@@ -828,6 +828,7 @@ class EngagementService(BaseService):
         search: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        include_financial_summary: bool = True,
     ) -> Tuple[List[EngagementResponse], int]:
         """List engagements with pagination.
         When employee_id and week_start_date are both set, only return engagements where
@@ -866,17 +867,25 @@ class EngagementService(BaseService):
         responses = []
         for e in engagements:
             base = await self._to_response(e, include_line_items=False)
-            plan_summary = await self.calculate_resource_plan_summary(e)
-            actuals_summary = await self.calculate_actuals_summary(e)
-            try:
-                comparative = await self.calculate_comparative_summary(e)
-            except ValueError:
-                comparative = await self._calculate_partial_comparative_summary(e)
             base_dict = base.model_dump()
-            base_dict["plan_amount"] = plan_summary.get("total_revenue")
-            base_dict["actuals_amount"] = actuals_summary.get("total_revenue")
-            base_dict["revenue_deviation_percentage"] = comparative.revenue_deviation_percentage
-            base_dict["plan_vs_actuals_revenue_deviation_percentage"] = comparative.plan_vs_actuals_revenue_deviation_percentage
+            if include_financial_summary:
+                plan_summary = await self.calculate_resource_plan_summary(e)
+                actuals_summary = await self.calculate_actuals_summary(e)
+                try:
+                    comparative = await self.calculate_comparative_summary(e)
+                except ValueError:
+                    comparative = await self._calculate_partial_comparative_summary(e)
+                base_dict["plan_amount"] = plan_summary.get("total_revenue")
+                base_dict["actuals_amount"] = actuals_summary.get("total_revenue")
+                base_dict["revenue_deviation_percentage"] = comparative.revenue_deviation_percentage
+                base_dict["plan_vs_actuals_revenue_deviation_percentage"] = (
+                    comparative.plan_vs_actuals_revenue_deviation_percentage
+                )
+            else:
+                base_dict["plan_amount"] = None
+                base_dict["actuals_amount"] = None
+                base_dict["revenue_deviation_percentage"] = None
+                base_dict["plan_vs_actuals_revenue_deviation_percentage"] = None
             if employee_id and e.line_items:
                 li_id, li_billable = pick_timesheet_line_item_for_employee(
                     e, employee_id, week_start_date
@@ -1123,6 +1132,10 @@ class EngagementService(BaseService):
             .distinct()
         )
         return [row[0] for row in result.all() if row[0]]
+
+    async def get_approved_week_starts_for_line_item(self, line_item_id: UUID) -> List[date]:
+        """Week start dates (Sunday) that have approved or invoiced hours on this line item."""
+        return await self._get_approved_weeks_for_line_item(line_item_id)
 
     async def update_line_item(
         self,
@@ -1545,8 +1558,17 @@ class EngagementService(BaseService):
         include_line_items: bool = False,
     ) -> EngagementResponse:
         """Convert Engagement model to response schema."""
-        opportunity = await self.opportunity_repo.get(engagement.opportunity_id)
-        quote = await self.quote_repo.get(engagement.quote_id)
+        from sqlalchemy import inspect as sa_inspect
+
+        insp = sa_inspect(engagement)
+        if "opportunity" in insp.unloaded:
+            opportunity = await self.opportunity_repo.get(engagement.opportunity_id)
+        else:
+            opportunity = engagement.opportunity
+        if "quote" in insp.unloaded:
+            quote = await self.quote_repo.get(engagement.quote_id)
+        else:
+            quote = engagement.quote
         
         quote_display_name = None
         if quote:
@@ -1592,7 +1614,10 @@ class EngagementService(BaseService):
         
         # Get created_by name
         if engagement.created_by:
-            employee = await self.employee_repo.get(engagement.created_by)
+            if "created_by_employee" in insp.unloaded:
+                employee = await self.employee_repo.get(engagement.created_by)
+            else:
+                employee = engagement.created_by_employee
             if employee:
                 response_dict["created_by_name"] = f"{employee.first_name} {employee.last_name}".strip()
         

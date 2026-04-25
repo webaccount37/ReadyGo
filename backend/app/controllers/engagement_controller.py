@@ -55,6 +55,7 @@ class EngagementController(BaseController):
         search: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_order: Optional[str] = None,
+        include_financial_summary: bool = True,
     ) -> EngagementListResponse:
         """List engagements with optional filters.
         When employee_id and week_start_date are both set, only return engagements
@@ -72,6 +73,7 @@ class EngagementController(BaseController):
             search=search,
             sort_by=sort_by,
             sort_order=sort_order,
+            include_financial_summary=include_financial_summary,
         )
         return EngagementListResponse(items=engagements, total=total)
     

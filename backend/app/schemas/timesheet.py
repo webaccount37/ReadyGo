@@ -10,6 +10,13 @@ from decimal import Decimal
 from enum import Enum
 
 
+class IncompleteWeeksSnapshot(BaseModel):
+    """Count + incomplete week starts in one payload (Timesheet Management backlog)."""
+
+    count: int
+    weeks: List[str]  # week_start_date ISO, earliest first
+
+
 class TimesheetStatusEnum(str, Enum):
     """Timesheet status values."""
     NOT_SUBMITTED = "NOT_SUBMITTED"

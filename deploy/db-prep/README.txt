@@ -127,6 +127,87 @@ Docker (same volume mount as step 3):
 
 Step 4 requires billing_terms.code "NET30". Delivery center names in the DB must match Country / invoice mappings (see EMPLOYEE_SEED_DELIVERY_CENTER / OPPORTUNITY_SEED_DELIVERY_CENTER).
 
+Replicon / time-export timesheet migration (optional)
+------------------------------------------------------
+Implementation lives under `backend/app/integrations/replicon/`. Run the CLI from `backend/`:
+
+  python -m scripts.replicon_timesheet_import --dry-run
+
+**Primary input (recommended):** place a Replicon Excel export at
+`uploads/time_export_04252026.xlsx` (columns include Client Name, Project Name, Entry Date,
+User Email, Hours, optional Billing Rate Name). The importer auto-detects that file and does **not**
+call Replicon APIs. Override path with `REPLICON_TIMESHEET_EXPORT_XLSX` or `--from-excel PATH`.
+Set `REPLICON_DISABLE_EXCEL_EXPORT=1` to ignore the default workbook and use Analytics instead.
+
+**Mapping workbook (`replicon_mapping.xlsx`) — multi-contract rows (ENGAGEMENT only):** you may list
+several Cortex Opportunity names and the same number of Cortex Engagement names in one row, using
+**line breaks** (newline / carriage return, as Excel often stores in one cell) or semicolons with
+optional spaces (e.g. `Opp A` on one line and `Opp B` on the next, paired line-by-line with
+engagements the same way).
+SALES and HOLIDAY rows must keep a single opportunity and single engagement; multi-value
+opportunity/engagement on those types is skipped with a warning. **Cortex Phase** may be one value
+(reused for every pair) or the same count of `;`-separated values as the pairs. For multi-pair
+ENGAGEMENT rows, the importer loads each engagement's assignment window from the database
+(min/max **EngagementLineItem** dates across the engagement, or min/max **EngagementPhase** dates if
+there are no line items). When resolving which of several engagements applies to a row, it
+prefers each timekeeper's own **resource-plan line** min/max dates (**EngagementLineItem** where
+that employee is assigned); if they have no line on that engagement, it falls back to the
+engagement-wide window. For each time entry it picks the pair whose effective window **contains
+the entry date** (inclusive).
+If none contain the date, the row fails with a multi-contract window message. If several windows
+contain the date, the **narrowest** window wins; if spans tie, the **first** pair in sheet order
+wins (a warning is logged when ties remain after narrowing).
+
+Always set `REPLICON_IMPORT_APPROVER_EMPLOYEE_ID` (UUID). For **live Replicon Analytics only** (no
+Excel file): also set `REPLICON_SERVICES_BASE_URL` and `REPLICON_ACCESS_TOKEN` or login/password.
+
+See `backend/scripts/replicon_timesheet_import.py` for flags. CSV cache from Analytics is written
+under `uploads/replicon_cache/` when using the API (gitignored).
+
+Import summary line (logged after each run)
+---------------------------------------------
+The CLI logs a line like:
+  Replicon import summary: raw=… mapped=… weeks=… skipped_invoiced=… lines_created=…
+Optional extra fields may appear (e.g. rows skipped when no resource-plan line overlaps a week).
+
+  raw
+    Time rows read from the Excel/CSV source after parse, after the 2024-01-01 filter.
+  mapped
+    Rows that matched `uploads/replicon_mapping.xlsx` (and exclusions) and became Cortex-shaped
+    input for aggregation. Unmapped project/client pairs are not counted here.
+  weeks
+    Distinct employee × week (Sunday week start) pairs that went through per-week kill/fill
+    (excluding weeks skipped as INVOICED).
+  skipped_invoiced
+    Employee-weeks skipped because the timesheet was already INVOICED.
+  lines_created
+    New engagement resource-plan (`EngagementLineItem`) rows auto-created for
+    (employee, engagement) pairs that had import hours but no existing line.
+
+Resource-plan dates for this import use Sunday–Saturday week envelopes around the min/max
+work dates in the extract, and widen existing lines so date ranges still cover every week that
+already has approved timesheet hours on that line (avoids `Cannot change dates` when extending).
+
+Per-row status workbook (Excel source only)
+---------------------------------------------
+After a dry-run or full import from an Excel export, the importer writes a **copy** of that
+workbook with two extra columns: ``Import Status`` and ``Import Detail`` (one row per source
+time entry: OK / Failed / Skipped and a short reason).
+
+  - Default output path: next to the input file, named ``<stem>_import_status<suffix>`` (e.g.
+    ``time_export_04252026_import_status.xlsx``).
+  - Override with env ``REPLICON_IMPORT_ROW_STATUS_XLSX`` or CLI ``--row-status-output PATH``.
+
+Docker: ``../uploads`` is mounted read-only on the backend container, so the default sibling
+path under ``/uploads`` cannot be saved. Use a writable path, for example:
+
+  docker compose -f config/docker-compose.yaml exec -T \
+    -e REPLICON_IMPORT_ROW_STATUS_XLSX=/tmp/time_export_04252026_import_status.xlsx \
+    backend python -m scripts.replicon_timesheet_import --dry-run --skip-token-check
+
+Then copy the file from the container (``docker cp readygo-backend:/tmp/... .``) or write to
+``/app/...`` (backend bind mount) if you want the file next to your repo on the host.
+
 Verification
 ------------
 Re-run 00_preflight.sql: employees / accounts / contacts / opportunities counts should match expectations.

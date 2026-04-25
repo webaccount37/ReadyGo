@@ -43,6 +43,7 @@ import { FetchError } from "@/lib/fetchClient";
 import { WeekCarousel, getWeekStart, getWeekRange, formatWeekLabel } from "@/components/timesheets/week-carousel";
 import type { TimesheetEntry, TimesheetEntryUpsert } from "@/types/timesheet";
 import type { Opportunity } from "@/types/opportunity";
+import type { EngagementPhase } from "@/types/engagement";
 
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const DAY_KEYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"] as const;
@@ -124,32 +125,33 @@ function TimesheetPageContent() {
 
   const employeeId = timesheet?.employee_id ?? user?.employee_id;
 
-  const { data: engagementsAll } = useEngagements({ limit: 500 });
   const { data: engagementsForEmployee } = useEngagements(
     {
       employee_id: employeeId ?? undefined,
       limit: 200,
       week_start_date: timesheet ? selectedWeek : undefined,
+      include_financial_summary: false,
     },
-    { enabled: !!employeeId }
+    { enabled: !!employeeId && !!selectedWeek }
   );
-  const useWeekFilter = !!(employeeId && selectedWeek);
   const engagementsSource = useMemo(() => {
-    // When filtering by week, use filtered result only (even if empty) - don't fall back to all engagements
-    if (useWeekFilter && engagementsForEmployee) {
-      return engagementsForEmployee.items ?? [];
-    }
-    if (engagementsForEmployee?.items?.length) return engagementsForEmployee.items;
-    if (engagementsAll?.items?.length) return engagementsAll.items;
-    return [];
-  }, [useWeekFilter, engagementsForEmployee, engagementsAll?.items]);
+    return engagementsForEmployee?.items ?? [];
+  }, [engagementsForEmployee?.items]);
 
   const { data: incompleteWeeksData } = useTimesheetIncompleteWeeks({
     enabled: (incompleteData?.count ?? 0) > 0,
   });
-  const { data: weekStatuses } = useWeekStatuses({ past_weeks: 104, future_weeks: 12 });
-  const { data: accountsData } = useAccounts({ limit: 500 });
-  const { data: opportunitiesData } = useOpportunities({ limit: 500 });
+  const { data: weekStatuses } = useWeekStatuses({ past_weeks: 104, future_weeks: 104 });
+  const timesheetEditable =
+    !!timesheet && ["NOT_SUBMITTED", "REOPENED"].includes(timesheet.status);
+  const { data: accountsData } = useAccounts(
+    { limit: 500 },
+    { enabled: timesheetEditable }
+  );
+  const { data: opportunitiesData } = useOpportunities(
+    { limit: 500 },
+    { enabled: timesheetEditable }
+  );
   const saveEntries = useSaveTimesheetEntries();
   const submitTimesheet = useSubmitTimesheet();
   const approveTimesheet = useApproveTimesheet();
@@ -782,6 +784,7 @@ interface EngagementItem {
   opportunity_id?: string;
   timesheet_employee_line_item_id?: string;
   timesheet_employee_line_item_billable?: boolean;
+  phases?: EngagementPhase[];
 }
 
 function TimesheetEntryRow({
@@ -825,8 +828,18 @@ function TimesheetEntryRow({
     return opportunitiesData.items.filter((o) => o.account_id === entry.account_id);
   }, [opportunitiesData?.items, entry.account_id]);
 
+  const engagementFromList = useMemo(
+    () => engagementsSource.find((g) => g.id === entry.engagement_id),
+    [engagementsSource, entry.engagement_id]
+  );
+  const phasesFromList = engagementFromList?.phases;
+  const needEngagementDetailFetch =
+    !!entry.engagement_id &&
+    canEdit &&
+    !isSales &&
+    (!phasesFromList || phasesFromList.length === 0);
   const { data: engagementDetail } = useEngagementDetail(entry.engagement_id || "", {
-    enabled: !!entry.engagement_id && canEdit && !isSales,
+    enabled: needEngagementDetailFetch,
   });
 
   const entryAsResp = entry as TimesheetEntry & { requires_notes?: boolean };
@@ -851,13 +864,17 @@ function TimesheetEntryRow({
   }, [engagementsSource, entry.account_id]);
 
   const phasesInWeek = useMemo(() => {
-    if (!engagementDetail?.phases || !weekRange || isSales) return [];
-    return engagementDetail.phases.filter((p) => {
+    const raw =
+      phasesFromList && phasesFromList.length > 0
+        ? phasesFromList
+        : engagementDetail?.phases;
+    if (!raw?.length || !weekRange || isSales) return [];
+    return raw.filter((p) => {
       const pStart = new Date(p.start_date);
       const pEnd = new Date(p.end_date);
       return pStart <= weekRange.end && pEnd >= weekRange.start;
     });
-  }, [engagementDetail?.phases, weekRange, isSales]);
+  }, [phasesFromList, engagementDetail?.phases, weekRange, isSales]);
 
   const rowTotal = DAY_KEYS.reduce(
     (sum, k) => sum + (parseFloat(String(entry[`${k}_hours`])) || 0),
