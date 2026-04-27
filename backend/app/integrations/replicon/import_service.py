@@ -47,7 +47,7 @@ from app.integrations.replicon.normalize import (
     week_start_sunday,
 )
 from app.integrations.replicon.settings import RepliconImportSettings
-from app.models.employee import Employee
+from app.models.employee import Employee, EmployeeStatus
 from app.models.engagement import EngagementPhase
 from app.models.role import Role
 from app.models.timesheet import TimesheetEntry, TimesheetEntryType, TimesheetStatus
@@ -116,9 +116,16 @@ class RepliconTimesheetImportService:
         with path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(line, default=str) + "\n")
 
-    async def _load_employees(self) -> list[tuple[UUID, str]]:
-        r = await self.session.execute(select(Employee.id, Employee.email))
-        return [(row[0], row[1] or "") for row in r.fetchall()]
+    async def _load_employees(self) -> list[tuple[UUID, str, EmployeeStatus]]:
+        """Every employee with a non-empty email, regardless of status (historical Replicon imports)."""
+        r = await self.session.execute(select(Employee.id, Employee.email, Employee.status))
+        out: list[tuple[UUID, str, EmployeeStatus]] = []
+        for row in r.fetchall():
+            email = (row[1] or "").strip()
+            if not email:
+                continue
+            out.append((row[0], email, row[2]))
+        return out
 
     def _filter_since_2024(
         self,
@@ -674,6 +681,7 @@ class RepliconTimesheetImportService:
             current_employee_id=employee_id,
             force=True,
             allow_short_week=True,
+            fill_missing_resource_plan_engagements=False,
         )
         await self.approval_svc.approve_timesheet(ts.id, approver_employee_id=approver)
         return "ok"

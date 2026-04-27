@@ -13,6 +13,7 @@ from app.integrations.replicon.excel_timesheet_export import (
 )
 from app.integrations.replicon.mapping_workbook import MappingCandidate, MappingRecord, MappingRule
 from app.integrations.replicon.models import CortexMappedRow, RawTimeRow
+from app.models.employee import EmployeeStatus
 from app.integrations.replicon.normalize import (
     aggregate_by_week_and_entry,
     build_login_to_employee_id,
@@ -134,6 +135,24 @@ def test_build_login_to_employee_id_dedup_last_wins():
     a, b = uuid4(), uuid4()
     m = build_login_to_employee_id([(a, "dup@x.com"), (b, "dup@y.com")])
     assert m["dup"] == b
+
+
+def test_build_login_prefers_active_over_inactive_same_email():
+    active_id, inactive_id = uuid4(), uuid4()
+    m = build_login_to_employee_id(
+        [
+            (inactive_id, "legacy@readyms.com", EmployeeStatus.INACTIVE),
+            (active_id, "Legacy@ReadyMS.com", EmployeeStatus.ACTIVE),
+        ]
+    )
+    assert m["legacy@readyms.com"] == active_id
+
+
+def test_build_login_resolves_inactive_when_only_record():
+    emp = uuid4()
+    m = build_login_to_employee_id([(emp, "Alumni@ReadyMS.com", EmployeeStatus.INACTIVE)])
+    assert m["alumni@readyms.com"] == emp
+    assert m["alumni"] == emp
 
 
 def test_build_login_indexes_full_email():

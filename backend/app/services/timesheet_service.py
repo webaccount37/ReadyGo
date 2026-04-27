@@ -1080,10 +1080,16 @@ class TimesheetService(BaseService):
         current_employee_id: UUID,
         force: bool = False,
         allow_short_week: bool = False,
+        *,
+        fill_missing_resource_plan_engagements: bool = True,
     ) -> Tuple[TimesheetResponse, Optional[str]]:
         """Submit timesheet. Returns (response, warning_message).
         Submission is allowed for any week including before employee start_date; only incomplete
         flagging excludes pre-start weeks. Weeks before start_date are not required but can be submitted.
+
+        When ``fill_missing_resource_plan_engagements`` is True (default), billable resource-plan
+        lines with plan hours for the week get a timesheet row if missing — normal UX.
+        Replicon import sets this to False so kill/fill leaves only rows built from the extract.
         """
         timesheet = await self.timesheet_repo.get(timesheet_id)
         if not timesheet:
@@ -1096,9 +1102,10 @@ class TimesheetService(BaseService):
         if timesheet.status not in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
             raise ValueError("Timesheet cannot be submitted in current status")
 
-        await self._ensure_resource_plan_zero_entries(timesheet)
+        if fill_missing_resource_plan_engagements:
+            await self._ensure_resource_plan_zero_entries(timesheet)
         await self.session.flush()
-        await self.session.refresh(timesheet)  # reload entries including new 0-hour rows
+        await self.session.refresh(timesheet)  # reload entries after optional RP fill
 
         # Validate rows with hours: Type, Account, and Project (for ENGAGEMENT) are required
         for entry in timesheet.entries or []:

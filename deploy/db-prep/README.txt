@@ -139,6 +139,11 @@ User Email, Hours, optional Billing Rate Name). The importer auto-detects that f
 call Replicon APIs. Override path with `REPLICON_TIMESHEET_EXPORT_XLSX` or `--from-excel PATH`.
 Set `REPLICON_DISABLE_EXCEL_EXPORT=1` to ignore the default workbook and use Analytics instead.
 
+**Employee email / login matching:** the importer builds the login map from **all** employees with a
+non-empty email, including **inactive** and **on-leave** (needed for multi-year history). If two
+rows share the same email or the same local-part before ``@``, an **active** employee wins over
+on-leave or inactive.
+
 **Mapping workbook (`replicon_mapping.xlsx`) — multi-contract rows (ENGAGEMENT only):** you may list
 several Cortex Opportunity names and the same number of Cortex Engagement names in one row, using
 **line breaks** (newline / carriage return, as Excel often stores in one cell) or semicolons with

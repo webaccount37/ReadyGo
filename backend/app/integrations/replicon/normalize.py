@@ -13,6 +13,7 @@ from app.integrations.replicon.mapping_workbook import (
     effective_mapping_candidate_window,
     pick_mapping_record_for_entry_date,
 )
+from app.models.employee import EmployeeStatus
 from app.integrations.replicon.models import (
     AggregatedEntryKey,
     AggregatedHours,
@@ -122,19 +123,45 @@ def multi_contract_date_miss(
     return True
 
 
+def _employee_login_precedence(status: EmployeeStatus | None) -> int:
+    """Lower sorts first; later duplicate keys overwrite earlier (see ``build_login_to_employee_id``)."""
+    if status == EmployeeStatus.ACTIVE:
+        return 2
+    if status == EmployeeStatus.ON_LEAVE:
+        return 1
+    if status == EmployeeStatus.INACTIVE:
+        return 0
+    return 1  # legacy (id, email) tuples without status — same tier as ON_LEAVE
+
+
 def build_login_to_employee_id(
-    employees: Iterable[tuple[UUID, str]],
+    employees: Iterable[tuple[UUID, str] | tuple[UUID, str, EmployeeStatus]],
 ) -> dict[str, UUID]:
     """Map employee lookup keys (lowercased) -> employee id.
 
     Indexes both full ``employee.email`` and its local-part (after ``@``) so CSV
     Replicon logins and Excel ``User Email`` exports resolve consistently.
+
+    Includes **inactive** employees (``(id, email, EmployeeStatus.INACTIVE)`` from the
+    Replicon import loader). When the same key would map to multiple employees, **ACTIVE**
+    beats **ON_LEAVE** beats **INACTIVE**; ties use the later row in the input sequence.
     """
-    out: dict[str, UUID] = {}
-    for emp_id, email in employees:
+    rows: list[tuple[int, UUID, str, EmployeeStatus | None]] = []
+    for i, tup in enumerate(employees):
+        if len(tup) == 3:
+            emp_id, email, status = tup
+        else:
+            emp_id, email = tup
+            status = None
         e = (email or "").strip().lower()
         if not e:
             continue
+        rows.append((i, emp_id, e, status))
+
+    rows.sort(key=lambda r: (_employee_login_precedence(r[3]), r[0]))
+
+    out: dict[str, UUID] = {}
+    for _i, emp_id, e, _status in rows:
         out[e] = emp_id
         lp = email_local_part(e)
         if lp:
