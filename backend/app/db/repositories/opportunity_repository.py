@@ -2,7 +2,7 @@
 Opportunity repository for database operations.
 """
 
-from typing import Optional, List, Set
+from typing import Dict, Optional, List, Set
 from uuid import UUID
 from datetime import date
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -58,6 +58,21 @@ class OpportunityRepository(BaseRepository[Opportunity]):
         )
         return int(result.scalar_one() or 0)
 
+    async def count_by_accounts(self, account_ids: List[UUID]) -> Dict[UUID, int]:
+        """Return opportunity counts keyed by account_id (missing keys count as 0)."""
+        if not account_ids:
+            return {}
+        result = await self.session.execute(
+            select(Opportunity.account_id, func.count(Opportunity.id))
+            .where(Opportunity.account_id.in_(account_ids))
+            .group_by(Opportunity.account_id)
+        )
+        counts: Dict[UUID, int] = {aid: 0 for aid in account_ids}
+        for aid, n in result.all():
+            if aid is not None:
+                counts[aid] = int(n or 0)
+        return counts
+
     async def count_by_status(self, status: OpportunityStatus) -> int:
         result = await self.session.execute(
             select(func.count(Opportunity.id)).where(Opportunity.status == status)
@@ -102,7 +117,15 @@ class OpportunityRepository(BaseRepository[Opportunity]):
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
+
+    async def list_by_account_ids(self, account_ids: List[UUID]) -> List[Opportunity]:
+        """List all opportunities for any of the given accounts (no pagination, no account eager load)."""
+        if not account_ids:
+            return []
+        query = select(Opportunity).where(Opportunity.account_id.in_(account_ids))
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def list_by_status(
         self,
         status: OpportunityStatus,

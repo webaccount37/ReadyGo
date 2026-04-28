@@ -6,8 +6,8 @@ import logging
 from typing import Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func, asc
+from sqlalchemy.orm import selectinload, noload
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.estimate import Estimate
@@ -37,6 +37,35 @@ class EstimateRepository(BaseRepository[Estimate]):
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
     
+    def _list_query_for_index(self):
+        """List/index query: no phases, stable order (matches grouped list UX)."""
+        from app.models.opportunity import Opportunity
+
+        return (
+            select(Estimate)
+            .options(
+                selectinload(Estimate.opportunity).selectinload(Opportunity.account),
+                selectinload(Estimate.created_by_employee),
+                noload(Estimate.phases),
+            )
+            .order_by(asc(Estimate.opportunity_id), asc(Estimate.name))
+        )
+
+    async def list_for_list_api(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        **filters,
+    ) -> List[Estimate]:
+        """List estimates for list API: slimmer loads and deterministic sort."""
+        query = self._list_query_for_index()
+        for key, value in filters.items():
+            if hasattr(Estimate, key):
+                query = query.where(getattr(Estimate, key) == value)
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
     async def list(
         self,
         skip: int = 0,
@@ -45,12 +74,12 @@ class EstimateRepository(BaseRepository[Estimate]):
     ) -> List[Estimate]:
         """List estimates with pagination and filters."""
         query = self._base_query()
-        
+
         # Apply filters
         for key, value in filters.items():
             if hasattr(Estimate, key):
                 query = query.where(getattr(Estimate, key) == value)
-        
+
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
@@ -104,22 +133,17 @@ class EstimateRepository(BaseRepository[Estimate]):
                 selectinload(Estimate.line_items)
                 .selectinload(EstimateLineItem.employee),
                 selectinload(Estimate.line_items)
+                .selectinload(EstimateLineItem.payable_center),
+                selectinload(Estimate.line_items)
                 .selectinload(EstimateLineItem.weekly_hours),
             )
             .where(Estimate.id == estimate_id)
         )
         estimate = result.scalar_one_or_none()
-        
-        # CRITICAL: Always reload line items directly from database to ensure we get all records
-        # Don't trust the relationship-loaded collection - it may be incomplete
-        if estimate:
-            from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
-            line_item_repo = EstimateLineItemRepository(self.session)
-            actual_line_items = await line_item_repo.list_by_estimate(estimate_id)
-            # Replace relationship-loaded items with actual database records
-            estimate.line_items = actual_line_items
-            logger.info(f"Reloaded {len(actual_line_items)} line items from database for estimate {estimate_id}")
-        
+
+        if estimate and estimate.line_items:
+            estimate.line_items.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
+
         return estimate
     
     async def create(self, **kwargs) -> Estimate:

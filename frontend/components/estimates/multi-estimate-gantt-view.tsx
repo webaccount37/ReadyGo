@@ -6,6 +6,7 @@ import { estimatesApi } from "@/lib/api/estimates";
 import { useOpportunities } from "@/hooks/useOpportunities";
 import type { EstimateDetailResponse } from "@/types/estimate";
 import { startOfWeekSunday } from "@/lib/utils/week";
+import { parseOpportunityCalendarDate } from "@/lib/opportunity-utils";
 
 interface MultiEstimateGanttViewProps {
   estimateIds: string[];
@@ -136,8 +137,12 @@ export function MultiEstimateGanttView({ estimateIds }: MultiEstimateGanttViewPr
         estimate,
         opportunityId,
         opportunityName: opportunity?.name || estimate.opportunity_name || "Unknown Opportunity",
-        opportunityStartDate: opportunity?.start_date ? new Date(opportunity.start_date) : undefined,
-        opportunityEndDate: opportunity?.end_date ? new Date(opportunity.end_date) : undefined,
+        opportunityStartDate: opportunity?.start_date
+          ? parseOpportunityCalendarDate(opportunity.start_date)
+          : undefined,
+        opportunityEndDate: opportunity?.end_date
+          ? parseOpportunityCalendarDate(opportunity.end_date)
+          : undefined,
         estimateIndex: count,
       });
     });

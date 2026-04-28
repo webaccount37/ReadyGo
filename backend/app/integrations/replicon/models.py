@@ -60,10 +60,11 @@ class AggregatedHours:
     """Per-day hours for Sunday..Saturday (indices 0..6)."""
 
     hours_by_dow: list[Decimal] = field(default_factory=lambda: [Decimal("0")] * 7)
-    billable_any: bool = False
+    #: True only if every contributing slice was billable (conservative for merged rows).
+    billable: bool = True
 
     def add(self, entry_date: date, hours: Decimal, week_start: date, billable: bool) -> None:
         idx = (entry_date - week_start).days
         if 0 <= idx <= 6:
             self.hours_by_dow[idx] += hours
-        self.billable_any = self.billable_any or billable
+        self.billable = self.billable and billable

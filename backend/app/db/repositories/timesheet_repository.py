@@ -2,14 +2,152 @@
 Timesheet repository for database operations.
 """
 
-from typing import Optional, List, Dict, Tuple, Sequence
+from typing import Optional, List, Dict, Tuple, Sequence, NamedTuple, Any
 from uuid import UUID
 from datetime import date, timedelta, datetime
+from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, or_, tuple_
+from sqlalchemy import select, func, and_, or_, tuple_, union_all
 
 from app.db.repositories.base_repository import BaseRepository
 from app.models.timesheet import Timesheet, TimesheetStatus, TimesheetStatusHistory
+
+
+class ApprovableTimesheetSummary(NamedTuple):
+    """Slim row for approver list (no ORM timesheet graph)."""
+
+    id: UUID
+    employee_id: UUID
+    week_start_date: date
+    status: TimesheetStatus
+    employee_first_name: Optional[str]
+    employee_last_name: Optional[str]
+    total_hours: Decimal
+
+
+def _build_approvable_union_subquery(
+    approver_employee_id: UUID,
+    status_filter: Optional[TimesheetStatus],
+    employee_id_filter: Optional[UUID],
+):
+    """
+    Subquery of timesheet ids: engagement entries, engagement line items, employee delivery center,
+    or entries tied to an opportunity the approver can approve via that opportunity's invoice DC
+    (e.g. SALES rows without an engagement_id).
+    Must match list_approvable_timesheets_for_approver and TimesheetApprovalService._can_approve_async.
+    """
+    from app.models.timesheet import TimesheetEntry
+    from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
+    from app.models.delivery_center_approver import DeliveryCenterApprover
+    from app.models.engagement import Engagement, EngagementLineItem
+    from app.models.opportunity import Opportunity
+    from app.models.employee import Employee
+
+    status_val = status_filter.value if status_filter else None
+    eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
+        EngagementTimesheetApprover.employee_id == approver_employee_id
+    )
+    dc_approver_subq = (
+        select(Engagement.id.label("engagement_id"))
+        .select_from(Engagement)
+        .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
+        .join(
+            DeliveryCenterApprover,
+            Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id,
+        )
+        .where(DeliveryCenterApprover.employee_id == approver_employee_id)
+    )
+    approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
+    approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
+        DeliveryCenterApprover.employee_id == approver_employee_id
+    )
+
+    engagement_based = (
+        select(Timesheet.id)
+        .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
+        .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
+        .distinct()
+    )
+    if status_val:
+        engagement_based = engagement_based.where(Timesheet.status == status_filter)
+    if employee_id_filter:
+        engagement_based = engagement_based.where(Timesheet.employee_id == employee_id_filter)
+
+    engagement_line_item_based = (
+        select(Timesheet.id)
+        .where(
+            Timesheet.employee_id.in_(
+                select(EngagementLineItem.employee_id)
+                .where(
+                    EngagementLineItem.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)),
+                    EngagementLineItem.employee_id.isnot(None),
+                )
+            )
+        )
+    )
+    if status_val:
+        engagement_line_item_based = engagement_line_item_based.where(Timesheet.status == status_filter)
+    if employee_id_filter:
+        engagement_line_item_based = engagement_line_item_based.where(
+            Timesheet.employee_id == employee_id_filter
+        )
+
+    employee_dc_based = (
+        select(Timesheet.id)
+        .join(Employee, Timesheet.employee_id == Employee.id)
+        .where(Employee.delivery_center_id.in_(approver_dc_ids))
+    )
+    if status_val:
+        employee_dc_based = employee_dc_based.where(Timesheet.status == status_filter)
+    if employee_id_filter:
+        employee_dc_based = employee_dc_based.where(Timesheet.employee_id == employee_id_filter)
+
+    # Timesheet has an entry with opportunity_id and approver is DC for that opportunity's center
+    opportunity_entry_based = (
+        select(Timesheet.id)
+        .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
+        .join(
+            Opportunity,
+            TimesheetEntry.opportunity_id == Opportunity.id,
+        )
+        .join(
+            DeliveryCenterApprover,
+            and_(
+                Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id,
+                DeliveryCenterApprover.employee_id == approver_employee_id,
+            ),
+        )
+        .distinct()
+    )
+    if status_val:
+        opportunity_entry_based = opportunity_entry_based.where(Timesheet.status == status_filter)
+    if employee_id_filter:
+        opportunity_entry_based = opportunity_entry_based.where(
+            Timesheet.employee_id == employee_id_filter
+        )
+
+    return union_all(
+        union_all(engagement_based, engagement_line_item_based),
+        employee_dc_based,
+        opportunity_entry_based,
+    ).subquery()
+
+
+def _approvable_list_outer_predicates():
+    """exclude_future and sunday_only for timesheets in the approver list (same for all list paths)."""
+
+    def _sunday_of(d: date) -> date:
+        days_back = (d.weekday() + 1) % 7
+        return d - timedelta(days=days_back)
+
+    today = date.today()
+    end_of_current_week = _sunday_of(today) + timedelta(days=6)
+    exclude_future = or_(
+        ~Timesheet.status.in_([TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED]),
+        Timesheet.week_start_date <= end_of_current_week,
+    )
+    sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
+    return exclude_future, sunday_only
 
 
 class TimesheetRepository(BaseRepository[Timesheet]):
@@ -311,7 +449,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         (3) DC approver for employee's delivery center (entire timesheet).
         """
         from sqlalchemy.orm import selectinload
-        from sqlalchemy import or_, union_all
+        from sqlalchemy import or_, union_all, and_
         from app.models.timesheet import TimesheetEntry
         from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
         from app.models.delivery_center_approver import DeliveryCenterApprover
@@ -371,9 +509,25 @@ class TimesheetRepository(BaseRepository[Timesheet]):
                 Employee.delivery_center_id.in_(approver_dc_ids),
             )
         )
+        # Path 4: Entry with opportunity_id; approver is DC for that opportunity's invoice center
+        opportunity_entry_based = (
+            select(Timesheet.id)
+            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
+            .join(Opportunity, TimesheetEntry.opportunity_id == Opportunity.id)
+            .join(
+                DeliveryCenterApprover,
+                and_(
+                    Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id,
+                    DeliveryCenterApprover.employee_id == approver_employee_id,
+                ),
+            )
+            .where(Timesheet.status == TimesheetStatus.SUBMITTED)
+            .distinct()
+        )
         union_ids = union_all(
             union_all(engagement_based, engagement_line_item_based),
             employee_dc_based,
+            opportunity_entry_based,
         ).subquery()
 
         # Only include timesheets with Sunday week_start_date (valid period)
@@ -399,7 +553,7 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         self, approver_employee_id: UUID
     ) -> int:
         """Count timesheets with status SUBMITTED that the approver can approve."""
-        from sqlalchemy import union_all
+        from sqlalchemy import union_all, and_
         from app.models.timesheet import TimesheetEntry
         from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
         from app.models.delivery_center_approver import DeliveryCenterApprover
@@ -456,9 +610,27 @@ class TimesheetRepository(BaseRepository[Timesheet]):
                 Employee.delivery_center_id.in_(approver_dc_ids),
             )
         )
+        opportunity_entry_based = (
+            select(Timesheet.id)
+            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
+            .join(Opportunity, TimesheetEntry.opportunity_id == Opportunity.id)
+            .join(
+                DeliveryCenterApprover,
+                and_(
+                    Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id,
+                    DeliveryCenterApprover.employee_id == approver_employee_id,
+                ),
+            )
+            .where(
+                Timesheet.status == TimesheetStatus.SUBMITTED,
+                sunday_only,
+            )
+            .distinct()
+        )
         union_ids = union_all(
             union_all(engagement_based, engagement_line_item_based),
             employee_dc_based,
+            opportunity_entry_based,
         ).subquery()
 
         from sqlalchemy import distinct
@@ -478,93 +650,12 @@ class TimesheetRepository(BaseRepository[Timesheet]):
     ) -> List[Timesheet]:
         """List timesheets the approver can manage, with optional status and employee filters."""
         from sqlalchemy.orm import selectinload
-        from sqlalchemy import union_all
         from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement, EngagementLineItem
-        from app.models.opportunity import Opportunity
-        from app.models.employee import Employee
 
-        status_val = status_filter.value if status_filter else None
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
+        union_ids = _build_approvable_union_subquery(
+            approver_employee_id, status_filter, employee_id_filter
         )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
-
-        # Path 1: Timesheets with entries linking to engagements (employee has logged time)
-        engagement_based = (
-            select(Timesheet.id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
-            .distinct()
-        )
-        if status_val:
-            engagement_based = engagement_based.where(Timesheet.status == status_filter)
-        if employee_id_filter:
-            engagement_based = engagement_based.where(Timesheet.employee_id == employee_id_filter)
-
-        # Path 2: Timesheets for employees on engagement line items (resource plan) - no entries required
-        # Includes employees who haven't logged time yet but are staffed on the engagement
-        # Uses subquery to avoid SQLAlchemy date arithmetic issues across DB dialects
-        engagement_line_item_based = (
-            select(Timesheet.id)
-            .where(
-                Timesheet.employee_id.in_(
-                    select(EngagementLineItem.employee_id)
-                    .where(
-                        EngagementLineItem.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)),
-                        EngagementLineItem.employee_id.isnot(None),
-                    )
-                )
-            )
-        )
-        if status_val:
-            engagement_line_item_based = engagement_line_item_based.where(Timesheet.status == status_filter)
-        if employee_id_filter:
-            engagement_line_item_based = engagement_line_item_based.where(Timesheet.employee_id == employee_id_filter)
-
-        # Path 3: Timesheets for employees in approver's delivery centers (Employee.delivery_center_id)
-        employee_dc_based = (
-            select(Timesheet.id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
-        )
-        if status_val:
-            employee_dc_based = employee_dc_based.where(Timesheet.status == status_filter)
-        if employee_id_filter:
-            employee_dc_based = employee_dc_based.where(Timesheet.employee_id == employee_id_filter)
-
-        union_ids = union_all(
-            union_all(engagement_based, engagement_line_item_based),
-            employee_dc_based,
-        ).subquery()
-
-        # Exclude future weeks for NOT_SUBMITTED/REOPENED (only show current week or past)
-        def _sunday_of(d: date) -> date:
-            days_back = (d.weekday() + 1) % 7
-            return d - timedelta(days=days_back)
-
-        today = date.today()
-        end_of_current_week = _sunday_of(today) + timedelta(days=6)
-
-        exclude_future = or_(
-            ~Timesheet.status.in_([TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED]),
-            Timesheet.week_start_date <= end_of_current_week,
-        )
-        # Only include timesheets with Sunday week_start_date (valid period)
-        sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
-
+        exclude_future, sunday_only = _approvable_list_outer_predicates()
         q = (
             select(Timesheet)
             .where(and_(Timesheet.id.in_(select(union_ids.c.id)), exclude_future, sunday_only))
@@ -583,334 +674,159 @@ class TimesheetRepository(BaseRepository[Timesheet]):
         result = await self.session.execute(q)
         return list(result.scalars().all())
 
-    async def list_approvable_employee_ids_for_approver(
-        self, approver_employee_id: UUID
-    ) -> List[UUID]:
-        """Get distinct employee IDs from timesheets the approver can manage (fallback for manageable employees)."""
-        from sqlalchemy import union_all
+    async def list_approvable_timesheet_summaries_for_approver(
+        self,
+        approver_employee_id: UUID,
+        status_filter: Optional[TimesheetStatus] = None,
+        employee_id_filter: Optional[UUID] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> List[ApprovableTimesheetSummary]:
+        """Approvable timesheet list without loading full entry ORM graphs; total hours from SQL."""
         from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement
-        from app.models.opportunity import Opportunity
         from app.models.employee import Employee
 
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
+        union_ids = _build_approvable_union_subquery(
+            approver_employee_id, status_filter, employee_id_filter
         )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
+        exclude_future, sunday_only = _approvable_list_outer_predicates()
 
-        sunday_only = func.extract("dow", Timesheet.week_start_date) == 0
-        engagement_based = (
-            select(Timesheet.employee_id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(
-                TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)),
-                sunday_only,
-            )
-            .distinct()
+        entry_day_sum = (
+            func.coalesce(TimesheetEntry.sun_hours, 0)
+            + func.coalesce(TimesheetEntry.mon_hours, 0)
+            + func.coalesce(TimesheetEntry.tue_hours, 0)
+            + func.coalesce(TimesheetEntry.wed_hours, 0)
+            + func.coalesce(TimesheetEntry.thu_hours, 0)
+            + func.coalesce(TimesheetEntry.fri_hours, 0)
+            + func.coalesce(TimesheetEntry.sat_hours, 0)
         )
-        employee_dc_based = (
-            select(Timesheet.employee_id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids), sunday_only)
-        )
-        union_ids = union_all(engagement_based, employee_dc_based).subquery()
+        entry_totals = (
+            select(
+                TimesheetEntry.timesheet_id.label("tid"),
+                func.coalesce(func.sum(entry_day_sum), 0).label("total_hours"),
+            ).group_by(TimesheetEntry.timesheet_id)
+        ).subquery()
 
-        def _sunday_of(d: date) -> date:
-            days_back = (d.weekday() + 1) % 7
-            return d - timedelta(days=days_back)
-
-        today = date.today()
-        end_of_current_week = _sunday_of(today) + timedelta(days=6)
-        exclude_future = or_(
-            ~Timesheet.status.in_([TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED]),
-            Timesheet.week_start_date <= end_of_current_week,
-        )
-
-        result = await self.session.execute(
-            select(Timesheet.employee_id)
-            .where(Timesheet.employee_id.in_(select(union_ids.c.employee_id)))
-            .where(exclude_future)
-            .where(sunday_only)
-            .distinct()
-        )
-        return [r[0] for r in result.fetchall() if r[0]]
-
-    async def list_approvable_employee_ids_for_approver(
-        self, approver_employee_id: UUID
-    ) -> List[UUID]:
-        """Return distinct employee IDs that have timesheets the approver can manage. Used as fallback for manageable employees."""
-        from sqlalchemy import union_all
-        from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement
-        from app.models.opportunity import Opportunity
-        from app.models.employee import Employee
-
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
-        )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
-
-        engagement_based = (
-            select(Timesheet.employee_id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
-            .where(Timesheet.employee_id.isnot(None))
-            .distinct()
-        )
-        employee_dc_based = (
-            select(Timesheet.employee_id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
-            .where(Timesheet.employee_id.isnot(None))
-        )
-
-        def _sunday_of(d: date) -> date:
-            days_back = (d.weekday() + 1) % 7
-            return d - timedelta(days=days_back)
-
-        today = date.today()
-        end_of_current_week = _sunday_of(today) + timedelta(days=6)
-        exclude_future = or_(
-            ~Timesheet.status.in_([TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED]),
-            Timesheet.week_start_date <= end_of_current_week,
-        )
-
-        union_ids = union_all(engagement_based, employee_dc_based).subquery()
         q = (
-            select(union_ids.c.employee_id)
-            .where(exclude_future)
+            select(
+                Timesheet.id,
+                Timesheet.employee_id,
+                Timesheet.week_start_date,
+                Timesheet.status,
+                Employee.first_name,
+                Employee.last_name,
+                func.coalesce(entry_totals.c.total_hours, 0).label("total_hours"),
+            )
+            .join(Employee, Timesheet.employee_id == Employee.id)
+            .outerjoin(entry_totals, Timesheet.id == entry_totals.c.tid)
+            .where(and_(Timesheet.id.in_(select(union_ids.c.id)), exclude_future, sunday_only))
+            .order_by(Timesheet.week_start_date.desc())
+            .offset(skip)
+            .limit(limit)
         )
-        # Need to apply exclude_future to the union - do it via a subquery on Timesheet
-        ids_subq = union_all(engagement_based, employee_dc_based).subquery()
-        q2 = (
-            select(Timesheet.employee_id)
-            .where(
-                Timesheet.id.in_(
-                    select(Timesheet.id)
-                    .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-                    .where(
-                        TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id))
+        r = await self.session.execute(q)
+        out: List[ApprovableTimesheetSummary] = []
+        for row in r.mappings().all():
+            th = row["total_hours"]
+            if th is not None and not isinstance(th, Decimal):
+                th = Decimal(str(th))
+            elif th is None:
+                th = Decimal("0")
+            out.append(
+                ApprovableTimesheetSummary(
+                    id=row["id"],
+                    employee_id=row["employee_id"],
+                    week_start_date=row["week_start_date"],
+                    status=row["status"],
+                    employee_first_name=row["first_name"],
+                    employee_last_name=row["last_name"],
+                    total_hours=th,
+                )
+            )
+        return out
+
+    async def count_approvable_timesheets_for_approver(
+        self,
+        approver_employee_id: UUID,
+        status_filter: Optional[TimesheetStatus] = None,
+        employee_id_filter: Optional[UUID] = None,
+    ) -> int:
+        """Count timesheets the approver can manage (same scope as list_approvable_timesheet_summaries)."""
+        from sqlalchemy import distinct
+
+        union_ids = _build_approvable_union_subquery(
+            approver_employee_id, status_filter, employee_id_filter
+        )
+        exclude_future, sunday_only = _approvable_list_outer_predicates()
+        result = await self.session.execute(
+            select(func.count(distinct(Timesheet.id)))
+            .where(and_(Timesheet.id.in_(select(union_ids.c.id)), exclude_future, sunday_only))
+        )
+        return int(result.scalar_one() or 0)
+
+    async def fetch_timesheet_entry_label_rows(
+        self, timesheet_ids: List[UUID]
+    ) -> List[Tuple[UUID, Any, Any, Any, Any, Any, Any]]:
+        """One query of entry fields + joined names for approval list labels; callers build label strings."""
+        if not timesheet_ids:
+            return []
+        from app.models.timesheet import TimesheetEntry
+        from app.models.engagement import Engagement
+        from app.models.opportunity import Opportunity
+        from app.models.account import Account
+
+        out: List[Tuple[UUID, Any, Any, Any, Any, Any, Any]] = []
+        chunk = 500
+        for i in range(0, len(timesheet_ids), chunk):
+            part = timesheet_ids[i : i + chunk]
+            r = await self.session.execute(
+                select(
+                    TimesheetEntry.timesheet_id,
+                    TimesheetEntry.entry_type,
+                    Engagement.name,
+                    Account.company_name,
+                    Opportunity.name,
+                    TimesheetEntry.engagement_display_name,
+                    TimesheetEntry.account_display_name,
+                )
+                .select_from(TimesheetEntry)
+                .outerjoin(Engagement, TimesheetEntry.engagement_id == Engagement.id)
+                .outerjoin(Account, TimesheetEntry.account_id == Account.id)
+                .outerjoin(Opportunity, TimesheetEntry.opportunity_id == Opportunity.id)
+                .where(TimesheetEntry.timesheet_id.in_(part))
+            )
+            for row in r.all():
+                out.append(
+                    (
+                        row[0],
+                        row[1],
+                        row[2],
+                        row[3],
+                        row[4],
+                        row[5],
+                        row[6],
                     )
                 )
-                | Timesheet.employee_id.in_(
-                    select(Employee.id).where(Employee.delivery_center_id.in_(approver_dc_ids))
-                )
-            )
-        )
-        # Simpler: just get distinct employee_ids from the full list_approvable_timesheets result
-        timesheets = await self.list_approvable_timesheets_for_approver(
-            approver_employee_id, status_filter=None, skip=0, limit=2000
-        )
-        return list({ts.employee_id for ts in timesheets if ts.employee_id})
-
-    async def list_approvable_employee_ids_for_approver(self, approver_employee_id: UUID) -> List[UUID]:
-        """Return distinct employee IDs that have timesheets the approver can manage (for dropdown fallback)."""
-        from sqlalchemy import union_all
-        from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement
-        from app.models.opportunity import Opportunity
-        from app.models.employee import Employee
-
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
-        )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
-
-        engagement_based = (
-            select(Timesheet.employee_id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
-            .distinct()
-        )
-        employee_dc_based = (
-            select(Timesheet.employee_id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
-        )
-        union_ids = union_all(engagement_based, employee_dc_based).subquery()
-
-        result = await self.session.execute(select(union_ids.c.employee_id).distinct())
-        return [r[0] for r in result.fetchall() if r[0]]
+        return out
 
     async def list_approvable_employee_ids_for_approver(
         self, approver_employee_id: UUID
     ) -> List[UUID]:
-        """Return distinct employee IDs from timesheets the approver can manage (fallback for manageable employees)."""
-        from sqlalchemy import union_all
-        from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement
-        from app.models.opportunity import Opportunity
-        from app.models.employee import Employee
-
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
+        """Distinct employee_ids for timesheets in approver scope (same filters as approvable list)."""
+        union_ids = _build_approvable_union_subquery(
+            approver_employee_id, status_filter=None, employee_id_filter=None
         )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
-
-        engagement_based = (
-            select(Timesheet.employee_id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
-            .where(Timesheet.employee_id.isnot(None))
-            .distinct()
-        )
-        employee_dc_based = (
-            select(Timesheet.employee_id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
-            .where(Timesheet.employee_id.isnot(None))
-            .distinct()
-        )
-        union_ids = union_all(engagement_based, employee_dc_based).subquery()
+        exclude_future, sunday_only = _approvable_list_outer_predicates()
         result = await self.session.execute(
-            select(union_ids.c.employee_id).distinct()
-        )
-        return [r[0] for r in result.fetchall() if r[0]]
-
-    async def list_approvable_employee_ids_for_approver(self, approver_employee_id: UUID) -> List[UUID]:
-        """Return distinct employee IDs from timesheets the approver can manage (engagement or DC path)."""
-        from sqlalchemy import union_all
-        from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement
-        from app.models.opportunity import Opportunity
-        from app.models.employee import Employee
-
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
-        )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
-
-        engagement_based = (
             select(Timesheet.employee_id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
-            .where(Timesheet.employee_id.isnot(None))
+            .where(
+                and_(
+                    Timesheet.id.in_(select(union_ids.c.id)),
+                    exclude_future,
+                    sunday_only,
+                    Timesheet.employee_id.isnot(None),
+                )
+            )
             .distinct()
-        )
-        employee_dc_based = (
-            select(Timesheet.employee_id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
-            .where(Timesheet.employee_id.isnot(None))
-            .distinct()
-        )
-        union_ids = union_all(engagement_based, employee_dc_based).subquery()
-        result = await self.session.execute(select(union_ids.c.employee_id).distinct())
-        return [r[0] for r in result.fetchall() if r[0]]
-
-    async def list_approvable_employee_ids_for_approver(
-        self, approver_employee_id: UUID, limit: int = 500
-    ) -> List[UUID]:
-        """Get distinct employee IDs from timesheets the approver can manage. Used as fallback for manageable employees."""
-        from sqlalchemy import union_all
-        from app.models.timesheet import TimesheetEntry
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.delivery_center_approver import DeliveryCenterApprover
-        from app.models.engagement import Engagement
-        from app.models.opportunity import Opportunity
-        from app.models.employee import Employee
-
-        def _sunday_of(d: date) -> date:
-            days_back = (d.weekday() + 1) % 7
-            return d - timedelta(days=days_back)
-
-        end_of_current_week = _sunday_of(date.today()) + timedelta(days=6)
-        exclude_future = or_(
-            ~Timesheet.status.in_([TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED]),
-            Timesheet.week_start_date <= end_of_current_week,
-        )
-
-        eng_approver_subq = select(EngagementTimesheetApprover.engagement_id).where(
-            EngagementTimesheetApprover.employee_id == approver_employee_id
-        )
-        dc_approver_subq = (
-            select(Engagement.id.label("engagement_id"))
-            .select_from(Engagement)
-            .join(Opportunity, Engagement.opportunity_id == Opportunity.id)
-            .join(DeliveryCenterApprover, Opportunity.delivery_center_id == DeliveryCenterApprover.delivery_center_id)
-            .where(DeliveryCenterApprover.employee_id == approver_employee_id)
-        )
-        approver_engagement_ids = union_all(eng_approver_subq, dc_approver_subq).subquery()
-        approver_dc_ids = select(DeliveryCenterApprover.delivery_center_id).where(
-            DeliveryCenterApprover.employee_id == approver_employee_id
-        )
-
-        engagement_based = (
-            select(Timesheet.employee_id)
-            .join(TimesheetEntry, Timesheet.id == TimesheetEntry.timesheet_id)
-            .where(TimesheetEntry.engagement_id.in_(select(approver_engagement_ids.c.engagement_id)))
-            .where(exclude_future)
-            .distinct()
-        )
-        employee_dc_based = (
-            select(Timesheet.employee_id)
-            .join(Employee, Timesheet.employee_id == Employee.id)
-            .where(Employee.delivery_center_id.in_(approver_dc_ids))
-            .where(exclude_future)
-        )
-        union_ids = union_all(engagement_based, employee_dc_based).subquery()
-
-        result = await self.session.execute(
-            select(union_ids.c.employee_id).distinct().limit(limit)
         )
         return [r[0] for r in result.fetchall() if r[0]]

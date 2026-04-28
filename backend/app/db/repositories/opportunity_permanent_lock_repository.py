@@ -2,7 +2,7 @@
 Opportunity permanent lock repository for database operations.
 """
 
-from typing import Optional
+from typing import Optional, Set, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -30,6 +30,17 @@ class OpportunityPermanentLockRepository(BaseRepository[OpportunityPermanentLock
         """Check if opportunity is permanently locked."""
         lock = await self.get_by_opportunity(opportunity_id)
         return lock is not None
+
+    async def list_locked_opportunity_ids_among(self, opportunity_ids: List[UUID]) -> Set[UUID]:
+        """Return which of the given opportunities have a permanent lock row."""
+        if not opportunity_ids:
+            return set()
+        result = await self.session.execute(
+            select(OpportunityPermanentLock.opportunity_id).where(
+                OpportunityPermanentLock.opportunity_id.in_(opportunity_ids)
+            )
+        )
+        return {row[0] for row in result.all() if row[0] is not None}
 
     async def create(self, **kwargs) -> OpportunityPermanentLock:
         """Create a new permanent lock."""

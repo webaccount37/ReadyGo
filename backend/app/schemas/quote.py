@@ -153,6 +153,18 @@ class QuoteStatusUpdate(BaseModel):
     sent_date: Optional[date] = None
 
 
+class QuoteListFinancialSummary(BaseModel):
+    """Precomputed totals for the quotes list (active quotes only); matches list UI math."""
+
+    total_cost: Decimal
+    total_revenue: Decimal
+    total_billable_hours: Decimal
+    margin_amount: Decimal
+    margin_percentage: Decimal
+    quote_amount: Decimal
+    currency: str
+
+
 class QuoteResponse(QuoteBase):
     """Schema for quote response."""
     id: UUID
@@ -178,6 +190,7 @@ class QuoteResponse(QuoteBase):
     cap_type: Optional[CapType] = None
     cap_amount: Optional[Decimal] = None
     created_engagement_id: Optional[UUID] = None
+    list_financial_summary: Optional[QuoteListFinancialSummary] = None
 
     class Config:
         from_attributes = True
@@ -191,8 +204,21 @@ class QuoteDetailResponse(QuoteResponse):
     variable_compensations: List[VariableCompensationResponse]
 
 
+class QuoteListOpportunitySnippet(BaseModel):
+    """Deduped opportunity context for the quotes list page (one row per opportunity in the page)."""
+
+    id: UUID
+    name: str
+    account_name: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    default_currency: str = "USD"
+    is_permanently_locked: bool = False
+
+
 class QuoteListResponse(BaseModel):
     """Schema for quote list response."""
     items: List[QuoteResponse]
     total: int
+    opportunities: List[QuoteListOpportunitySnippet] = Field(default_factory=list)
 

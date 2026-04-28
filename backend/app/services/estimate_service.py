@@ -2,6 +2,7 @@
 Estimate service with business logic.
 """
 
+import asyncio
 import logging
 import re
 from typing import List, Optional, Tuple, Dict
@@ -23,6 +24,7 @@ from app.db.repositories.employee_repository import EmployeeRepository
 from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.db.repositories.quote_repository import QuoteRepository
 from app.models.estimate import Estimate, EstimateLineItem, EstimateWeeklyHours
+from app.models.quote import Quote
 from app.models.delivery_center import DeliveryCenter
 from app.models.role_rate import RoleRate
 from app.models.role import Role
@@ -225,15 +227,7 @@ class EstimateService(BaseService):
         estimate = await self.estimate_repo.get_with_line_items(estimate_id)
         if not estimate:
             return None
-        
-        # Explicitly reload line items to ensure all are loaded and sorted
-        # Sometimes selectinload doesn't load all items properly
-        line_items = await self.line_item_repo.list_by_estimate(estimate_id)
-        if line_items:
-            # Replace the relationship-loaded items with explicitly queried ones
-            estimate.line_items = line_items
-            logger.info(f"Explicitly loaded {len(line_items)} line items for estimate {estimate_id}")
-        
+
         return await self._to_detail_response(estimate)
     
     async def list_estimates(
@@ -246,13 +240,23 @@ class EstimateService(BaseService):
         filters = {}
         if opportunity_id:
             filters["opportunity_id"] = opportunity_id
-        
-        estimates = await self.estimate_repo.list(skip=skip, limit=limit, **filters)
-        total = await self.estimate_repo.count(**filters)
-        
-        responses = []
+
+        estimates, total = await asyncio.gather(
+            self.estimate_repo.list_for_list_api(skip=skip, limit=limit, **filters),
+            self.estimate_repo.count(**filters),
+        )
+        opp_ids = list({e.opportunity_id for e in estimates})
+        active_by_opp = await self.quote_repo.map_active_quotes_by_opportunity_ids(opp_ids)
+
+        responses: List[EstimateResponse] = []
         for e in estimates:
-            responses.append(await self._to_response(e, include_line_items=False))
+            responses.append(
+                await self._to_response(
+                    e,
+                    include_line_items=False,
+                    active_quotes_by_opportunity=active_by_opp,
+                )
+            )
         return responses, total
     
     async def update_estimate(
@@ -293,7 +297,7 @@ class EstimateService(BaseService):
         updated = await self.estimate_repo.get(estimate_id)
         if not updated:
             return None
-        return self._to_response(updated, include_line_items=False)
+        return await self._to_response(updated, include_line_items=False)
     
     async def delete_estimate(self, estimate_id: UUID) -> bool:
         """Delete an estimate."""
@@ -1213,48 +1217,61 @@ class EstimateService(BaseService):
             overall_total_revenue=overall_total_revenue,
         )
     
-    async def _to_response(self, estimate: Estimate, include_line_items: bool = False) -> EstimateResponse:
+    async def _to_response(
+        self,
+        estimate: Estimate,
+        include_line_items: bool = False,
+        active_quotes_by_opportunity: Optional[Dict[UUID, Quote]] = None,
+    ) -> EstimateResponse:
         """Convert estimate model to response schema."""
         from sqlalchemy import inspect
-        
+        from sqlalchemy.orm.attributes import NO_VALUE
+
         inspector = inspect(estimate)
-        
-        # Safely get opportunity name and currency if loaded
+
+        # Safely get opportunity name and currency if loaded (NO_VALUE is not None but must be skipped)
         opportunity_name = None
         opportunity_currency = None
         try:
-            if inspector.attrs.opportunity.loaded_value is not None:
-                opportunity = inspector.attrs.opportunity.loaded_value
-                if opportunity:
-                    opportunity_name = opportunity.name
-                    opportunity_currency = opportunity.default_currency
+            opp_attr = inspector.attrs.opportunity
+            ov = opp_attr.loaded_value
+            if ov is not NO_VALUE and ov is not None:
+                opportunity_name = ov.name
+                opportunity_currency = ov.default_currency
         except (AttributeError, KeyError):
             pass
-        
+
         # Safely get created_by_employee name if loaded
         created_by_name = None
         try:
-            if inspector.attrs.created_by_employee.loaded_value is not None:
-                emp = inspector.attrs.created_by_employee.loaded_value
-                if emp:
-                    created_by_name = f"{emp.first_name} {emp.last_name}"
+            emp_attr = inspector.attrs.created_by_employee
+            ev = emp_attr.loaded_value
+            if ev is not NO_VALUE and ev is not None:
+                created_by_name = f"{ev.first_name} {ev.last_name}"
         except (AttributeError, KeyError):
             pass
         
-        # Safely get phases if loaded
+        # Safely get phases if loaded (list API uses noload(phases) -> empty list)
         phases_list = []
         try:
             phases_attr = inspector.attrs.get("phases")
-            if phases_attr and phases_attr.loaded_value is not None:
-                phases_list = [self._phase_to_response(p) for p in phases_attr.loaded_value]
+            if phases_attr:
+                val = phases_attr.loaded_value
+                if val is not NO_VALUE and val is not None:
+                    phases_list = [self._phase_to_response(p) for p in val]
         except (AttributeError, KeyError, TypeError):
             pass
-        
+
         # Check if estimate is locked by active quote (only lock active version)
         is_locked = False
         locked_by_quote_id = None
         try:
-            active_quote = await self.quote_repo.get_active_quote_by_opportunity(estimate.opportunity_id)
+            if active_quotes_by_opportunity is not None:
+                active_quote = active_quotes_by_opportunity.get(estimate.opportunity_id)
+            else:
+                active_quote = await self.quote_repo.get_active_quote_by_opportunity(
+                    estimate.opportunity_id
+                )
             if active_quote and estimate.active_version:
                 is_locked = True
                 locked_by_quote_id = active_quote.id
@@ -1278,30 +1295,16 @@ class EstimateService(BaseService):
         }
         
         if include_line_items:
-            # Safely get line_items if loaded
             estimate_dict["line_items"] = []
             try:
-                # Check if line_items relationship is loaded
                 line_items_attr = inspector.attrs.get("line_items")
-                if line_items_attr and line_items_attr.loaded_value is not None:
-                    line_items_list = line_items_attr.loaded_value
-                    logger.info(f"Found {len(line_items_list) if line_items_list else 0} line items in relationship for estimate {estimate.id}")
-                    if line_items_list:
-                        # Filter to only EstimateLineItem objects and sort by row_order
-                        # This ensures all line items are included and properly ordered
-                        filtered_items = [
-                            li for li in line_items_list 
-                            if isinstance(li, EstimateLineItem)
-                        ]
-                        logger.info(f"Filtered to {len(filtered_items)} EstimateLineItem objects (removed {len(line_items_list) - len(filtered_items)} non-line-item objects)")
-                        # Sort by row_order to ensure consistent ordering
-                        filtered_items.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
-                        logger.info(f"Line items row_order values: {[li.row_order for li in filtered_items]}")
-                        estimate_dict["line_items"] = [
-                            self._line_item_to_response(li) 
-                            for li in filtered_items
-                        ]
-                        logger.info(f"Converted {len(estimate_dict['line_items'])} line items to response format")
+                liv = line_items_attr.loaded_value if line_items_attr else NO_VALUE
+                if line_items_attr and liv is not NO_VALUE and liv is not None:
+                    filtered_items = [li for li in liv if isinstance(li, EstimateLineItem)]
+                    filtered_items.sort(key=lambda li: li.row_order if li.row_order is not None else 0)
+                    estimate_dict["line_items"] = [
+                        self._line_item_to_response(li) for li in filtered_items
+                    ]
             except (AttributeError, KeyError, TypeError) as e:
                 logger.error(f"Error processing line items: {e}", exc_info=True)
                 pass
@@ -1320,100 +1323,71 @@ class EstimateService(BaseService):
     def _line_item_to_response(self, line_item: EstimateLineItem) -> EstimateLineItemResponse:
         """Convert line item model to response schema."""
         from sqlalchemy import inspect
-        
+        from sqlalchemy.orm.attributes import NO_VALUE
+
         inspector = inspect(line_item)
-        
-        # Safely get role name and delivery center name from role_rate if loaded
+
         role_name = None
         delivery_center_name = None
+        role_rate_obj = None
         try:
-            if inspector.attrs.role_rate.loaded_value is not None:
-                role_rate = inspector.attrs.role_rate.loaded_value
-                if role_rate:
-                    # Get role name from role_rate.role
-                    if hasattr(role_rate, 'role') and role_rate.role:
-                        role_name = role_rate.role.role_name
-                    # Get delivery center name from role_rate.delivery_center
-                    if hasattr(role_rate, 'delivery_center') and role_rate.delivery_center:
-                        delivery_center_name = role_rate.delivery_center.name
+            rr_lv = inspector.attrs.role_rate.loaded_value
+            if rr_lv is not NO_VALUE and rr_lv is not None:
+                role_rate_obj = rr_lv
+                role = getattr(role_rate_obj, "role", None)
+                if role:
+                    role_name = role.role_name
+                dc = getattr(role_rate_obj, "delivery_center", None)
+                if dc:
+                    delivery_center_name = dc.name
         except (AttributeError, KeyError):
             pass
-        
-        # Safely get employee name if loaded
+
         employee_name = None
         try:
-            if inspector.attrs.employee.loaded_value is not None:
-                emp = inspector.attrs.employee.loaded_value
-                if emp:
-                    employee_name = f"{emp.first_name} {emp.last_name}"
+            emp_lv = inspector.attrs.employee.loaded_value
+            if emp_lv is not NO_VALUE and emp_lv is not None:
+                employee_name = f"{emp_lv.first_name} {emp_lv.last_name}"
         except (AttributeError, KeyError):
             pass
-        
-        # CRITICAL FIX: Use exact same approach as Release/Opportunity services
-        # Release service does: assoc.start_date.isoformat() directly on the date object
-        # We must do the same - call .isoformat() directly on line_item.start_date
-        # This ensures dates match exactly between Release/Opportunity and Estimate pages
-        
-        logger.info(f"  === RETRIEVING FROM DB (FOR RESPONSE) ===")
-        logger.info(f"  line_item.start_date = {line_item.start_date} (type: {type(line_item.start_date)})")
-        logger.info(f"  line_item.end_date = {line_item.end_date} (type: {type(line_item.end_date)})")
-        
-        # Extract date part - if datetime, get date() first, then isoformat()
-        # If date, call isoformat() directly (same as Release service)
+
         if isinstance(line_item.start_date, datetime):
-            # If datetime, get date part first, then isoformat
             start_date_iso = line_item.start_date.date().isoformat()
-            logger.warning(f"  start_date was datetime! date()={line_item.start_date.date()}, isoformat={start_date_iso}")
         elif isinstance(line_item.start_date, date):
-            # Pure date object - call isoformat() directly (same as Opportunity service)
             start_date_iso = line_item.start_date.isoformat()
-            logger.info(f"  start_date.isoformat() = {start_date_iso}")
         else:
-            # String - extract date part
             start_date_iso = str(line_item.start_date).split("T")[0].split(" ")[0]
-        
+
         if isinstance(line_item.end_date, datetime):
             end_date_iso = line_item.end_date.date().isoformat()
-            logger.warning(f"  end_date was datetime! date()={line_item.end_date.date()}, isoformat={end_date_iso}")
         elif isinstance(line_item.end_date, date):
-            # Pure date object - call isoformat() directly (same as Opportunity service)
             end_date_iso = line_item.end_date.isoformat()
-            logger.info(f"  end_date.isoformat() = {end_date_iso}")
         else:
             end_date_iso = str(line_item.end_date).split("T")[0].split(" ")[0]
-        
-        logger.info(f"  === SERIALIZATION ===")
-        logger.info(f"  Final ISO strings: start_date={start_date_iso}, end_date={end_date_iso}")
-        
-        # Serialize dates directly as ISO strings (EXACTLY like Opportunity service)
-        # Opportunity service: "start_date": assoc.start_date.isoformat() if assoc.start_date else None
-        # Get role_id and delivery_center_id from role_rate for backward compatibility
+
         role_id = None
         delivery_center_id = None
-        if line_item.role_rate:
-            if line_item.role_rate.role:
-                role_id = line_item.role_rate.role.id
-            if line_item.role_rate.delivery_center:
-                delivery_center_id = line_item.role_rate.delivery_center.id
-        
-        # Get payable_center_name from payable_center relationship
+        if role_rate_obj:
+            if getattr(role_rate_obj, "role", None):
+                role_id = role_rate_obj.role.id
+            if getattr(role_rate_obj, "delivery_center", None):
+                delivery_center_id = role_rate_obj.delivery_center.id
+
         payable_center_name = None
         try:
-            if inspector.attrs.payable_center.loaded_value is not None:
-                payable_center = inspector.attrs.payable_center.loaded_value
-                if payable_center:
-                    payable_center_name = payable_center.name
+            pc_lv = inspector.attrs.payable_center.loaded_value
+            if pc_lv is not NO_VALUE and pc_lv is not None:
+                payable_center_name = pc_lv.name
         except (AttributeError, KeyError):
-            # If not loaded, try to get from line_item.payable_center if available
-            if hasattr(line_item, 'payable_center') and line_item.payable_center:
+            if hasattr(line_item, "payable_center") and line_item.payable_center:
                 payable_center_name = line_item.payable_center.name
-        
+
         effective_payable_id = (
             line_item.payable_center_id if getattr(line_item, "payable_center_id", None) else delivery_center_id
         )
         if not payable_center_name and effective_payable_id and delivery_center_id == effective_payable_id:
-            if line_item.role_rate and line_item.role_rate.delivery_center:
-                payable_center_name = line_item.role_rate.delivery_center.name
+            if role_rate_obj and getattr(role_rate_obj, "delivery_center", None):
+                payable_center_name = role_rate_obj.delivery_center.name
         line_item_dict = {
             "id": line_item.id,
             "estimate_id": line_item.estimate_id,
@@ -1436,46 +1410,27 @@ class EstimateService(BaseService):
             "employee_name": employee_name,
         }
         
-        # Safely get weekly hours if loaded
         try:
             weekly_hours_attr = inspector.attrs.get("weekly_hours")
-            if weekly_hours_attr and weekly_hours_attr.loaded_value is not None:
-                weekly_hours_list = weekly_hours_attr.loaded_value
-                logger.info(f"Found {len(weekly_hours_list) if weekly_hours_list else 0} weekly hours in loaded_value")
-                # Build dicts directly, serializing dates as ISO strings (same as Opportunity service)
+            wh_lv = weekly_hours_attr.loaded_value if weekly_hours_attr else NO_VALUE
+            if weekly_hours_attr and wh_lv is not NO_VALUE and wh_lv is not None:
                 line_item_dict["weekly_hours"] = [
                     {
                         "id": str(wh.id),
-                        "week_start_date": wh.week_start_date.isoformat() if isinstance(wh.week_start_date, date) else str(wh.week_start_date).split("T")[0],
+                        "week_start_date": wh.week_start_date.isoformat()
+                        if isinstance(wh.week_start_date, date)
+                        else str(wh.week_start_date).split("T")[0],
                         "hours": str(wh.hours),
                     }
-                    for wh in weekly_hours_list
+                    for wh in wh_lv
                     if isinstance(wh, EstimateWeeklyHours)
                 ]
-                logger.info(f"Serialized {len(line_item_dict['weekly_hours'])} weekly hours")
             else:
-                # If weekly_hours is not loaded or is None, set empty list
-                logger.warning("weekly_hours not loaded or is None")
                 line_item_dict["weekly_hours"] = []
-        except (AttributeError, KeyError, TypeError) as e:
-            logger.warning(f"Error serializing weekly_hours: {e}", exc_info=True)
-            # Set empty list as fallback
+        except (AttributeError, KeyError, TypeError):
             line_item_dict["weekly_hours"] = []
-        
-        logger.info(f"  === BEFORE PYDANTIC ===")
-        logger.info(f"  Dict start_date = {line_item_dict.get('start_date')} (type: {type(line_item_dict.get('start_date'))})")
-        logger.info(f"  Dict end_date = {line_item_dict.get('end_date')} (type: {type(line_item_dict.get('end_date'))})")
-        
-        # Validate and serialize the response
-        response = EstimateLineItemResponse.model_validate(line_item_dict)
-        
-        logger.info(f"  === AFTER PYDANTIC ===")
-        logger.info(f"  Response start_date = {response.start_date} (type: {type(response.start_date)})")
-        logger.info(f"  Response end_date = {response.end_date} (type: {type(response.end_date)})")
-        logger.info(f"  Response model_dump() start_date = {response.model_dump().get('start_date')}")
-        logger.info(f"  Response model_dump() end_date = {response.model_dump().get('end_date')}")
-        
-        return response
+
+        return EstimateLineItemResponse.model_validate(line_item_dict)
     
     def _weekly_hours_to_response(self, weekly_hours: EstimateWeeklyHours) -> EstimateWeeklyHoursResponse:
         """Convert weekly hours model to response schema."""

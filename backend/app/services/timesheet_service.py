@@ -21,7 +21,6 @@ from app.db.repositories.opportunity_permanent_lock_repository import Opportunit
 from app.db.repositories.engagement_line_item_repository import EngagementLineItemRepository
 from app.db.repositories.engagement_weekly_hours_repository import EngagementWeeklyHoursRepository
 from app.db.repositories.engagement_repository import EngagementRepository
-from app.db.repositories.quote_repository import QuoteRepository
 from app.db.repositories.calendar_repository import CalendarRepository
 from app.models.timesheet import (
     Timesheet,
@@ -34,7 +33,7 @@ from app.models.timesheet import (
 from app.models.engagement import Engagement, EngagementLineItem, EngagementPhase, EngagementWeeklyHours
 from app.models.employee import Employee, EmployeeStatus
 from app.services.internal_holiday_timesheet_links import resolve_holiday_row_targets
-from app.models.quote import InvoiceDetail
+from app.models.quote import InvoiceDetail, Quote
 from app.utils.currency_converter import convert_currency
 from app.schemas.timesheet import (
     TimesheetResponse,
@@ -47,6 +46,18 @@ from app.schemas.timesheet import (
 logger = logging.getLogger(__name__)
 
 MIN_HOURS_TO_SUBMIT = Decimal("40")
+
+
+async def _weekly_hours_by_line_item_for_week(
+    weekly_hours_repo: EngagementWeeklyHoursRepository,
+    line_item_ids: List[UUID],
+    week_start: date,
+) -> Dict[UUID, EngagementWeeklyHours]:
+    """Single-query map line_item_id -> weekly hours row for that week."""
+    if not line_item_ids:
+        return {}
+    rows = await weekly_hours_repo.list_by_line_items_and_week(line_item_ids, week_start)
+    return {r.engagement_line_item_id: r for r in rows}
 
 
 def _compute_holiday_hours_by_dow_from_calendar_events(events: List) -> List[Decimal]:
@@ -88,7 +99,6 @@ class TimesheetService(BaseService):
         self.line_item_repo = EngagementLineItemRepository(session)
         self.weekly_hours_repo = EngagementWeeklyHoursRepository(session)
         self.engagement_repo = EngagementRepository(session)
-        self.quote_repo = QuoteRepository(session)
         self.calendar_repo = CalendarRepository(session)
 
     async def _resolve_engagement_row_line_item(
@@ -187,6 +197,31 @@ class TimesheetService(BaseService):
             return await self._to_response(timesheet, entries_override=fresh_entries)
         return await self._to_response(timesheet)
 
+    async def _create_missing_timesheets_for_keys(
+        self, required_keys: set[tuple[UUID, date]]
+    ) -> None:
+        """Batch-check existence for (employee_id, week_start_date), create defaults only for gaps."""
+        if not required_keys:
+            return
+        chunk_size = 2000
+        keys_list = list(required_keys)
+        existing: set[tuple[UUID, date]] = set()
+        for i in range(0, len(keys_list), chunk_size):
+            chunk = keys_list[i : i + chunk_size]
+            for ts in await self.timesheet_repo.list_by_employee_week_keys(chunk):
+                existing.add((ts.employee_id, ts.week_start_date))
+        missing = required_keys - existing
+        for employee_id, week_start in missing:
+            ts = await self.timesheet_repo.create(
+                employee_id=employee_id,
+                week_start_date=week_start,
+                status=TimesheetStatus.NOT_SUBMITTED,
+            )
+            await self._default_entries_from_resource_plan(ts)
+            await self._add_holiday_entries(ts)
+        if missing:
+            await self.session.commit()
+
     async def ensure_timesheets_for_engagement_employees(
         self, engagement_ids: List[UUID], max_weeks_back: int = 12
     ) -> None:
@@ -211,7 +246,7 @@ class TimesheetService(BaseService):
         oldest_week = today - timedelta(days=7 * max_weeks_back)
         oldest_week_start = _get_week_start(oldest_week)
 
-        seen: set[tuple[UUID, date]] = set()
+        required_keys: set[tuple[UUID, date]] = set()
         for employee_id, start_date, end_date in rows:
             if not employee_id:
                 continue
@@ -224,24 +259,10 @@ class TimesheetService(BaseService):
                 range_end = end_of_current_week
             while week_start <= range_end:
                 if week_end >= start_date and (not end_date or week_start <= end_date):
-                    key = (employee_id, week_start)
-                    if key not in seen:
-                        seen.add(key)
-                        existing = await self.timesheet_repo.get_by_employee_and_week(
-                            employee_id, week_start
-                        )
-                        if not existing:
-                            ts = await self.timesheet_repo.create(
-                                employee_id=employee_id,
-                                week_start_date=week_start,
-                                status=TimesheetStatus.NOT_SUBMITTED,
-                            )
-                            await self._default_entries_from_resource_plan(ts)
-                            await self._add_holiday_entries(ts)
+                    required_keys.add((employee_id, week_start))
                 week_start += timedelta(days=7)
                 week_end = week_start + timedelta(days=6)
-        if seen:
-            await self.session.commit()
+        await self._create_missing_timesheets_for_keys(required_keys)
 
     async def ensure_timesheets_for_dc_employees(
         self, delivery_center_ids: List[UUID], max_weeks_back: int = 12
@@ -265,7 +286,7 @@ class TimesheetService(BaseService):
         oldest_week = today - timedelta(days=7 * max_weeks_back)
         oldest_week_start = _get_week_start(oldest_week)
 
-        seen: set[tuple[UUID, date]] = set()
+        required_keys: set[tuple[UUID, date]] = set()
         for employee_id, emp_start_date in rows:
             if not employee_id or not emp_start_date:
                 continue
@@ -280,24 +301,10 @@ class TimesheetService(BaseService):
                 week_end = week_start + timedelta(days=6)
             while week_start <= end_of_current_week:
                 if week_end >= emp_start_date:
-                    key = (employee_id, week_start)
-                    if key not in seen:
-                        seen.add(key)
-                        existing = await self.timesheet_repo.get_by_employee_and_week(
-                            employee_id, week_start
-                        )
-                        if not existing:
-                            ts = await self.timesheet_repo.create(
-                                employee_id=employee_id,
-                                week_start_date=week_start,
-                                status=TimesheetStatus.NOT_SUBMITTED,
-                            )
-                            await self._default_entries_from_resource_plan(ts)
-                            await self._add_holiday_entries(ts)
+                    required_keys.add((employee_id, week_start))
                 week_start += timedelta(days=7)
                 week_end = week_start + timedelta(days=6)
-        if seen:
-            await self.session.commit()
+        await self._create_missing_timesheets_for_keys(required_keys)
 
     async def sync_engagement_to_timesheets(
         self,
@@ -393,17 +400,36 @@ class TimesheetService(BaseService):
         }
         max_row = max((e.row_order for e in existing_entries), default=-1)
 
-        rows_with_hours: List[Tuple[EngagementLineItem, Decimal]] = []
-        for li in line_items:
-            if li.id in dismissed or li.id in existing_line_item_ids:
-                continue
-            if plan_hours_by_line_and_week is not None:
+        hours_by_li: Dict[UUID, Decimal] = {}
+        if plan_hours_by_line_and_week is not None:
+            for li in line_items:
+                if li.id in dismissed or li.id in existing_line_item_ids:
+                    continue
                 h = plan_hours_by_line_and_week.get((li.id, week_start), Decimal("0"))
-            else:
-                plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(li.id, week_start)
-                h = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
-            if h > 0:
-                rows_with_hours.append((li, h))
+                if h > 0:
+                    hours_by_li[li.id] = h
+        else:
+            li_ids = [
+                li.id
+                for li in line_items
+                if li.id not in dismissed and li.id not in existing_line_item_ids
+            ]
+            wh_map = await _weekly_hours_by_line_item_for_week(
+                self.weekly_hours_repo, li_ids, week_start
+            )
+            for li in line_items:
+                if li.id in dismissed or li.id in existing_line_item_ids:
+                    continue
+                plan_row = wh_map.get(li.id)
+                h = Decimal(str(plan_row.hours)) if plan_row else Decimal("0")
+                if h > 0:
+                    hours_by_li[li.id] = h
+
+        rows_with_hours: List[Tuple[EngagementLineItem, Decimal]] = [
+            (li, hours_by_li[li.id])
+            for li in line_items
+            if li.id in hours_by_li
+        ]
 
         new_entries: List[TimesheetEntry] = []
         for line_item, plan_weekly_hours in rows_with_hours:
@@ -448,12 +474,16 @@ class TimesheetService(BaseService):
         When plan has 0 hours, removes the entry (user must add manually via Add Row)."""
         week_start = timesheet.week_start_date
         existing_entries = await self.entry_repo.list_by_timesheet(timesheet.id)
+        li_ids = [
+            e.engagement_line_item_id
+            for e in existing_entries
+            if e.engagement_line_item_id and not getattr(e, "is_holiday_row", False)
+        ]
+        wh_map = await _weekly_hours_by_line_item_for_week(self.weekly_hours_repo, li_ids, week_start)
         for entry in existing_entries:
             if not entry.engagement_line_item_id or getattr(entry, "is_holiday_row", False):
                 continue
-            plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(
-                entry.engagement_line_item_id, week_start
-            )
+            plan_hours = wh_map.get(entry.engagement_line_item_id)
             plan_weekly = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
             if plan_weekly <= 0:
                 await self.dismissed_repo.add_dismissed(timesheet.id, entry.engagement_line_item_id)
@@ -488,15 +518,26 @@ class TimesheetService(BaseService):
             return
         cache: Dict[UUID, Engagement] = engagement_cache if engagement_cache is not None else {}
 
-        rows_with_hours: List[Tuple[EngagementLineItem, Decimal]] = []
-        for li in line_items:
-            if plan_hours_by_line_and_week is not None:
+        hours_by_li: Dict[UUID, Decimal] = {}
+        if plan_hours_by_line_and_week is not None:
+            for li in line_items:
                 h = plan_hours_by_line_and_week.get((li.id, week_start), Decimal("0"))
-            else:
-                plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(li.id, week_start)
-                h = Decimal(str(plan_hours.hours)) if plan_hours else Decimal("0")
-            if h > 0:
-                rows_with_hours.append((li, h))
+                if h > 0:
+                    hours_by_li[li.id] = h
+        else:
+            li_ids = [li.id for li in line_items]
+            wh_map = await _weekly_hours_by_line_item_for_week(
+                self.weekly_hours_repo, li_ids, week_start
+            )
+            for li in line_items:
+                plan_row = wh_map.get(li.id)
+                h = Decimal(str(plan_row.hours)) if plan_row else Decimal("0")
+                if h > 0:
+                    hours_by_li[li.id] = h
+
+        rows_with_hours: List[Tuple[EngagementLineItem, Decimal]] = [
+            (li, hours_by_li[li.id]) for li in line_items if li.id in hours_by_li
+        ]
 
         new_entries: List[TimesheetEntry] = []
         for row_order, (line_item, plan_weekly_hours) in enumerate(rows_with_hours):
@@ -734,12 +775,15 @@ class TimesheetService(BaseService):
             if e.engagement_line_item_id
         }
         max_row = max((e.row_order for e in existing_entries), default=-1)
+        wh_map = await _weekly_hours_by_line_item_for_week(
+            self.weekly_hours_repo, [li.id for li in line_items], week_start
+        )
         for line_item in line_items:
             if not line_item.billable:
                 continue  # only add back billable Resource Plan engagements; non-billable stay deleted
             if line_item.id in dismissed or line_item.id in existing_line_item_ids:
                 continue
-            plan_hours = await self.weekly_hours_repo.get_by_line_item_and_week(line_item.id, week_start)
+            plan_hours = wh_map.get(line_item.id)
             if not plan_hours or Decimal(str(plan_hours.hours)) <= 0:
                 continue  # skip 0-hour engagements - user must add manually
             plan_weekly = Decimal(str(plan_hours.hours))
@@ -1125,6 +1169,23 @@ class TimesheetService(BaseService):
 
         total = Decimal("0")
         plan_vs_actual_warnings = []
+        submit_li_ids = [
+            e.engagement_line_item_id
+            for e in (timesheet.entries or [])
+            if e.engagement_line_item_id
+        ]
+        submit_wh_map = await _weekly_hours_by_line_item_for_week(
+            self.weekly_hours_repo, submit_li_ids, timesheet.week_start_date
+        )
+        submit_eng_ids = {
+            e.engagement_id for e in (timesheet.entries or []) if e.engagement_id
+        }
+        submit_eng_names: Dict[UUID, str] = {}
+        if submit_eng_ids:
+            er = await self.session.execute(
+                select(Engagement.id, Engagement.name).where(Engagement.id.in_(submit_eng_ids))
+            )
+            submit_eng_names = {row[0]: row[1] for row in er.all()}
         for entry in timesheet.entries:
             entry_total = sum(
                 Decimal(str(getattr(entry, f"{d}_hours") or 0))
@@ -1132,12 +1193,13 @@ class TimesheetService(BaseService):
             )
             total += entry_total
             if entry.engagement_line_item_id:
-                plan = await self.weekly_hours_repo.get_by_line_item_and_week(
-                    entry.engagement_line_item_id, timesheet.week_start_date
-                )
+                plan = submit_wh_map.get(entry.engagement_line_item_id)
                 if plan and entry_total != Decimal(str(plan.hours)):
-                    eng = await self.engagement_repo.get(entry.engagement_id) if entry.engagement_id else None
-                    name = eng.name if eng else "Unknown"
+                    name = (
+                        submit_eng_names.get(entry.engagement_id, "Unknown")
+                        if entry.engagement_id
+                        else "Unknown"
+                    )
                     plan_vs_actual_warnings.append(
                         f"{name}: Plan {plan.hours}h vs Actual {entry_total}h"
                     )
@@ -1181,9 +1243,34 @@ class TimesheetService(BaseService):
     ) -> TimesheetResponse:
         """Convert timesheet to response schema. Use entries_override when provided to avoid stale session cache."""
         entries = entries_override if entries_override is not None else (timesheet.entries or [])
+        sorted_entries = sorted(entries, key=lambda e: e.row_order)
+        li_ids_for_plan = [e.engagement_line_item_id for e in sorted_entries if e.engagement_line_item_id]
+        wh_map = await _weekly_hours_by_line_item_for_week(
+            self.weekly_hours_repo, li_ids_for_plan, timesheet.week_start_date
+        )
+        engagement_ids_for_notes = {
+            e.engagement_id
+            for e in sorted_entries
+            if e.engagement_id and e.entry_type != TimesheetEntryType.HOLIDAY
+        }
+        eng_to_quote: Dict[UUID, UUID] = {}
+        if engagement_ids_for_notes:
+            er = await self.session.execute(
+                select(Engagement.id, Engagement.quote_id).where(Engagement.id.in_(engagement_ids_for_notes))
+            )
+            eng_to_quote = {row[0]: row[1] for row in er.all() if row[1]}
+        quote_ids = set(eng_to_quote.values())
+        quote_requires_notes: Dict[UUID, bool] = {}
+        if quote_ids:
+            qr = await self.session.execute(
+                select(Quote.id, Quote.invoice_detail).where(Quote.id.in_(quote_ids))
+            )
+            for qid, inv in qr.all():
+                quote_requires_notes[qid] = inv == InvoiceDetail.EMPLOYEE_WITH_DESCRIPTIONS
+
         total = Decimal("0")
         entries_resp = []
-        for entry in sorted(entries, key=lambda e: e.row_order):
+        for entry in sorted_entries:
             entry_total = sum(
                 Decimal(str(getattr(entry, f"{d}_hours") or 0))
                 for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
@@ -1191,18 +1278,13 @@ class TimesheetService(BaseService):
             total += entry_total
             plan_hours = None
             if entry.engagement_line_item_id:
-                plan = await self.weekly_hours_repo.get_by_line_item_and_week(
-                    entry.engagement_line_item_id, timesheet.week_start_date
-                )
+                plan = wh_map.get(entry.engagement_line_item_id)
                 if plan:
                     plan_hours = Decimal(str(plan.hours))
             requires_notes = False
             if entry.engagement_id and entry.entry_type != TimesheetEntryType.HOLIDAY:
-                eng = await self.engagement_repo.get(entry.engagement_id)
-                if eng and eng.quote_id:
-                    quote = await self.quote_repo.get(eng.quote_id)
-                    if quote and quote.invoice_detail == InvoiceDetail.EMPLOYEE_WITH_DESCRIPTIONS:
-                        requires_notes = True
+                qid = eng_to_quote.get(entry.engagement_id)
+                requires_notes = bool(qid and quote_requires_notes.get(qid))
             day_notes_resp = [
                 TimesheetDayNoteResponse(
                     id=n.id, timesheet_entry_id=n.timesheet_entry_id, day_of_week=n.day_of_week, note=n.note

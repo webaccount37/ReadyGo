@@ -1,9 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { useParams } from "next/navigation";
 import { useEngagementDetail, useApprovedHoursByWeek } from "@/hooks/useEngagements";
 import { useOpportunity } from "@/hooks/useOpportunities";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
+import { useBillingTerms } from "@/hooks/useBillingTerms";
 import { ResourcePlan } from "@/components/engagements/resource-plan";
 import { PhaseManagement } from "@/components/engagements/phase-management";
 import { ComparativeSummary } from "@/components/engagements/comparative-summary";
@@ -30,12 +32,30 @@ export default function EngagementDetailPage() {
   });
   const { data: opportunity } = useOpportunity(engagement?.opportunity_id || "", false);
   const { data: deliveryCentersData } = useDeliveryCenters();
+  const { data: billingTermsData } = useBillingTerms({ limit: 500, active_only: true });
 
   const getDeliveryCenterName = (dcId: string | undefined): string => {
     if (!dcId || !deliveryCentersData?.items) return dcId || "—";
     const dc = deliveryCentersData.items.find(d => d.id === dcId);
     return dc?.name || dcId;
   };
+
+  const formatShortDate = (iso: string | undefined | null) => {
+    if (!iso) return "—";
+    const p = iso.split("T")[0].split("-").map(Number);
+    if (p.length < 3) return "—";
+    return new Date(p[0]!, p[1]! - 1, p[2]!).toLocaleDateString("en-US", {
+      month: "numeric",
+      day: "numeric",
+      year: "2-digit",
+    });
+  };
+
+  const paymentTermsLabel = useMemo(() => {
+    if (!opportunity?.billing_term_id || !billingTermsData?.items?.length) return "—";
+    const t = billingTermsData.items.find((x) => x.id === opportunity.billing_term_id);
+    return t?.name || "—";
+  }, [opportunity?.billing_term_id, billingTermsData?.items]);
 
   if (isLoading) {
     return (
@@ -123,10 +143,10 @@ export default function EngagementDetailPage() {
               </Button>
             </Link>
           )}
-          {engagement.quote_id && (
-            <Link href={`/quotes/${engagement.quote_id}`}>
+          {engagement.estimate_id && (
+            <Link href={`/estimates/${engagement.estimate_id}`}>
               <Button variant="outline" size="sm">
-                View Quote
+                View estimate
               </Button>
             </Link>
           )}
@@ -147,6 +167,22 @@ export default function EngagementDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+            {opportunity && (
+              <>
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-semibold">Opportunity start date:</span>
+                  <span>{formatShortDate(opportunity.start_date)}</span>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-semibold">Opportunity end date:</span>
+                  <span>{formatShortDate(opportunity.end_date)}</span>
+                </div>
+                <div className="flex flex-wrap items-baseline gap-x-2 sm:col-span-2">
+                  <span className="font-semibold">Payment terms:</span>
+                  <span>{paymentTermsLabel}</span>
+                </div>
+              </>
+            )}
             {opportunity?.delivery_center_id && (
               <div className="flex items-center">
                 <span className="font-semibold mr-2">Invoice Center:</span>
@@ -168,6 +204,62 @@ export default function EngagementDetailPage() {
             {engagement.description && (
               <div className="col-span-2">
                 <span className="font-semibold">Description:</span> {engagement.description}
+              </div>
+            )}
+            {engagement.quote_id && (
+              <div className="col-span-2 border-t border-gray-200 pt-4 mt-2">
+                <h3 className="text-sm font-semibold text-gray-900 mb-3">Quote</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="font-medium text-gray-700">Estimate: </span>
+                    {engagement.estimate_id ? (
+                      <Link
+                        href={`/estimates/${engagement.estimate_id}`}
+                        className="text-blue-600 hover:underline"
+                      >
+                        {engagement.quote_display_name || engagement.quote_number || engagement.quote_id}
+                      </Link>
+                    ) : (
+                      <span>
+                        {engagement.quote_display_name || engagement.quote_number || engagement.quote_id}
+                      </span>
+                    )}
+                  </div>
+                  {engagement.comparative_summary && (
+                    <>
+                      {engagement.comparative_summary.quote_amount != null && (
+                        <div>
+                          <span className="font-medium text-gray-700">Quote amount: </span>
+                          <span>
+                            {new Intl.NumberFormat("en-US", {
+                              style: "currency",
+                              currency: engagement.comparative_summary.currency || "USD",
+                            }).format(
+                              typeof engagement.comparative_summary.quote_amount === "string"
+                                ? parseFloat(engagement.comparative_summary.quote_amount)
+                                : Number(engagement.comparative_summary.quote_amount)
+                            )}
+                          </span>
+                        </div>
+                      )}
+                      {engagement.comparative_summary.estimate_revenue != null && (
+                        <div>
+                          <span className="font-medium text-gray-700">Estimate revenue: </span>
+                          <span>
+                            {new Intl.NumberFormat("en-US", {
+                              style: "currency",
+                              currency: engagement.comparative_summary.currency || "USD",
+                            }).format(
+                              typeof engagement.comparative_summary.estimate_revenue === "string"
+                                ? parseFloat(engagement.comparative_summary.estimate_revenue)
+                                : Number(engagement.comparative_summary.estimate_revenue)
+                            )}
+                          </span>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
               </div>
             )}
           </div>

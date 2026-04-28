@@ -431,6 +431,44 @@ export function EngagementLineItemRow({
       return;
     }
 
+    // role_id must not share the debounced timer with rate/cost/other fields: a follow-up
+    // handleFieldUpdate("rate") from the role effect clears this timer and would drop the role save
+    // (same pattern as estimate-line-item-row: immediate save).
+    if (field === "role_id") {
+      isUpdatingRoleIdRef.current = true;
+      isUpdatingRef.current = true;
+      const payload: Partial<EngagementLineItemUpdate> = {
+        role_id: value === "" || value === undefined ? null : value,
+      };
+      void (async () => {
+        try {
+          logResourcePlanServerCall("updateLineItem", "lineItemRow: handleFieldUpdate (immediate) field=role_id", {
+            engagementId,
+            lineItemId: lineItem.id,
+            body: payload,
+          });
+          await updateLineItem.mutateAsync({
+            engagementId,
+            lineItemId: lineItem.id,
+            data: payload,
+          });
+        } catch (err) {
+          console.error(`Failed to update ${field}:`, err);
+          setRoleValue(originalValue);
+          isUpdatingRef.current = false;
+          isUpdatingRoleIdRef.current = false;
+          return;
+        }
+        setTimeout(() => {
+          isUpdatingRef.current = false;
+          setTimeout(() => {
+            isUpdatingRoleIdRef.current = false;
+          }, 500);
+        }, 100);
+      })();
+      return;
+    }
+
     // Set updating flag to prevent useEffect from interfering
     isUpdatingRef.current = true;
 
@@ -453,10 +491,6 @@ export function EngagementLineItemRow({
           // For employee_id, send null when clearing (empty string becomes null)
           // This allows the backend to properly clear the association
           updateData.employee_id = value === "" || value === undefined ? null : value;
-        } else if (field === "role_id") {
-          // For role_id, send null when clearing (empty string becomes null)
-          // This allows the backend to properly clear the role
-          updateData.role_id = value === "" || value === undefined ? null : value;
         } else if (field === "cost") {
           updateData.cost = value;
         } else if (field === "rate") {
@@ -467,10 +501,6 @@ export function EngagementLineItemRow({
           updateData.end_date = value;
         } else if (field === "payable_center_id") {
           updateData.payable_center_id = value;
-        } else if (field === "role_id") {
-          updateData.role_id = value;
-          // Set flag to prevent sync effect from overwriting role_id during update
-          isUpdatingRoleIdRef.current = true;
         } else if (field === "currency") {
           updateData.currency = value;
         } else if (field === "row_order") {
@@ -499,29 +529,17 @@ export function EngagementLineItemRow({
         // Use a small delay to allow the query invalidation to complete
         setTimeout(() => {
           isUpdatingRef.current = false;
-          // Clear role_id update flag after backend has processed and refetched
-          if (field === "role_id") {
-            // Give extra time for the backend to update and refetch
-            setTimeout(() => {
-              isUpdatingRoleIdRef.current = false;
-            }, 500);
-          }
         }, 100);
       } catch (err) {
         console.error(`Failed to update ${field}:`, err);
         // Clear updating flag on error
         isUpdatingRef.current = false;
-        // Clear role_id update flag on error
-        if (field === "role_id") {
-          isUpdatingRoleIdRef.current = false;
-        }
         // Revert on error
         if (field === "cost") setCostValue(originalValue);
         else if (field === "rate") setRateValue(originalValue);
         else if (field === "start_date") setStartDateValue(originalValue.split("T")[0]);
         else if (field === "end_date") setEndDateValue(originalValue.split("T")[0]);
         else if (field === "payable_center_id") setPayableCenterValue(originalValue);
-        else if (field === "role_id") setRoleValue(originalValue);
         else if (field === "employee_id") setEmployeeValue(originalValue || "");
         else if (field === "billable") setBillableValue(originalValue === "true" || originalValue === "True");
         else if (field === "billable_expense_percentage") setBillableExpensePercentageValue(originalValue || "0");

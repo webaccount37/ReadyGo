@@ -176,13 +176,16 @@ The CLI logs a line like:
 Optional extra fields may appear (e.g. rows skipped when no resource-plan line overlaps a week).
 
   raw
-    Time rows read from the Excel/CSV source after parse, after the 2024-01-01 filter.
+    Time rows read from the Excel/CSV source after parse, after the minimum entry-date filter
+    (currently 2023-01-01; rows before that date are skipped).
   mapped
     Rows that matched `uploads/replicon_mapping.xlsx` (and exclusions) and became Cortex-shaped
     input for aggregation. Unmapped project/client pairs are not counted here.
   weeks
-    Distinct employee × week (Sunday week start) pairs that went through per-week kill/fill
-    (excluding weeks skipped as INVOICED).
+    Distinct employee × week (Sunday week start) pairs that went through per-week processing
+    (excluding weeks skipped as INVOICED). Weeks with ``week_start`` before 2023-08-02 are not
+    kill/filled from Replicon: the engagement resource plan is treated as actuals, then the
+    timesheet is submitted and approved.
   skipped_invoiced
     Employee-weeks skipped because the timesheet was already INVOICED.
   lines_created

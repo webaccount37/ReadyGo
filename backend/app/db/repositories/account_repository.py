@@ -2,7 +2,7 @@
 Account repository for database operations.
 """
 
-from typing import Optional, List
+from typing import List, Optional, Sequence
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_, cast, String
@@ -77,7 +77,34 @@ class AccountRepository(BaseRepository[Account]):
         query = query.offset(skip).limit(limit)
         result = await self.session.execute(query)
         return list(result.scalars().all())
-    
+
+    async def list_ids_for_aggregate_window(
+        self,
+        search: Optional[str] = None,
+        limit: int = 10000,
+        **filters,
+    ) -> List[UUID]:
+        """Account IDs only (no billing_term load), same filters/search as list(), ordered by company_name asc."""
+        query = select(Account.id)
+        for key, value in filters.items():
+            if hasattr(Account, key):
+                query = query.where(getattr(Account, key) == value)
+        pattern = ilike_pattern(search)
+        query = self._apply_search(query, pattern)
+        query = query.order_by(Account.company_name.asc().nulls_last())
+        query = query.limit(limit)
+        result = await self.session.execute(query)
+        return [row[0] for row in result.all()]
+
+    async def list_by_ids_preserve_order(self, ids: Sequence[UUID]) -> List[Account]:
+        """Load accounts by ID; return rows in the same order as ids (skip missing)."""
+        if not ids:
+            return []
+        query = self._base_query().where(Account.id.in_(ids))
+        result = await self.session.execute(query)
+        by_id = {a.id: a for a in result.scalars().all()}
+        return [by_id[i] for i in ids if i in by_id]
+
     async def count(
         self,
         search: Optional[str] = None,

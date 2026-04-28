@@ -115,6 +115,28 @@ def test_pick_multi_same_span_first_sheet_order():
     assert pick_mapping_record_for_entry_date(rule, d) == r1
 
 
+def test_pick_multi_same_span_prefers_engagement_where_employee_has_line():
+    """One Replicon project/client → two Cortex engagements with the same RP window; hours follow the
+    engagement where the timekeeper already has a line (avoids wrong auto-line + double count).
+    """
+    emp = uuid4()
+    r1, r2 = _rec(), _rec()
+    d = date(2026, 4, 5)
+    rule = MappingRule(
+        (
+            MappingCandidate(r1, date(2026, 4, 1), date(2026, 4, 30)),
+            MappingCandidate(
+                r2,
+                date(2026, 4, 1),
+                date(2026, 4, 30),
+                ((emp, date(2026, 4, 1), date(2026, 4, 30)),),
+            ),
+        )
+    )
+    assert pick_mapping_record_for_entry_date(rule, d) == r1
+    assert pick_mapping_record_for_entry_date(rule, d, emp) == r2
+
+
 def test_multi_contract_date_miss_only_when_multi_and_no_window():
     r1, r2 = _rec(), _rec()
     rule = MappingRule(

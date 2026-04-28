@@ -323,14 +323,31 @@ function EstimatesPageContent() {
             const allOpportunitySelected = opportunityEstimateIds.length > 0 && opportunityEstimateIds.every((id) => selectedEstimateIds.has(id));
             const someOpportunitySelected = opportunityEstimateIds.some((id) => selectedEstimateIds.has(id));
             
+            const primaryEstimateId =
+              group.estimates.find((e) => e.active_version)?.id ??
+              group.estimates[0]?.id;
+            const primaryEstimateHref = primaryEstimateId
+              ? `/estimates/${String(primaryEstimateId)}`
+              : null;
+
             return (
               <div key={group.opportunity.id} className="flex gap-4">
                 <Card className="flex-1">
                   <CardHeader>
                     <div className="flex items-center justify-between">
-                      <div className="flex-1">
+                      <div className="flex-1 min-w-0">
                         <CardTitle className="text-xl">
-                          {highlightText(group.opportunity.name, searchQuery)}
+                          {primaryEstimateHref ? (
+                            <Link
+                              href={primaryEstimateHref}
+                              className="text-gray-900 hover:text-blue-600 hover:underline cursor-pointer"
+                              aria-label={`Open estimate for ${group.opportunity.name}`}
+                            >
+                              {highlightText(group.opportunity.name, searchQuery)}
+                            </Link>
+                          ) : (
+                            highlightText(group.opportunity.name, searchQuery)
+                          )}
                         </CardTitle>
                         <div className="flex gap-4 text-sm text-gray-600 mt-2">
                           {group.opportunity.account_name && (
@@ -391,35 +408,36 @@ function EstimatesPageContent() {
                                 selectedEstimateIds.has(estimate.id) ? "bg-blue-50 border-blue-300" : ""
                               }`}
                             >
-                              <div className="flex items-center gap-3 flex-1">
+                              <div className="flex items-center gap-3 flex-1 min-w-0">
                                 <Checkbox
+                                  className="shrink-0"
                                   checked={selectedEstimateIds.has(estimate.id)}
                                   onChange={() => toggleEstimateSelection(estimate.id)}
                                   aria-label={`Select estimate ${estimate.name}`}
                                 />
                                 <Link
-                                  href={`/estimates/${estimate.id}`}
-                                  className="text-blue-600 hover:underline font-medium"
+                                  href={`/estimates/${String(estimate.id)}`}
+                                  className="text-blue-600 hover:underline font-medium shrink-0"
                                 >
-                                  {highlightText(estimate.name, searchQuery)}
+                                  {highlightText(estimate.name ?? "", searchQuery)}
                                 </Link>
                                 {estimate.active_version ? (
-                                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
+                                  <span className="shrink-0 px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-semibold">
                                     ACTIVE VERSION
                                   </span>
                                 ) : (
-                                  <span className="px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs font-semibold">
+                                  <span className="shrink-0 px-2 py-1 bg-gray-100 text-gray-800 rounded text-xs font-semibold">
                                     PENDING VERSION
                                   </span>
                                 )}
                                 {estimate.is_locked && (
-                                  <span className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold ${group.opportunity.is_permanently_locked ? "bg-violet-100 text-violet-800" : "bg-yellow-100 text-yellow-800"}`}>
+                                  <span className={`shrink-0 flex items-center gap-1 px-2 py-1 rounded text-xs font-semibold ${group.opportunity.is_permanently_locked ? "bg-violet-100 text-violet-800" : "bg-yellow-100 text-yellow-800"}`}>
                                     <Lock className="w-3 h-3 shrink-0" />
                                     {group.opportunity.is_permanently_locked ? "PERMANENTLY LOCKED" : "LOCKED"}
                                   </span>
                                 )}
                                 {estimate.description && (
-                                  <span className="text-sm text-gray-500">
+                                  <span className="text-sm text-gray-500 min-w-0 flex-1 truncate">
                                     {estimate.description}
                                   </span>
                                 )}
@@ -449,7 +467,7 @@ function EstimatesPageContent() {
                                   </>
                                 )}
                                 <Button
-                                  onClick={() => router.push(`/estimates/${estimate.id}`)}
+                                  onClick={() => router.push(`/estimates/${String(estimate.id)}`)}
                                   variant="outline"
                                   size="sm"
                                   disabled={estimate.is_locked}

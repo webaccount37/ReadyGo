@@ -6,6 +6,7 @@ from uuid import uuid4
 
 from openpyxl import Workbook, load_workbook
 
+from app.integrations.replicon.column_mapping import dict_rows_to_raw
 from app.integrations.replicon.excel_timesheet_export import (
     load_time_export_xlsx,
     load_time_export_xlsx_detailed,
@@ -116,6 +117,49 @@ def test_map_raw_row_and_aggregate():
     assert k.employee_id == emp
     assert k.week_start == week_start_sunday(date(2026, 4, 21))
     assert buckets[k].hours_by_dow[2] == Decimal("3")  # Tue
+    assert buckets[k].billable is True
+
+
+def test_aggregate_billable_and_semantics_mixed_rows_same_bucket():
+    """Merged week row is non-billable unless every contributing slice was billable."""
+    oid = uuid4()
+    aid = uuid4()
+    eid = uuid4()
+    emp = uuid4()
+    rows = [
+        CortexMappedRow("x", date(2026, 4, 21), Decimal("2"), True, "ENGAGEMENT", aid, oid, eid, None),
+        CortexMappedRow("x", date(2026, 4, 22), Decimal("1"), False, "ENGAGEMENT", aid, oid, eid, None),
+    ]
+    buckets = aggregate_by_week_and_entry(rows, {"x": emp})
+    assert len(buckets) == 1
+    k = next(iter(buckets))
+    assert buckets[k].billable is False
+
+
+def test_dict_rows_to_raw_invoice_customer_false():
+    headers = [
+        "Login Name",
+        "Entry Date",
+        "Hours",
+        "Client Name",
+        "Project Name",
+        "Billable",
+        "Invoice Customer",
+    ]
+    rows = [
+        {
+            "Login Name": "u1",
+            "Entry Date": "2026-04-21",
+            "Hours": "2",
+            "Client Name": "C",
+            "Project Name": "P",
+            "Billable": "true",
+            "Invoice Customer": "false",
+        }
+    ]
+    out = dict_rows_to_raw(headers, rows)
+    assert len(out) == 1
+    assert out[0].billable is False
 
 
 def test_min_max_dates():
@@ -206,6 +250,48 @@ def test_load_time_export_xlsx(tmp_path):
     assert r.entry_date == date(2026, 4, 21)
     assert r.approved is True
     assert r.source_excel_row == 2
+    assert r.billable is True
+
+
+def test_load_time_export_xlsx_invoice_customer_false(tmp_path):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Report"
+    ws.append(
+        [
+            "Client Name",
+            "Project Name",
+            "Entry Date",
+            "User Name",
+            "Task Name",
+            "Billing Rate Name",
+            "Hours",
+            "Timesheet Start Date",
+            "Timesheet End Date",
+            "User Email",
+            "Invoice Customer",
+        ]
+    )
+    ws.append(
+        [
+            "Acme Corp",
+            "Alpha",
+            date(2026, 4, 21),
+            "Doe, Jane",
+            "Task",
+            "Consultant",
+            4,
+            date(2026, 4, 19),
+            date(2026, 4, 25),
+            "jane.doe@example.com",
+            False,
+        ]
+    )
+    p = tmp_path / "export_inv.xlsx"
+    wb.save(p)
+    rows = load_time_export_xlsx(p)
+    assert len(rows) == 1
+    assert rows[0].billable is False
 
 
 def test_load_time_export_xlsx_detailed_parse_note_bad_email(tmp_path):

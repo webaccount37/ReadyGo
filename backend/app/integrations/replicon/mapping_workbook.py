@@ -87,6 +87,16 @@ def effective_mapping_candidate_window(
     return (c.window_start, c.window_end)
 
 
+def _employee_line_covers_entry_date(
+    c: MappingCandidate, employee_id: UUID, entry_date: date
+) -> bool:
+    """True if this engagement has an assigned RP line for ``employee_id`` covering ``entry_date``."""
+    for emp_id, ws, we in c.employee_rp_windows:
+        if emp_id == employee_id and ws <= entry_date <= we:
+            return True
+    return False
+
+
 def pick_mapping_record_for_entry_date(
     rule: MappingRule,
     entry_date: date,
@@ -96,6 +106,11 @@ def pick_mapping_record_for_entry_date(
 
     For multiple candidates, ``entry_date`` is tested against the employee's resource-plan
     line min/max dates when ``employee_id`` is known; otherwise the engagement-wide window.
+
+    When several engagements still match (e.g. identical engagement-wide spans for a one-to-many
+    Replicon project/client), prefer the engagement where the timekeeper already has an RP line
+    covering ``entry_date`` so hours are not attributed to a sibling engagement that used
+    narrowest-window / sheet-order tie-breaks and would auto-create a second line.
     """
     cands = rule.candidates
     if len(cands) == 1:
@@ -117,6 +132,15 @@ def pick_mapping_record_for_entry_date(
         return None
     if len(matches) == 1:
         return matches[0].record
+
+    if employee_id is not None:
+        on_employee_line = [
+            c for c in matches if _employee_line_covers_entry_date(c, employee_id, entry_date)
+        ]
+        if len(on_employee_line) == 1:
+            return on_employee_line[0].record
+        if len(on_employee_line) > 1:
+            matches = on_employee_line
 
     def span_days(c: MappingCandidate) -> int:
         ws, we = effective_mapping_candidate_window(c, employee_id)
@@ -353,7 +377,9 @@ async def load_mapping_workbook(session: AsyncSession, path: Path) -> dict[tuple
     (``\\n``, ``\\r\\n``, ``\\r``) or semicolons (same count), paired left-to-right. For ENGAGEMENT
     with multiple pairs, each candidate has an engagement-wide window from all line items (else
     phases) plus per-employee RP windows from that employee's ``EngagementLineItem`` rows.
-    :func:`pick_mapping_record_for_entry_date` uses the timekeeper's employee id when provided.
+    :func:`pick_mapping_record_for_entry_date` uses the timekeeper's employee id when provided,
+    including preferring an engagement where they already have an RP line for that entry date when
+    multiple sibling engagements share the same calendar window.
 
     Name lookups use exact string equality (trimmed, case-sensitive); if more than one DB row
     matches a name, that segment is skipped.

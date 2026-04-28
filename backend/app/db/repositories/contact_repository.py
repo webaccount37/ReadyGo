@@ -2,7 +2,7 @@
 Contact repository for database operations.
 """
 
-from typing import Optional, List
+from typing import Dict, Optional, List
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, or_
@@ -48,7 +48,21 @@ class ContactRepository(BaseRepository[Contact]):
             select(func.count(Contact.id)).where(Contact.account_id == account_id)
         )
         return result.scalar() or 0
-    
+
+    async def count_by_accounts(self, account_ids: List[UUID]) -> Dict[UUID, int]:
+        """Return contact counts keyed by account_id (missing keys count as 0)."""
+        if not account_ids:
+            return {}
+        result = await self.session.execute(
+            select(Contact.account_id, func.count(Contact.id))
+            .where(Contact.account_id.in_(account_ids))
+            .group_by(Contact.account_id)
+        )
+        counts: Dict[UUID, int] = {aid: 0 for aid in account_ids}
+        for aid, n in result.all():
+            counts[aid] = int(n or 0)
+        return counts
+
     async def get_primary_contact(self, account_id: UUID) -> Optional[Contact]:
         """Get the primary contact for an account."""
         result = await self.session.execute(

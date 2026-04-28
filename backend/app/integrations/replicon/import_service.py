@@ -1,4 +1,9 @@
-"""Orchestrate time export (Excel or Replicon Analytics CSV) → engagement prep → per-week kill/fill → submit/approve."""
+"""Orchestrate time export (Excel or Replicon Analytics CSV) → engagement prep → per-week kill/fill → submit/approve.
+
+Weeks with Sunday ``week_start`` **strictly before** ``2023-08-02`` skip Replicon kill/fill (no conversion
+data): rows are rebuilt from the engagement resource plan, then submitted and approved like default
+loading. Rows before ``2023-01-01`` are still excluded from the extract.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ import json
 import logging
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -47,6 +52,7 @@ from app.integrations.replicon.normalize import (
     week_start_sunday,
 )
 from app.integrations.replicon.settings import RepliconImportSettings
+from app.models.account import Account
 from app.models.employee import Employee, EmployeeStatus
 from app.models.engagement import EngagementPhase
 from app.models.role import Role
@@ -75,6 +81,12 @@ class ImportSummary:
 
 
 _MAPPING_LOG_CAP = 30
+
+# Minimum entry_date in the extract (rows before this are ignored).
+REPLICON_IMPORT_MIN_ENTRY_DATE = date(2023, 1, 1)
+
+# Timesheets with week_start (Sunday) before this date: no Replicon conversion; RP = actuals, then submit+approve.
+REPLICON_LEGACY_RESOURCE_PLAN_WEEK_CUTOFF = date(2023, 8, 2)
 
 
 class RepliconTimesheetImportService:
@@ -127,19 +139,32 @@ class RepliconTimesheetImportService:
             out.append((row[0], email, row[2]))
         return out
 
-    def _filter_since_2024(
+    async def _ready_non_billable_account_ids(self, account_ids: set[UUID]) -> set[UUID]:
+        """Accounts whose company_name is exactly ``Ready`` (case-insensitive) — internal / non-billable."""
+        if not account_ids:
+            return set()
+        r = await self.session.execute(
+            select(Account.id, Account.company_name).where(Account.id.in_(account_ids))
+        )
+        ready: set[UUID] = set()
+        for aid, name in r.fetchall():
+            if (name or "").strip().lower() == "ready":
+                ready.add(aid)
+        return ready
+
+    def _filter_minimum_entry_date(
         self,
         rows: list[RawTimeRow],
         row_status: dict[int, tuple[str, str]],
     ) -> list[RawTimeRow]:
-        cutoff = date(2024, 1, 1)
+        cutoff = REPLICON_IMPORT_MIN_ENTRY_DATE
         out: list[RawTimeRow] = []
         for r in rows:
             if r.entry_date < cutoff:
                 if r.source_excel_row is not None:
                     row_status[r.source_excel_row] = (
                         "Skipped",
-                        "Entry date before 2024-01-01 (not imported)",
+                        f"Entry date before {cutoff.isoformat()} (not imported)",
                     )
                 continue
             out.append(r)
@@ -211,10 +236,11 @@ class RepliconTimesheetImportService:
             except ValueError as e:
                 raise RuntimeError(f"CSV parse failed: {e}") from e
 
-        raw = self._filter_since_2024(raw_full, row_status)
+        raw = self._filter_minimum_entry_date(raw_full, row_status)
         if not raw and not allow_zero_rows_after_filter and not dry_run:
             raise RuntimeError(
-                "Extract produced zero time rows after 2024-01-01 filter — refusing DB changes. "
+                f"Extract produced zero time rows after {REPLICON_IMPORT_MIN_ENTRY_DATE.isoformat()} "
+                "entry-date filter — refusing DB changes. "
                 "Use --allow-zero-rows-after-filter only if intentional."
             )
 
@@ -286,6 +312,12 @@ class RepliconTimesheetImportService:
                     )
                 continue
             mapped_list.append(m)
+
+        ready_account_ids = await self._ready_non_billable_account_ids({m.account_id for m in mapped_list})
+        if ready_account_ids:
+            for i, m in enumerate(mapped_list):
+                if m.account_id in ready_account_ids:
+                    mapped_list[i] = replace(m, billable=False)
 
         if unmapped_count:
             logger.warning(
@@ -372,13 +404,14 @@ class RepliconTimesheetImportService:
             if not opp or not opp.delivery_center_id:
                 errors.append(f"Skip auto line: opportunity missing for engagement {eng_id}")
                 continue
-            billable_any = any(
-                r.billable
+            _bill_rows = [
+                r
                 for r in mapped_list
                 if r.cortex_type == "ENGAGEMENT"
                 and r.engagement_id == eng_id
                 and login_to_emp.get(r.login.strip().lower()) == emp_id
-            )
+            ]
+            billable_for_line = bool(_bill_rows) and all(r.billable for r in _bill_rows)
             try:
                 li = await self.engagement_svc.create_line_item(
                     eng_id,
@@ -392,7 +425,7 @@ class RepliconTimesheetImportService:
                         currency=(opp.default_currency or "USD").strip() or "USD",
                         start_date=rp_start,
                         end_date=rp_end,
-                        billable=billable_any,
+                        billable=billable_for_line,
                     ),
                 )
                 created_lines += 1
@@ -483,6 +516,12 @@ class RepliconTimesheetImportService:
                     "Skipped",
                     "Timesheet for this week is INVOICED — week not modified",
                 )
+            elif ws < REPLICON_LEGACY_RESOURCE_PLAN_WEEK_CUTOFF:
+                row_status[er] = (
+                    "OK",
+                    "Week before 2023-08-02: resource plan treated as actuals; submitted and approved "
+                    "(no Replicon kill/fill).",
+                )
             else:
                 row_status[er] = ("OK", "Imported (kill/fill, submit, approve)")
 
@@ -529,6 +568,70 @@ class RepliconTimesheetImportService:
                 return li.id
         return None
 
+    async def _legacy_week_resource_plan_submit_approve(
+        self,
+        employee_id: UUID,
+        week_start: date,
+    ) -> str:
+        """Weeks before conversion data: rebuild rows from resource plan, submit, approve.
+
+        Idempotent for already-APPROVED weeks. Skips INVOICED. Does not apply Replicon kill/fill.
+        """
+        ts = await self.timesheet_repo.get_by_employee_and_week(employee_id, week_start)
+        if not ts:
+            raise RuntimeError("timesheet missing for legacy week path")
+        if ts.status == TimesheetStatus.INVOICED:
+            logger.warning("Skip INVOICED timesheet %s (legacy week)", ts.id)
+            return "invoiced"
+        if ts.status == TimesheetStatus.APPROVED:
+            logger.info(
+                "Legacy week already APPROVED: emp=%s week=%s — leaving unchanged",
+                employee_id,
+                week_start,
+            )
+            return "ok"
+
+        approver = self.settings.approver_employee_id
+        assert approver is not None
+        if ts.status == TimesheetStatus.SUBMITTED:
+            await self.approval_svc.reopen_timesheet(ts.id, approver, is_approver=False)
+            ts = await self.timesheet_repo.get_by_employee_and_week(employee_id, week_start)
+            if not ts:
+                raise RuntimeError("timesheet missing after reopen (legacy week)")
+
+        if ts.status not in (TimesheetStatus.NOT_SUBMITTED, TimesheetStatus.REOPENED):
+            raise RuntimeError(f"Unexpected timesheet status for legacy week: {ts.status}")
+
+        await self.dismissed_repo.clear_for_timesheet(ts.id)
+        for entry in await self.entry_repo.list_by_timesheet(ts.id):
+            await self.entry_repo.delete(entry.id)
+        await self.session.flush()
+
+        await self.timesheet_svc._add_holiday_entries(ts)
+        await self.timesheet_svc._default_entries_from_resource_plan(ts)
+        await self.timesheet_svc._refresh_entry_hours_from_plan(ts)
+        await self.timesheet_svc._sync_engagement_timesheet_rows_from_resource_plan(ts)
+        await self.session.flush()
+
+        ts_submit = await self.timesheet_repo.get(ts.id)
+        if not ts_submit:
+            raise RuntimeError("timesheet missing before submit (legacy week)")
+
+        await self.timesheet_svc.submit_timesheet(
+            ts_submit.id,
+            current_employee_id=employee_id,
+            force=True,
+            allow_short_week=True,
+            fill_missing_resource_plan_engagements=True,
+        )
+        await self.approval_svc.approve_timesheet(ts_submit.id, approver_employee_id=approver)
+        logger.info(
+            "Replicon legacy week (week_start=%s emp=%s): resource-plan submit/approve (no kill/fill)",
+            week_start,
+            employee_id,
+        )
+        return "ok"
+
     async def _process_one_week(
         self,
         employee_id: UUID,
@@ -547,6 +650,9 @@ class RepliconTimesheetImportService:
             logger.warning("Skip INVOICED timesheet %s", ts.id)
             return "invoiced"
 
+        if week_start < REPLICON_LEGACY_RESOURCE_PLAN_WEEK_CUTOFF:
+            return await self._legacy_week_resource_plan_submit_approve(employee_id, week_start)
+
         approver = self.settings.approver_employee_id
         assert approver is not None
         if ts.status in (TimesheetStatus.SUBMITTED, TimesheetStatus.APPROVED):
@@ -563,10 +669,27 @@ class RepliconTimesheetImportService:
         week_keys = [k for k in buckets if k.employee_id == employee_id and k.week_start == week_start]
         week_keys.sort(key=lambda k: (k.entry_type, str(k.engagement_id), str(k.opportunity_id)))
 
+        # Replicon often carries PTO on HOLIDAY rows while _add_holiday_entries already added the
+        # DC calendar row — merge hours into that single system row instead of duplicating.
+        replicon_holiday_hours: list[Decimal] = [Decimal(0)] * 7
+        for k in week_keys:
+            if k.entry_type != "HOLIDAY":
+                continue
+            agg = buckets[k]
+            h = agg.hours_by_dow
+            if sum(h) <= 0:
+                continue
+            for i in range(7):
+                replicon_holiday_hours[i] += Decimal(str(h[i]))
+
+        existing_after_calendar = await self.entry_repo.list_by_timesheet(ts.id)
+        row_order = max((e.row_order for e in existing_after_calendar), default=-1) + 1
+
         entries: list[TimesheetEntry] = []
-        row_order = 0
         plan_hours_by_line: dict[UUID, Decimal] = defaultdict(lambda: Decimal("0"))
         for k in week_keys:
+            if k.entry_type == "HOLIDAY":
+                continue
             agg = buckets[k]
             h = agg.hours_by_dow
             if sum(h) <= 0:
@@ -588,6 +711,17 @@ class RepliconTimesheetImportService:
                         week_start,
                     )
                     continue
+                li = await self.line_item_repo.get(li_id)
+                if not li:
+                    if no_line_item_skips is not None:
+                        no_line_item_skips[0] += 1
+                    logger.debug(
+                        "Engagement line item missing for li_id=%s emp=%s eng=%s",
+                        li_id,
+                        employee_id,
+                        k.engagement_id,
+                    )
+                    continue
                 phase_id = await self._validate_phase(k.engagement_id, k.engagement_phase_id)
                 plan_hours_by_line[li_id] += sum(h)
                 entries.append(
@@ -601,7 +735,7 @@ class RepliconTimesheetImportService:
                         opportunity_id=k.opportunity_id,
                         engagement_line_item_id=li_id,
                         engagement_phase_id=phase_id,
-                        billable=agg.billable_any,
+                        billable=bool(li.billable),
                         sun_hours=h[0],
                         mon_hours=h[1],
                         tue_hours=h[2],
@@ -637,7 +771,28 @@ class RepliconTimesheetImportService:
                 )
                 row_order += 1
 
-            elif k.entry_type == "HOLIDAY":
+        if sum(replicon_holiday_hours) > 0:
+            existing_now = await self.entry_repo.list_by_timesheet(ts.id)
+            sys_row = next(
+                (
+                    e
+                    for e in existing_now
+                    if e.entry_type == TimesheetEntryType.HOLIDAY and getattr(e, "is_holiday_row", False)
+                ),
+                None,
+            )
+            if sys_row:
+                await self.entry_repo.update(
+                    sys_row.id,
+                    sun_hours=replicon_holiday_hours[0],
+                    mon_hours=replicon_holiday_hours[1],
+                    tue_hours=replicon_holiday_hours[2],
+                    wed_hours=replicon_holiday_hours[3],
+                    thu_hours=replicon_holiday_hours[4],
+                    fri_hours=replicon_holiday_hours[5],
+                    sat_hours=replicon_holiday_hours[6],
+                )
+            else:
                 emp = await self.session.get(Employee, employee_id)
                 dc = emp.delivery_center_id if emp else None
                 link = await resolve_holiday_row_targets(self.session, dc, week_start)
@@ -655,17 +810,16 @@ class RepliconTimesheetImportService:
                         engagement_line_item_id=None,
                         engagement_phase_id=link.get("engagement_phase_id"),
                         billable=False,
-                        is_holiday_row=False,
-                        sun_hours=h[0],
-                        mon_hours=h[1],
-                        tue_hours=h[2],
-                        wed_hours=h[3],
-                        thu_hours=h[4],
-                        fri_hours=h[5],
-                        sat_hours=h[6],
+                        is_holiday_row=True,
+                        sun_hours=replicon_holiday_hours[0],
+                        mon_hours=replicon_holiday_hours[1],
+                        tue_hours=replicon_holiday_hours[2],
+                        wed_hours=replicon_holiday_hours[3],
+                        thu_hours=replicon_holiday_hours[4],
+                        fri_hours=replicon_holiday_hours[5],
+                        sat_hours=replicon_holiday_hours[6],
                     )
                 )
-                row_order += 1
 
         for li_id, hrs in plan_hours_by_line.items():
             await self.weekly_hours_repo.upsert(li_id, week_start, float(hrs))

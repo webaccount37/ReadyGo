@@ -1,20 +1,22 @@
 "use client";
 
 import { useState, useMemo, Suspense } from "react";
-import { useQueries } from "@tanstack/react-query";
 import { useQuotes, useDeactivateQuote } from "@/hooks/useQuotes";
-import { useOpportunity } from "@/hooks/useOpportunities";
-import { quotesApi } from "@/lib/api/quotes";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { highlightText } from "@/lib/utils/highlight";
-import { useOpportunities } from "@/hooks/useOpportunities";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { FileText, Lock, Unlock, ChevronDown, ChevronUp } from "lucide-react";
-import type { Quote, QuoteDetailResponse } from "@/types/quote";
+import type { Quote, QuoteListFinancialSummary, QuoteListOpportunitySnippet } from "@/types/quote";
 import { QuoteStatusBadge } from "@/components/quotes/quote-status-badge";
+
+function numFromSummary(v: string | undefined): number {
+  if (v === undefined || v === null) return 0;
+  const n = parseFloat(String(v));
+  return Number.isFinite(n) ? n : 0;
+}
 
 function QuotesPageContent() {
   const searchParams = useSearchParams();
@@ -43,7 +45,7 @@ function QuotesPageContent() {
     if (!confirm(`Are you sure you want to deactivate quote "${displayName}"? This will unlock the opportunity and estimates.`)) {
       return;
     }
-    
+
     try {
       await deactivateQuote.mutateAsync(quoteId);
       refetch();
@@ -53,139 +55,11 @@ function QuotesPageContent() {
     }
   };
 
-  // Fetch opportunities to get opportunity names
-  const { data: opportunitiesData } = useOpportunities({ limit: 1000 });
-
-  // Get active quote IDs for fetching details
-  const activeQuoteIds = useMemo(() => {
-    return data?.items.filter(q => q.is_active).map(q => q.id) || [];
-  }, [data?.items]);
-
-  // Fetch quote details for active quotes to calculate summaries
-  const activeQuoteDetailsQueries = useQueries({
-    queries: activeQuoteIds.map(quoteId => ({
-      queryKey: ["quotes", "detail", quoteId],
-      queryFn: () => quotesApi.getQuoteDetail(quoteId),
-      enabled: !!quoteId,
-      staleTime: 30000, // Cache for 30 seconds
-    })),
-  });
-
-  // Create a map of active quote details by quote ID
-  const activeQuoteDetailsMap = useMemo(() => {
-    const map = new Map<string, QuoteDetailResponse>();
-    activeQuoteDetailsQueries.forEach((query, index) => {
-      if (query.data && activeQuoteIds[index]) {
-        map.set(activeQuoteIds[index], query.data);
-      }
-    });
-    return map;
-  }, [activeQuoteDetailsQueries, activeQuoteIds]);
-
-  // Helper function to calculate estimate summary from quote's line items
-  const calculateEstimateSummary = (quoteDetail: QuoteDetailResponse, opportunity: { start_date: string; end_date: string; default_currency?: string }) => {
-    if (!quoteDetail.line_items || !opportunity.start_date || !opportunity.end_date) return null;
-
-    const parseLocalDate = (dateStr: string): Date => {
-      const datePart = dateStr.split("T")[0];
-      const [year, month, day] = datePart.split("-").map(Number);
-      return new Date(year, month - 1, day);
-    };
-
-    const formatDateKey = (date: Date): string => {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
-    };
-
-    // Generate weeks from opportunity start/end dates
-    const weeks: Date[] = [];
-    const startDate = parseLocalDate(opportunity.start_date);
-    const endDate = parseLocalDate(opportunity.end_date);
-
-    // Find first Sunday
-    const current = new Date(startDate);
-    const dayOfWeek = current.getDay();
-    const diff = current.getDate() - dayOfWeek;
-    current.setDate(diff);
-
-    while (current <= endDate) {
-      const weekStart = new Date(current);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6);
-
-      if (weekStart <= endDate && weekEnd >= startDate) {
-        weeks.push(new Date(weekStart));
-      }
-      current.setDate(current.getDate() + 7);
-    }
-
-    // Calculate totals from quote's snapshot line items
-    let totalCost = 0;
-    let totalRevenue = 0;
-    let totalHours = 0;
-
-    quoteDetail.line_items.forEach((item) => {
-      const itemHours = weeks.reduce((hoursSum, week) => {
-        const weekKey = formatDateKey(week);
-        const weekDate = week;
-        const itemStartDate = parseLocalDate(item.start_date);
-        const itemEndDate = parseLocalDate(item.end_date);
-        const weekEnd = new Date(weekDate);
-        weekEnd.setDate(weekEnd.getDate() + 6);
-
-        if (weekDate <= itemEndDate && weekEnd >= itemStartDate) {
-          const weeklyHour = item.weekly_hours?.find((wh) => {
-            const whDate = parseLocalDate(wh.week_start_date);
-            return formatDateKey(whDate) === weekKey;
-          });
-          return hoursSum + parseFloat(weeklyHour?.hours || "0");
-        }
-        return hoursSum;
-      }, 0);
-
-      const itemCost = itemHours * parseFloat(item.cost || "0");
-      // If billable is false, revenue should be 0 (non-billable roles don't generate revenue)
-      const itemRevenue = item.billable ? itemHours * parseFloat(item.rate || "0") : 0;
-
-      totalCost += itemCost;
-      totalRevenue += itemRevenue;
-      // For blended rate calculations, only include hours from billable rows
-      // Non-billable hours don't generate revenue, so they shouldn't be multiplied by blended rate
-      totalHours += item.billable ? itemHours : 0;
-    });
-
-    const marginAmount = totalRevenue - totalCost;
-    const marginPercentage = totalRevenue > 0 ? (marginAmount / totalRevenue) * 100 : 0;
-
-    return {
-      totalCost,
-      totalRevenue,
-      totalHours,
-      marginAmount,
-      marginPercentage,
-      currency: opportunity.default_currency || "USD",
-    };
-  };
-
-  // Helper function to calculate quote amount
-  const calculateQuoteAmount = (quote: Quote, estimateSummary: { totalRevenue: number; totalHours: number } | null): number => {
-    if (!quote.quote_type || !estimateSummary) return 0;
-
-    if (quote.quote_type === "FIXED_BID") {
-      return parseFloat(quote.target_amount || "0");
-    } else if (quote.quote_type === "TIME_MATERIALS") {
-      // If blended rate is selected, calculate: total hours * blended rate
-      if (quote.rate_billing_unit === "HOURLY_BLENDED" || quote.rate_billing_unit === "DAILY_BLENDED") {
-        const blendedRate = parseFloat(quote.blended_rate_amount || "0");
-        return estimateSummary.totalHours * blendedRate;
-      }
-      // Otherwise use estimate total revenue
-      return estimateSummary.totalRevenue;
-    }
-    return 0;
-  };
+  const opportunitiesMap = useMemo(() => {
+    const rows = data?.opportunities;
+    if (!rows?.length) return new Map<string, QuoteListOpportunitySnippet>();
+    return new Map(rows.map((o) => [o.id, o]));
+  }, [data?.opportunities]);
 
   // Helper function to format currency
   const formatCurrency = (amount: number, currency: string = "USD") => {
@@ -207,9 +81,17 @@ function QuotesPageContent() {
     });
   };
 
+  const summaryForDisplay = (fin: QuoteListFinancialSummary) => ({
+    totalRevenue: numFromSummary(fin.total_revenue),
+    marginAmount: numFromSummary(fin.margin_amount),
+    marginPercentage: numFromSummary(fin.margin_percentage),
+    quoteAmount: numFromSummary(fin.quote_amount),
+    currency: fin.currency || "USD",
+  });
+
   // Group quotes by opportunity
   const groupedByOpportunity = useMemo(() => {
-    if (!data?.items || !opportunitiesData?.items) return {};
+    if (!data?.items?.length) return {};
 
     const grouped: Record<
       string,
@@ -223,37 +105,28 @@ function QuotesPageContent() {
       }
     > = {};
 
-    const opportunitiesMap = new Map(
-      opportunitiesData.items.map((o) => [o.id, o])
-    );
-
     data.items.forEach((quote) => {
       const opportunityId = quote.opportunity_id;
       if (!grouped[opportunityId]) {
         const opportunity = opportunitiesMap.get(opportunityId);
-        if (opportunity) {
-          grouped[opportunityId] = {
-            opportunity: {
-              id: opportunity.id,
-              name: opportunity.name,
-              account_name: opportunity.account_name,
-            },
-            quotes: [],
-          };
-        }
+        grouped[opportunityId] = {
+          opportunity: {
+            id: opportunityId,
+            name: (opportunity?.name ?? quote.opportunity_name) || "Opportunity",
+            account_name: (opportunity?.account_name ?? quote.account_name) ?? undefined,
+          },
+          quotes: [],
+        };
       }
-      if (grouped[opportunityId]) {
-        grouped[opportunityId].quotes.push(quote);
-      }
+      grouped[opportunityId].quotes.push(quote);
     });
 
-    // Sort quotes within each opportunity by version (newest first)
     Object.values(grouped).forEach((group) => {
       group.quotes.sort((a, b) => b.version - a.version);
     });
 
     return grouped;
-  }, [data?.items, opportunitiesData?.items]);
+  }, [data?.items, opportunitiesMap]);
 
   // Filter grouped quotes by search query
   const filteredGroups = useMemo(() => {
@@ -342,19 +215,11 @@ function QuotesPageContent() {
           ) : (
             <div className="space-y-6">
               {Object.entries(filteredGroups).map(([opportunityId, group]) => {
-                const activeQuote = group.quotes.find(q => q.is_active);
-                const activeQuoteDetail = activeQuote ? activeQuoteDetailsMap.get(activeQuote.id) : null;
-                const opportunity = opportunitiesData?.items.find(o => o.id === opportunityId);
-                const estimateSummary = activeQuoteDetail && opportunity && opportunity.start_date && opportunity.end_date
-                  ? calculateEstimateSummary(activeQuoteDetail, {
-                      start_date: opportunity.start_date,
-                      end_date: opportunity.end_date,
-                      default_currency: opportunity.default_currency,
-                    })
-                  : null;
-                const quoteAmount = activeQuote && estimateSummary
-                  ? calculateQuoteAmount(activeQuote, estimateSummary)
-                  : 0;
+                const activeQuote = group.quotes.find((q) => q.is_active);
+                const fin = activeQuote?.list_financial_summary;
+                const estimateSummary = fin ? summaryForDisplay(fin) : null;
+                const opportunity = opportunitiesMap.get(opportunityId);
+                const permanentlyLocked = opportunity?.is_permanently_locked ?? false;
 
                 return (
                   <div key={opportunityId} className="border rounded-lg p-4">
@@ -377,8 +242,7 @@ function QuotesPageContent() {
                       </Link>
                     </div>
 
-                    {/* Active Quote Summary */}
-                    {activeQuote && estimateSummary && (
+                    {activeQuote && estimateSummary && fin && (
                       <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
                         <div className="flex items-center gap-2 mb-2">
                           <Lock className="h-4 w-4 text-green-600" />
@@ -394,7 +258,7 @@ function QuotesPageContent() {
                           <div>
                             <p className="text-gray-600 text-xs">Quote Amount</p>
                             <p className="font-medium text-green-700">
-                              {formatCurrency(quoteAmount, estimateSummary.currency)}
+                              {formatCurrency(estimateSummary.quoteAmount, estimateSummary.currency)}
                             </p>
                           </div>
                           <div>
@@ -421,13 +285,12 @@ function QuotesPageContent() {
 
                     <div className="space-y-2">
                       {(() => {
-                        const activeQuotes = group.quotes.filter(q => q.is_active);
-                        const inactiveQuotes = group.quotes.filter(q => !q.is_active);
+                        const activeQuotes = group.quotes.filter((q) => q.is_active);
+                        const inactiveQuotes = group.quotes.filter((q) => !q.is_active);
                         const isExpanded = expandedOpportunities.has(opportunityId);
-                        
+
                         return (
                           <>
-                            {/* Active Quotes - Always visible */}
                             {activeQuotes.map((quote) => (
                               <div
                                 key={quote.id}
@@ -445,7 +308,7 @@ function QuotesPageContent() {
                                     <Lock className="h-4 w-4" />
                                     Active
                                   </span>
-                                  {opportunity?.is_permanently_locked && (
+                                  {permanentlyLocked && (
                                     <span
                                       className="inline-flex items-center justify-center w-5 h-5 rounded shrink-0 bg-violet-100 text-violet-700 border border-violet-200"
                                       title="Permanently Locked by Active Timesheets"
@@ -468,7 +331,7 @@ function QuotesPageContent() {
                                       View
                                     </Button>
                                   </Link>
-                                  {!opportunity?.is_permanently_locked && (
+                                  {!permanentlyLocked && (
                                     <Button
                                       variant="destructive"
                                       size="sm"
@@ -483,12 +346,12 @@ function QuotesPageContent() {
                               </div>
                             ))}
 
-                            {/* Inactive Quotes - Collapsible section */}
                             {inactiveQuotes.length > 0 && (
                               <div className="border rounded-lg">
                                 <button
+                                  type="button"
                                   onClick={() => {
-                                    setExpandedOpportunities(prev => {
+                                    setExpandedOpportunities((prev) => {
                                       const next = new Set(prev);
                                       if (next.has(opportunityId)) {
                                         next.delete(opportunityId);
@@ -500,55 +363,55 @@ function QuotesPageContent() {
                                   }}
                                   className="w-full flex items-center justify-between p-2 hover:bg-gray-50 rounded-t-lg transition-colors"
                                 >
-                                    <span className="text-sm font-medium text-gray-700">
-                                      {inactiveQuotes.length} older version{inactiveQuotes.length !== 1 ? 's' : ''}
-                                    </span>
-                                    {isExpanded ? (
-                                      <ChevronUp className="h-4 w-4 text-gray-500" />
-                                    ) : (
-                                      <ChevronDown className="h-4 w-4 text-gray-500" />
-                                    )}
-                                  </button>
-                                  
-                                  {isExpanded && (
-                                    <div className="border-t divide-y">
-                                      {inactiveQuotes.map((quote) => {
-                                        const isInvalid = quote.status === "INVALID";
-                                        return (
-                                          <div
-                                            key={quote.id}
-                                            className={`flex items-center justify-between px-3 py-1.5 ${
-                                              isInvalid ? "bg-gray-50 opacity-75" : "bg-white"
-                                            }`}
-                                          >
-                                            <div className="flex items-center gap-3 flex-1 min-w-0">
-                                              <Link
-                                                href={`/quotes/${quote.id}`}
-                                                className="text-xs font-medium hover:underline truncate"
-                                              >
-                                                {highlightText(quote.display_name, searchQuery)}
-                                              </Link>
-                                              <QuoteStatusBadge status={quote.status} />
-                                              <span className="text-xs text-gray-500 whitespace-nowrap">
-                                                v{quote.version}
-                                              </span>
-                                              {quote.sent_date && (
-                                                <span className="text-xs text-gray-400 whitespace-nowrap">
-                                                  {formatLocalDate(quote.sent_date)}
-                                                </span>
-                                              )}
-                                            </div>
-                                            <Link href={`/quotes/${quote.id}`}>
-                                              <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
-                                                View
-                                              </Button>
-                                            </Link>
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
+                                  <span className="text-sm font-medium text-gray-700">
+                                    {inactiveQuotes.length} older version{inactiveQuotes.length !== 1 ? "s" : ""}
+                                  </span>
+                                  {isExpanded ? (
+                                    <ChevronUp className="h-4 w-4 text-gray-500" />
+                                  ) : (
+                                    <ChevronDown className="h-4 w-4 text-gray-500" />
                                   )}
-                                </div>
+                                </button>
+
+                                {isExpanded && (
+                                  <div className="border-t divide-y">
+                                    {inactiveQuotes.map((quote) => {
+                                      const isInvalid = quote.status === "INVALID";
+                                      return (
+                                        <div
+                                          key={quote.id}
+                                          className={`flex items-center justify-between px-3 py-1.5 ${
+                                            isInvalid ? "bg-gray-50 opacity-75" : "bg-white"
+                                          }`}
+                                        >
+                                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                                            <Link
+                                              href={`/quotes/${quote.id}`}
+                                              className="text-xs font-medium hover:underline truncate"
+                                            >
+                                              {highlightText(quote.display_name, searchQuery)}
+                                            </Link>
+                                            <QuoteStatusBadge status={quote.status} />
+                                            <span className="text-xs text-gray-500 whitespace-nowrap">
+                                              v{quote.version}
+                                            </span>
+                                            {quote.sent_date && (
+                                              <span className="text-xs text-gray-400 whitespace-nowrap">
+                                                {formatLocalDate(quote.sent_date)}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <Link href={`/quotes/${quote.id}`}>
+                                            <Button variant="ghost" size="sm" className="h-6 px-2 text-xs">
+                                              View
+                                            </Button>
+                                          </Link>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                )}
+                              </div>
                             )}
                           </>
                         );
@@ -567,17 +430,18 @@ function QuotesPageContent() {
 
 export default function QuotesPage() {
   return (
-    <Suspense fallback={
-      <div className="container mx-auto p-6">
-        <Card>
-          <CardContent className="p-6">
-            <p>Loading quotes...</p>
-          </CardContent>
-        </Card>
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="container mx-auto p-6">
+          <Card>
+            <CardContent className="p-6">
+              <p>Loading quotes...</p>
+            </CardContent>
+          </Card>
+        </div>
+      }
+    >
       <QuotesPageContent />
     </Suspense>
   );
 }
-

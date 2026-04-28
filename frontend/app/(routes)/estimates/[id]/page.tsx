@@ -45,11 +45,12 @@ export default function EstimateDetailPage() {
   const estimateId = params.id as string;
   const queryClient = useQueryClient();
   
-  // Force refetch on mount to ensure we have fresh data from database
+  // Use cache when present (e.g. Estimates list KPI prefetch) so navigation is not blocked by a
+  // duplicate full-detail request; line-item mutations invalidate this query when data changes.
   const { data: estimate, isLoading, error } = useEstimateDetail(estimateId, {
-    refetchOnMount: "always", // Always refetch to ensure fresh data
+    refetchOnMount: true,
     refetchOnWindowFocus: false,
-    staleTime: 0, // Never consider data stale - always refetch
+    staleTime: 60 * 1000,
   });
   
   // CRITICAL: Sync cache with database and clear stale data

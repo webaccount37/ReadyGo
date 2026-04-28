@@ -36,6 +36,9 @@ import type { FinancialForecastResponse } from "@/lib/api/financial-forecast";
 
 const DC_COLORS = ["#2563eb", "#16a34a", "#ca8a04", "#dc2626", "#9333ea", "#0891b2", "#ea580c", "#4f46e5"];
 
+/** Open-pipeline funnel bars: X-axis order (matches opportunity pipeline stages). */
+const FUNNEL_STATUS_ORDER = ["discovery", "qualified", "proposal", "negotiation"] as const;
+
 /** Pipeline mix pie: all statuses, fixed colors per status. */
 const PIPELINE_MIX_PIE_COLORS: Record<string, string> = {
   discovery: "#2563eb",
@@ -158,7 +161,12 @@ export function DashboardPage() {
 
   const funnelStatuses = useMemo(() => {
     if (!metrics?.funnel_by_status_dc?.length) return [];
-    return [...new Set(metrics.funnel_by_status_dc.map((r) => r.status))].sort();
+    const present = new Set(metrics.funnel_by_status_dc.map((r) => r.status));
+    const funnelOrderSet = new Set<string>(FUNNEL_STATUS_ORDER);
+    const ordered = FUNNEL_STATUS_ORDER.filter((s) => present.has(s));
+    const rest = [...present].filter((s) => !funnelOrderSet.has(s));
+    rest.sort();
+    return [...ordered, ...rest];
   }, [metrics]);
 
   const funnelUsdChartData = useMemo(() => {

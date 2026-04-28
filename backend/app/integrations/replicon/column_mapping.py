@@ -61,6 +61,18 @@ def _parse_bool(val: str) -> bool:
     return s in ("1", "true", "yes", "y", "billable", "b")
 
 
+def _parse_optional_bool(val: str) -> bool | None:
+    """Empty / unknown → None (caller does not override). Explicit false strings → False."""
+    s = (val or "").strip().lower()
+    if not s:
+        return None
+    if s in ("1", "true", "yes", "y", "billable", "b"):
+        return True
+    if s in ("0", "false", "no", "n", "non-billable", "nonbillable", "non billable"):
+        return False
+    return None
+
+
 def _is_approved_row(row: dict[str, str], approval_col: str | None) -> bool:
     if not approval_col:
         # If no approval column, accept row (caller may filter elsewhere)
@@ -97,6 +109,14 @@ def dict_rows_to_raw(
     client_c = _pick(idx, "client", "client name", "customer")
     project_c = _pick(idx, "project", "project name", "task name", "project full name")
     bill_c = _pick(idx, "billable", "billing type", "is billable")
+    inv_c = _pick(
+        idx,
+        "invoice customer",
+        "invoice to customer",
+        "invoice client",
+        "bill to customer",
+    )
+    res_bill_c = _pick(idx, "resource billable", "employee billable", "user billable")
     appr_c = _pick(
         idx,
         "timesheet status",
@@ -123,6 +143,10 @@ def dict_rows_to_raw(
         h = _parse_decimal(row.get(hours_c) or "0")
         if h <= 0:
             continue
+        bill_raw = _parse_bool(row.get(bill_c) or "") if bill_c else True
+        inv = _parse_optional_bool(row.get(inv_c) or "") if inv_c else None
+        res_b = _parse_optional_bool(row.get(res_bill_c) or "") if res_bill_c else None
+        billable = bill_raw and (inv is not False) and (res_b is not False)
         out.append(
             RawTimeRow(
                 login=login,
@@ -130,7 +154,7 @@ def dict_rows_to_raw(
                 hours=h,
                 client_name=(row.get(client_c) or "").strip() if client_c else "",
                 project_name=(row.get(project_c) or "").strip() if project_c else "",
-                billable=_parse_bool(row.get(bill_c) or "") if bill_c else True,
+                billable=billable,
                 approved=True,
             )
         )

@@ -3,11 +3,11 @@ Engagement repository for database operations.
 """
 
 import logging
-from typing import Optional, List
+from typing import List, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct, or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func, distinct, or_, and_
+from sqlalchemy.orm import selectinload, with_loader_criteria
 
 from app.db.repositories.base_repository import BaseRepository
 from app.db.search_helpers import ilike_pattern, normalize_sort_order
@@ -86,6 +86,8 @@ class EngagementRepository(BaseRepository[Engagement]):
             "name": Engagement.name,
             "account": Account.company_name,
             "opportunity": Opportunity.name,
+            "opportunity_start_date": Opportunity.start_date,
+            "opportunity_end_date": Opportunity.end_date,
             "quote": Quote.quote_number,
             "created_at": Engagement.created_at,
         }
@@ -169,9 +171,14 @@ class EngagementRepository(BaseRepository[Engagement]):
         
         Uses subquery for distinct IDs to avoid PostgreSQL 'equality operator for type json'
         error when DISTINCT is applied to full Engagement rows (attributes column is JSON).
+
+        Line items are filtered to this employee (and week overlap when ``week_start_date`` is set);
+        weekly_hours are not loaded (not needed for timesheet list / pick_timesheet_line_item).
         """
-        from datetime import date as date_type, timedelta
+        from datetime import timedelta
         from app.models.engagement import EngagementLineItem
+        from app.models.opportunity import Opportunity
+        from app.models.quote import Quote
 
         subq = (
             select(Engagement.id)
@@ -185,8 +192,26 @@ class EngagementRepository(BaseRepository[Engagement]):
                 EngagementLineItem.end_date >= week_start_date,
             )
         subq = subq.distinct()
+
+        li_criteria = EngagementLineItem.employee_id == employee_id
+        if week_start_date is not None:
+            week_end = week_start_date + timedelta(days=6)
+            li_criteria = and_(
+                li_criteria,
+                EngagementLineItem.start_date <= week_end,
+                EngagementLineItem.end_date >= week_start_date,
+            )
+
         query = (
-            self._base_query(include_line_items=True)
+            select(Engagement)
+            .options(
+                selectinload(Engagement.opportunity).selectinload(Opportunity.account),
+                selectinload(Engagement.created_by_employee),
+                selectinload(Engagement.quote).selectinload(Quote.opportunity),
+                selectinload(Engagement.phases),
+                with_loader_criteria(EngagementLineItem, li_criteria, include_aliases=True),
+                selectinload(Engagement.line_items),
+            )
             .where(Engagement.id.in_(subq))
             .offset(skip)
             .limit(limit)
@@ -226,6 +251,28 @@ class EngagementRepository(BaseRepository[Engagement]):
         )
         return result.scalar() or 0
     
+    async def load_engagements_for_plan_actuals_batch(
+        self, opportunity_ids: List[UUID]
+    ) -> List[Engagement]:
+        """All engagements for the given opportunities, with quote + line items + weekly hours.
+
+        Uses one eager-loaded query only. Do not assign to ``engagement.line_items`` after load in
+        async SQLAlchemy — that triggers a lazy read of the old collection and raises MissingGreenlet.
+        """
+        if not opportunity_ids:
+            return []
+        from app.models.engagement import EngagementLineItem
+
+        q = (
+            select(Engagement)
+            .where(Engagement.opportunity_id.in_(opportunity_ids))
+            .options(
+                selectinload(Engagement.quote),
+                selectinload(Engagement.line_items).selectinload(EngagementLineItem.weekly_hours),
+            )
+        )
+        return list((await self.session.execute(q)).scalars().all())
+
     async def get_with_line_items(self, engagement_id: UUID) -> Optional[Engagement]:
         """Get engagement with all line items and weekly hours."""
         from app.models.engagement import EngagementLineItem, EngagementWeeklyHours

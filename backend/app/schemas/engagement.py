@@ -170,8 +170,10 @@ class EngagementUpdate(BaseModel):
 class EngagementResponse(EngagementBase):
     """Schema for engagement response."""
     id: UUID
-    quote_id: UUID
-    opportunity_id: UUID
+    estimate_id: Optional[UUID] = Field(
+        default=None,
+        description="Estimate for this engagement's quote; use for /estimates/{id} (not quote_id).",
+    )
     account_id: Optional[UUID] = None
     opportunity_name: Optional[str] = None
     account_name: Optional[str] = None
@@ -180,6 +182,8 @@ class EngagementResponse(EngagementBase):
     created_by: Optional[UUID] = None
     created_by_name: Optional[str] = None
     created_at: str  # ISO datetime string
+    opportunity_start_date: Optional[str] = None  # ISO date from related opportunity
+    opportunity_end_date: Optional[str] = None  # ISO date from related opportunity
     line_items: Optional[List[EngagementLineItemResponse]] = None
     phases: Optional[List[EngagementPhaseResponse]] = None
     plan_amount: Optional[Decimal] = None  # Resource plan revenue (for list view)

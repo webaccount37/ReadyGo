@@ -1028,20 +1028,28 @@ class EngagementService(BaseService):
         
         line_item_dict = line_item_data.model_dump(exclude_unset=True)
         
-        # Handle role_rates_id lookup if role_id + delivery_center_id provided
+        # Handle role_rates_id lookup if role_id + delivery_center_id provided (schema requires both when role_rates_id missing)
         if not line_item_dict.get("role_rates_id") and line_item_dict.get("role_id") and line_item_dict.get("delivery_center_id"):
-            # Find matching role_rate
-            role_rates = await self.role_rate_repo.list(
-                role_id=line_item_dict["role_id"],
-                delivery_center_id=line_item_dict["delivery_center_id"],
+            opportunity_delivery_center_id = opportunity.delivery_center_id
+            if not opportunity_delivery_center_id:
+                raise ValueError("Opportunity Invoice Center (delivery_center_id) is required for role rate lookup")
+            invoice_currency = (opportunity.default_currency or "USD").strip() or "USD"
+            # Same resolution as EstimateService: opportunity invoice center + role, not list()[0] order
+            role_rate = await self._get_role_rate(
+                line_item_dict["role_id"],
+                opportunity_delivery_center_id,
+                invoice_currency,
             )
-            if not role_rates:
-                raise ValueError(f"RoleRate not found for role {line_item_dict['role_id']} and delivery center {line_item_dict['delivery_center_id']}")
-            line_item_dict["role_rates_id"] = role_rates[0].id
+            if not role_rate:
+                raise ValueError(
+                    f"RoleRate not found for role {line_item_dict['role_id']}, "
+                    f"opportunity invoice center {opportunity_delivery_center_id}, "
+                    f"currency {invoice_currency}."
+                )
+            line_item_dict["role_rates_id"] = role_rate.id
             # Remove role_id and delivery_center_id from dict as they're not in the model
-            # delivery_center_id is used for role_rate lookup, but payable_center_id is what gets stored
+            # Client delivery_center_id is for Payable; invoice center above is for rate card
             line_item_dict.pop("role_id", None)
-            # Handle delivery_center_id - if payable_center_id is not set, use delivery_center_id as payable_center_id
             if "payable_center_id" not in line_item_dict or not line_item_dict.get("payable_center_id"):
                 line_item_dict["payable_center_id"] = line_item_dict.get("delivery_center_id")
             line_item_dict.pop("delivery_center_id", None)
@@ -1596,6 +1604,7 @@ class EngagementService(BaseService):
         response_dict = {
             "id": engagement.id,
             "quote_id": engagement.quote_id,
+            "estimate_id": quote.estimate_id if quote else None,
             "opportunity_id": engagement.opportunity_id,
             "account_id": account_id,
             "name": engagement.name,
@@ -1604,6 +1613,12 @@ class EngagementService(BaseService):
             "created_at": engagement.created_at.isoformat() if engagement.created_at else None,
             "attributes": engagement.attributes or {},
             "opportunity_name": opportunity.name if opportunity else None,
+            "opportunity_start_date": (
+                opportunity.start_date.isoformat() if opportunity and opportunity.start_date else None
+            ),
+            "opportunity_end_date": (
+                opportunity.end_date.isoformat() if opportunity and opportunity.end_date else None
+            ),
             "account_name": account_name,
             "quote_number": quote.quote_number if quote else None,
             "quote_display_name": quote_display_name,

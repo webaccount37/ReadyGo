@@ -70,6 +70,28 @@ export interface QuoteLineItem {
   weekly_hours?: QuoteWeeklyHours[];
 }
 
+/** Precomputed active-quote totals from list API (matches prior client summary math). */
+export interface QuoteListFinancialSummary {
+  total_cost: string;
+  total_revenue: string;
+  total_billable_hours: string;
+  margin_amount: string;
+  margin_percentage: string;
+  quote_amount: string;
+  currency: string;
+}
+
+/** Opportunity context returned with quote list (deduped per opportunity). */
+export interface QuoteListOpportunitySnippet {
+  id: string;
+  name: string;
+  account_name?: string | null;
+  start_date?: string | null;
+  end_date?: string | null;
+  default_currency: string;
+  is_permanently_locked: boolean;
+}
+
 export interface Quote {
   id: string;
   opportunity_id: string;
@@ -98,6 +120,8 @@ export interface Quote {
   cap_amount?: string;
   /** Set when a new engagement is created (e.g. status ACCEPTED). */
   created_engagement_id?: string | null;
+  /** Populated on list API for active quotes. */
+  list_financial_summary?: QuoteListFinancialSummary | null;
   line_items?: QuoteLineItem[];
   phases?: QuotePhase[];
   payment_triggers?: PaymentTrigger[];
@@ -154,5 +178,6 @@ export type QuoteWeeklyHoursResponse = QuoteWeeklyHours;
 export interface QuoteListResponse {
   items: QuoteResponse[];
   total: number;
+  opportunities?: QuoteListOpportunitySnippet[];
 }
 

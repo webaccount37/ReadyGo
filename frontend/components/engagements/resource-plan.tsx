@@ -315,7 +315,7 @@ export function ResourcePlan({
   const currency = opportunityCurrency || "USD";
 
   return (
-    <Card className="w-full max-w-full overflow-hidden">
+    <Card className="w-full max-w-full min-w-0">
       <CardHeader>
         <div className="flex justify-between items-center">
           <CardTitle>Resource Plan</CardTitle>
@@ -363,13 +363,12 @@ export function ResourcePlan({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="p-0 overflow-hidden">
-        <div 
-          className="overflow-x-auto overflow-y-auto" 
-          style={{ 
-            maxHeight: "calc(100vh - 400px)",
+      <CardContent className="p-0 min-w-0 overflow-x-auto">
+        <div
+          className="min-h-[28rem] w-full max-w-full"
+          style={{
             maxWidth: "100%",
-            zoom: `${zoomLevel}%`
+            zoom: `${zoomLevel}%`,
           }}
         >
           <div className="inline-block min-w-full">

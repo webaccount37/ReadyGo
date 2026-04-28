@@ -4,12 +4,12 @@ Quote service with business logic for quote creation, snapshotting, and locking.
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 from uuid import UUID
 from datetime import date, datetime
 from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,9 @@ from app.db.repositories.estimate_weekly_hours_repository import EstimateWeeklyH
 from app.db.repositories.opportunity_repository import OpportunityRepository
 from app.db.repositories.delivery_center_approver_repository import DeliveryCenterApproverRepository
 from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_permanent_lock_repository import (
+    OpportunityPermanentLockRepository,
+)
 from app.models.quote import (
     Quote, QuoteLineItem, QuotePhase, QuoteWeeklyHours, QuoteStatus,
     QuotePaymentTrigger, QuoteVariableCompensation, QuoteType, PaymentTriggerType,
@@ -37,10 +40,20 @@ from app.models.estimate import Estimate
 from app.models.engagement import Engagement
 from app.models.opportunity import Opportunity, OpportunityStatus
 from app.utils.quote_display import compute_quote_display_name
+from app.utils.quote_list_financials import compute_quote_list_financial_summary
 from app.schemas.quote import (
-    QuoteCreate, QuoteUpdate, QuoteResponse, QuoteDetailResponse, QuoteListResponse,
-    QuoteStatusUpdate, QuoteLineItemResponse, QuotePhaseResponse, QuoteWeeklyHoursResponse,
-    PaymentTriggerResponse, VariableCompensationResponse,
+    QuoteCreate,
+    QuoteUpdate,
+    QuoteResponse,
+    QuoteDetailResponse,
+    QuoteStatusUpdate,
+    QuoteLineItemResponse,
+    QuotePhaseResponse,
+    QuoteWeeklyHoursResponse,
+    PaymentTriggerResponse,
+    VariableCompensationResponse,
+    QuoteListFinancialSummary,
+    QuoteListOpportunitySnippet,
 )
 
 
@@ -62,6 +75,7 @@ class QuoteService(BaseService):
         self.opportunity_repo = OpportunityRepository(session)
         self.approver_repo = DeliveryCenterApproverRepository(session)
         self.engagement_repo = EngagementRepository(session)
+        self.permanent_lock_repo = OpportunityPermanentLockRepository(session)
     
     async def create_quote(self, quote_data: QuoteCreate, created_by: Optional[UUID] = None) -> QuoteResponse:
         """Create quote from estimate snapshot."""
@@ -211,21 +225,17 @@ class QuoteService(BaseService):
         quote = await self.quote_repo.get(quote.id)
         if not quote:
             raise ValueError("Failed to retrieve created quote")
-        return await self._to_response(quote)
+        return self._to_response(quote)
     
     async def get_quote(self, quote_id: UUID) -> Optional[QuoteResponse]:
         """Get quote by ID."""
         quote = await self.quote_repo.get(quote_id)
         if not quote:
             return None
-        return await self._to_response(quote)
+        return self._to_response(quote)
     
     async def get_quote_detail(self, quote_id: UUID) -> Optional[QuoteDetailResponse]:
         """Get quote with all relationships."""
-        quote = await self.quote_repo.get(quote_id)
-        if not quote:
-            return None
-        
         # Load line items and phases with all nested relationships
         from sqlalchemy.orm import selectinload
         from app.models.role_rate import RoleRate
@@ -236,6 +246,9 @@ class QuoteService(BaseService):
         result = await self.session.execute(
             select(Quote)
             .options(
+                selectinload(Quote.opportunity).selectinload(Opportunity.account),
+                selectinload(Quote.estimate),
+                selectinload(Quote.created_by_employee),
                 selectinload(Quote.line_items).selectinload(QuoteLineItem.role_rate).selectinload(RoleRate.role),
                 selectinload(Quote.line_items).selectinload(QuoteLineItem.role_rate).selectinload(RoleRate.delivery_center),
                 selectinload(Quote.line_items).selectinload(QuoteLineItem.payable_center),
@@ -253,23 +266,84 @@ class QuoteService(BaseService):
         
         return await self._to_detail_response(quote)
     
+    def _quote_list_opportunity_snippets(
+        self,
+        quotes: List[Quote],
+        locked_ids: Set[UUID],
+    ) -> List[QuoteListOpportunitySnippet]:
+        seen_opp_ids: Set[UUID] = set()
+        out: List[QuoteListOpportunitySnippet] = []
+        for q in quotes:
+            oid = q.opportunity_id
+            if oid in seen_opp_ids or not q.opportunity:
+                continue
+            seen_opp_ids.add(oid)
+            opp = q.opportunity
+            account_name = opp.account.company_name if opp.account else None
+            out.append(
+                QuoteListOpportunitySnippet(
+                    id=opp.id,
+                    name=opp.name,
+                    account_name=account_name,
+                    start_date=opp.start_date,
+                    end_date=opp.end_date,
+                    default_currency=opp.default_currency or "USD",
+                    is_permanently_locked=opp.id in locked_ids,
+                )
+            )
+        return out
+
     async def list_quotes(
         self,
         skip: int = 0,
         limit: int = 100,
         opportunity_id: Optional[UUID] = None,
-    ) -> Tuple[List[QuoteResponse], int]:
-        """List quotes with filters."""
-        filters = {}
-        if opportunity_id:
-            filters["opportunity_id"] = opportunity_id
-        
-        quotes = await self.quote_repo.list(skip=skip, limit=limit, **filters)
-        total = await self.quote_repo.count(**filters)
-        
+    ) -> Tuple[List[QuoteResponse], int, List[QuoteListOpportunitySnippet]]:
+        """List quotes with filters, list UI enrichment, and windowed count."""
+        quotes, total = await self.quote_repo.list_for_list_api(
+            skip=skip, limit=limit, opportunity_id=opportunity_id
+        )
+
         linked = await self._linked_engagement_ids_by_quote_id([q.id for q in quotes]) if quotes else {}
-        quote_responses = [await self._to_response(quote, linked_engagement_id=linked.get(quote.id)) for quote in quotes]
-        return quote_responses, total
+
+        opp_ids = list({q.opportunity_id for q in quotes})
+        locked: set = set()
+        if opp_ids:
+            locked = await self.permanent_lock_repo.list_locked_opportunity_ids_among(opp_ids)
+
+        active_ids = [q.id for q in quotes if q.is_active]
+        line_by_quote = (
+            await self.quote_repo.load_line_items_with_weekly_by_quote_ids(active_ids)
+            if active_ids
+            else {}
+        )
+
+        opportunities = self._quote_list_opportunity_snippets(quotes, locked)
+
+        quote_responses: List[QuoteResponse] = []
+        for quote in quotes:
+            summary: Optional[QuoteListFinancialSummary] = None
+            if quote.is_active and quote.opportunity:
+                lines = line_by_quote.get(quote.id, [])
+                fin = compute_quote_list_financial_summary(
+                    lines,
+                    quote.opportunity.start_date,
+                    quote.opportunity.end_date,
+                    quote_type=quote.quote_type,
+                    target_amount=quote.target_amount,
+                    rate_billing_unit=quote.rate_billing_unit,
+                    blended_rate_amount=quote.blended_rate_amount,
+                    default_currency=quote.opportunity.default_currency or "USD",
+                )
+                summary = QuoteListFinancialSummary(**fin)
+            quote_responses.append(
+                self._to_response(
+                    quote,
+                    linked_engagement_id=linked.get(quote.id),
+                    list_financial_summary=summary,
+                )
+            )
+        return quote_responses, total, opportunities
 
     async def _linked_engagement_ids_by_quote_id(
         self, quote_ids: List[UUID]
@@ -291,7 +365,7 @@ class QuoteService(BaseService):
         employee_id: UUID,
         skip: int = 0,
         limit: int = 100,
-    ) -> Tuple[List[QuoteResponse], int]:
+    ) -> Tuple[List[QuoteResponse], int, List[QuoteListOpportunitySnippet]]:
         """List Draft quotes that the employee can approve based on their delivery center approver status."""
         # Get all delivery centers where this employee is an approver
         approver_associations = await self.approver_repo.get_by_employee(employee_id)
@@ -299,52 +373,17 @@ class QuoteService(BaseService):
         
         if not delivery_center_ids:
             # User is not an approver for any delivery center
-            return [], 0
-        
-        # Get all Draft quotes where the opportunity's delivery_center_id matches
-        # one of the delivery centers the user is an approver for
-        from sqlalchemy import select, and_
-        from sqlalchemy.orm import selectinload
-        
-        query = (
-            select(Quote)
-            .join(Opportunity, Quote.opportunity_id == Opportunity.id)
-            .where(
-                and_(
-                    Quote.status == QuoteStatus.DRAFT,
-                    Opportunity.delivery_center_id.in_(delivery_center_ids)
-                )
-            )
-            .options(
-                selectinload(Quote.opportunity).selectinload(Opportunity.account),
-                selectinload(Quote.estimate),
-                selectinload(Quote.created_by_employee),
-            )
-            .order_by(Quote.created_at.desc())
-            .offset(skip)
-            .limit(limit)
+            return [], 0, []
+
+        quotes, total = await self.quote_repo.list_drafts_for_approver_centers(
+            delivery_center_ids, skip, limit
         )
-        
-        result = await self.session.execute(query)
-        quotes = list(result.scalars().all())
-        
-        # Count total matching quotes
-        count_query = (
-            select(func.count(Quote.id))
-            .join(Opportunity, Quote.opportunity_id == Opportunity.id)
-            .where(
-                and_(
-                    Quote.status == QuoteStatus.DRAFT,
-                    Opportunity.delivery_center_id.in_(delivery_center_ids)
-                )
-            )
-        )
-        count_result = await self.session.execute(count_query)
-        total = count_result.scalar_one()
 
         linked = await self._linked_engagement_ids_by_quote_id([q.id for q in quotes]) if quotes else {}
-        quote_responses = [await self._to_response(quote, linked_engagement_id=linked.get(quote.id)) for quote in quotes]
-        return quote_responses, total
+        quote_responses = [
+            self._to_response(quote, linked_engagement_id=linked.get(quote.id)) for quote in quotes
+        ]
+        return quote_responses, total, []
 
     async def update_quote_status(
         self,
@@ -449,7 +488,7 @@ class QuoteService(BaseService):
         updated = await self.quote_repo.get(quote_id)
         if not updated:
             return None
-        return await self._to_response(
+        return self._to_response(
             updated,
             created_engagement_id=created_engagement_id,
             linked_engagement_id=created_engagement_id,
@@ -524,7 +563,7 @@ class QuoteService(BaseService):
         updated = await self.quote_repo.get(quote_id)
         if not updated:
             return None
-        return await self._to_response(updated)
+        return self._to_response(updated)
     
     async def _snapshot_estimate(self, quote_id: UUID, estimate_id: UUID) -> None:
         """Snapshot estimate data (line items, phases, weekly hours)."""
@@ -658,12 +697,13 @@ class QuoteService(BaseService):
             return str(snap["account_name"])
         return None
 
-    async def _to_response(
+    def _to_response(
         self,
         quote: Quote,
         *,
         created_engagement_id: Optional[UUID] = None,
         linked_engagement_id: Optional[UUID] = None,
+        list_financial_summary: Optional[QuoteListFinancialSummary] = None,
     ) -> QuoteResponse:
         """Convert Quote model to QuoteResponse schema."""
         return QuoteResponse(
@@ -693,11 +733,12 @@ class QuoteService(BaseService):
             cap_amount=quote.cap_amount,
             created_engagement_id=created_engagement_id,
             linked_engagement_id=linked_engagement_id,
+            list_financial_summary=list_financial_summary,
         )
     
     async def _to_detail_response(self, quote: Quote) -> QuoteDetailResponse:
         """Convert Quote model to QuoteDetailResponse schema."""
-        base_response = await self._to_response(quote)
+        base_response = self._to_response(quote)
         
         # Convert line items
         line_items = []

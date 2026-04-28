@@ -678,7 +678,7 @@ export default function FinancialForecastsPage() {
       </Card>
 
       <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-0 min-w-0">
           {isLoading && <p className="p-6 text-sm text-muted-foreground">Loading…</p>}
           {error && <p className="p-6 text-sm text-red-600">{(error as Error).message}</p>}
           {data && (
@@ -712,7 +712,7 @@ export default function FinancialForecastsPage() {
                   </span>
                 </div>
               </div>
-              <div className="overflow-x-auto p-4">
+              <div className="w-full min-w-0 min-h-[28rem] max-w-full overflow-x-auto p-4">
                 <div
                   className="inline-grid min-w-max gap-0 text-xs"
                   style={{ gridTemplateColumns: gridTemplateColumns, gridAutoRows: "minmax(0,auto)" }}

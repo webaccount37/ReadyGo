@@ -67,6 +67,22 @@ def _billing_rate_billable(name: str) -> bool:
     return True
 
 
+def _invoice_customer_billable(val: Any) -> bool | None:
+    """None = blank (keep billing-rate hint). False = do not invoice customer → non-billable."""
+    if val is None:
+        return None
+    if isinstance(val, bool):
+        return val
+    s = str(val).strip().lower()
+    if not s:
+        return None
+    if s in ("1", "true", "yes", "y"):
+        return True
+    if s in ("0", "false", "no", "n"):
+        return False
+    return None
+
+
 STATUS_HEADER = "import status"
 DETAIL_HEADER = "import detail"
 
@@ -89,7 +105,8 @@ def load_time_export_xlsx_detailed(path: Path) -> TimeExportLoadResult:
     Parse a Replicon-style Excel export with per-row diagnostics.
 
     Expected columns (case/spacing flexible): Client Name, Project Name, Entry Date,
-    User Email, Hours; optional: User Name, Billing Rate Name (for billable hint).
+    User Email, Hours; optional: User Name, Billing Rate Name (for billable hint),
+    Invoice Customer (when explicitly false, row is non-billable).
     """
     if not path.is_file():
         raise FileNotFoundError(f"Timesheet export workbook not found: {path}")
@@ -121,6 +138,12 @@ def load_time_export_xlsx_detailed(path: Path) -> TimeExportLoadResult:
         i_email = col("user email", "email")
         i_hours = col("hours", "duration")
         i_billing = col("billing rate name", "billing rate", "rate name")
+        i_invoice_customer = col(
+            "invoice customer",
+            "invoice to customer",
+            "invoice client",
+            "bill to customer",
+        )
 
         if i_client is None or i_project is None or i_entry is None or i_email is None or i_hours is None:
             raise ValueError(
@@ -154,6 +177,10 @@ def load_time_export_xlsx_detailed(path: Path) -> TimeExportLoadResult:
             project = str(cell(i_project) or "").strip()
             bill_name = str(cell(i_billing) or "").strip() if i_billing is not None else ""
             billable = _billing_rate_billable(bill_name)
+            if i_invoice_customer is not None:
+                inv = _invoice_customer_billable(cell(i_invoice_customer))
+                if inv is False:
+                    billable = False
             out.append(
                 RawTimeRow(
                     login=email,

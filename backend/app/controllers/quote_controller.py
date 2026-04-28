@@ -39,12 +39,12 @@ class QuoteController(BaseController):
         opportunity_id: Optional[UUID] = None,
     ) -> QuoteListResponse:
         """List quotes with optional filters."""
-        quotes, total = await self.quote_service.list_quotes(
+        quotes, total, opportunities = await self.quote_service.list_quotes(
             skip=skip,
             limit=limit,
             opportunity_id=opportunity_id,
         )
-        return QuoteListResponse(items=quotes, total=total)
+        return QuoteListResponse(items=quotes, total=total, opportunities=opportunities)
     
     async def list_quotes_for_approval(
         self,
@@ -53,7 +53,7 @@ class QuoteController(BaseController):
         limit: int = 100,
     ) -> QuoteListResponse:
         """List quotes available for approval by the given employee."""
-        quotes, total = await self.quote_service.list_quotes_for_approval(
+        quotes, total, _ = await self.quote_service.list_quotes_for_approval(
             employee_id=employee_id,
             skip=skip,
             limit=limit,

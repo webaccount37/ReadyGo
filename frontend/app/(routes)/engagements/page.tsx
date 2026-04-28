@@ -138,11 +138,11 @@ function EngagementsPageContent() {
                   <colgroup>
                     <col style={{ width: "5%" }} />
                     <col style={{ width: "10%" }} />
-                    <col style={{ width: "12%" }} />
-                    <col style={{ width: "15%" }} />
-                    <col style={{ width: "7%" }} />
+                    <col style={{ width: "18%" }} />
                     <col style={{ width: "8%" }} />
                     <col style={{ width: "8%" }} />
+                    <col style={{ width: "9%" }} />
+                    <col style={{ width: "9%" }} />
                     <col style={{ width: "10%" }} />
                     <col style={{ width: "10%" }} />
                     <col style={{ width: "13%" }} />
@@ -152,8 +152,8 @@ function EngagementsPageContent() {
                       <SortableTh label="Name" column="name" sort={sort} onSort={handleSort} title="Engagement" />
                       <SortableTh label="Account" column="account" sort={sort} onSort={handleSort} title="Account" />
                       <SortableTh label="Opportunity" column="opportunity" sort={sort} onSort={handleSort} title="Opportunity" />
-                      <SortableTh label="Quote" column="quote" sort={sort} onSort={handleSort} title="Quote" />
-                      <SortableTh label="Created" column="created_at" sort={sort} onSort={handleSort} title="Created Date" />
+                      <SortableTh label="Start" column="opportunity_start_date" sort={sort} onSort={handleSort} title="Opportunity start date" />
+                      <SortableTh label="End" column="opportunity_end_date" sort={sort} onSort={handleSort} title="Opportunity end date" />
                       <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Resource Plan Revenue (USD)">Plan $</th>
                       <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Actuals from Approved Timesheets (USD)">Actuals $</th>
                       <th className="text-left p-1.5 font-semibold whitespace-nowrap" title="Quote/Estimate vs Resource Plan Revenue Deviation %">% Quote Dev</th>
@@ -197,21 +197,17 @@ function EngagementsPageContent() {
                             "—"
                           )}
                         </td>
-                        <td className="p-1.5 truncate text-xs overflow-hidden" title={engagement.quote_display_name || engagement.quote_number || "—"}>
-                          {(engagement.quote_display_name || engagement.quote_number) ? (
-                            <Link
-                              href={`/quotes?search=${encodeURIComponent(engagement.quote_display_name || engagement.quote_number || "")}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-blue-600 hover:text-blue-800 hover:underline"
-                            >
-                              {engagement.quote_display_name || engagement.quote_number}
-                            </Link>
-                          ) : (
-                            "—"
-                          )}
+                        <td
+                          className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0"
+                          title={engagement.opportunity_start_date ? new Date(engagement.opportunity_start_date + "T12:00:00").toLocaleDateString() : "—"}
+                        >
+                          {engagement.opportunity_start_date ? formatDate(engagement.opportunity_start_date) : "—"}
                         </td>
-                        <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={engagement.created_at ? new Date(engagement.created_at).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "—"}>
-                          {engagement.created_at ? formatDate(engagement.created_at) : "—"}
+                        <td
+                          className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0"
+                          title={engagement.opportunity_end_date ? new Date(engagement.opportunity_end_date + "T12:00:00").toLocaleDateString() : "—"}
+                        >
+                          {engagement.opportunity_end_date ? formatDate(engagement.opportunity_end_date) : "—"}
                         </td>
                         <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden text-ellipsis min-w-0" title={engagement.plan_amount != null ? formatCurrency(engagement.plan_amount, "USD") : "—"}>
                           {engagement.plan_amount != null && engagement.plan_amount !== undefined && String(engagement.plan_amount) !== "0"
@@ -315,21 +311,17 @@ function EngagementsPageContent() {
                             <span className="text-sm">—</span>
                           )}
                         </div>
-                        {(engagement.quote_display_name || engagement.quote_number) && (
-                          <div>
-                            <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Quote</div>
-                            <Link
-                              href={`/quotes?search=${encodeURIComponent(engagement.quote_display_name || engagement.quote_number || "")}`}
-                              onClick={(e) => e.stopPropagation()}
-                              className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
-                            >
-                              {engagement.quote_display_name || engagement.quote_number}
-                            </Link>
-                          </div>
-                        )}
                         <div>
-                          <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Created</div>
-                          <span className="text-sm">{engagement.created_at ? formatDate(engagement.created_at) : "—"}</span>
+                          <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Opp. start</div>
+                          <span className="text-sm">
+                            {engagement.opportunity_start_date ? formatDate(engagement.opportunity_start_date) : "—"}
+                          </span>
+                        </div>
+                        <div>
+                          <div className="text-xs font-semibold text-gray-500 uppercase mb-1">Opp. end</div>
+                          <span className="text-sm">
+                            {engagement.opportunity_end_date ? formatDate(engagement.opportunity_end_date) : "—"}
+                          </span>
                         </div>
                         <div className="grid grid-cols-2 gap-2">
                           <div>

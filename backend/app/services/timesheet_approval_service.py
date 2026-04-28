@@ -3,8 +3,10 @@ Timesheet approval service - approve, reject, reopen, mark invoiced.
 """
 
 import logging
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal
+from typing import Dict, List, Tuple, Any
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,36 +52,75 @@ class TimesheetApprovalService(BaseService):
         self.eng_approver_repo = EngagementTimesheetApproverRepository(session)
         self.lock_repo = OpportunityPermanentLockRepository(session)
 
-    def _can_approve(self, approver_employee_id: UUID, timesheet: Timesheet) -> bool:
-        """Check if employee can approve this timesheet."""
+    def _is_dc_approver_for_opportunity_sync(
+        self, approver_employee_id: UUID, opportunity_id: UUID
+    ) -> bool:
+        """True if approver is a delivery-center approver for the opportunity's invoice (delivery) center."""
         from app.models.delivery_center_approver import DeliveryCenterApprover
         from app.models.opportunity import Opportunity
-        from sqlalchemy import select, union_all
-        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
-        from app.models.engagement import Engagement
+        from sqlalchemy import select
 
-        for entry in timesheet.entries or []:
-            if entry.entry_type == TimesheetEntryType.HOLIDAY:
-                continue
-            if not entry.engagement_id:
-                continue
-            eng = self.session.get(Engagement, entry.engagement_id)
-            if not eng:
-                continue
-            # Engagement approver?
-            approvers = [a.employee_id for a in (eng.timesheet_approvers or [])]
-            if approver_employee_id in approvers:
-                return True
-            # DC approver?
-            opp = self.session.get(Opportunity, eng.opportunity_id)
-            if opp and opp.delivery_center_id:
-                result = self.session.execute(
+        opp = self.session.get(Opportunity, opportunity_id)
+        if not opp or not opp.delivery_center_id:
+            return False
+        return (
+            self.session.execute(
+                select(DeliveryCenterApprover.employee_id).where(
+                    DeliveryCenterApprover.delivery_center_id == opp.delivery_center_id,
+                    DeliveryCenterApprover.employee_id == approver_employee_id,
+                )
+            ).scalar_one_or_none()
+            is not None
+        )
+
+    def _can_approve(self, approver_employee_id: UUID, timesheet: Timesheet) -> bool:
+        """Check if employee can approve this timesheet (sync; keep aligned with _can_approve_async)."""
+        from app.models.delivery_center_approver import DeliveryCenterApprover
+        from app.models.opportunity import Opportunity
+        from sqlalchemy import select
+        from app.models.engagement import Engagement
+        from app.models.employee import Employee
+        from app.models.engagement_timesheet_approver import EngagementTimesheetApprover
+
+        if timesheet.employee_id:
+            employee = self.session.get(Employee, timesheet.employee_id)
+            if employee and employee.delivery_center_id:
+                res = self.session.execute(
                     select(DeliveryCenterApprover.employee_id).where(
-                        DeliveryCenterApprover.delivery_center_id == opp.delivery_center_id,
+                        DeliveryCenterApprover.delivery_center_id == employee.delivery_center_id,
                         DeliveryCenterApprover.employee_id == approver_employee_id,
                     )
                 )
-                if result.scalar_one_or_none():
+                if res.scalar_one_or_none():
+                    return True
+
+        for entry in timesheet.entries or []:
+            if entry.engagement_id:
+                eap = self.session.execute(
+                    select(EngagementTimesheetApprover.employee_id).where(
+                        EngagementTimesheetApprover.engagement_id == entry.engagement_id,
+                        EngagementTimesheetApprover.employee_id == approver_employee_id,
+                    )
+                )
+                if eap.scalar_one_or_none():
+                    return True
+                eng = self.session.get(Engagement, entry.engagement_id)
+                if not eng:
+                    continue
+                opp = self.session.get(Opportunity, eng.opportunity_id)
+                if opp and opp.delivery_center_id:
+                    r = self.session.execute(
+                        select(DeliveryCenterApprover.employee_id).where(
+                            DeliveryCenterApprover.delivery_center_id == opp.delivery_center_id,
+                            DeliveryCenterApprover.employee_id == approver_employee_id,
+                        )
+                    )
+                    if r.scalar_one_or_none():
+                        return True
+            elif entry.opportunity_id:
+                if self._is_dc_approver_for_opportunity_sync(
+                    approver_employee_id, entry.opportunity_id
+                ):
                     return True
         return False
 
@@ -106,6 +147,59 @@ class TimesheetApprovalService(BaseService):
                 elif e.opportunity and e.opportunity.name:
                     labels.add(e.opportunity.name)
         return sorted(labels)
+
+    def _labels_for_flat_entry(
+        self,
+        entry_type: Any,
+        engagement_name: Any,
+        account_company: Any,
+        opportunity_name: Any,
+        engagement_display_name: Any,
+        account_display_name: Any,
+    ) -> List[str]:
+        """Same label rules as _entry_labels_from_timesheet, for raw SQL join rows."""
+        if not isinstance(entry_type, TimesheetEntryType):
+            try:
+                entry_type = TimesheetEntryType(entry_type)
+            except (ValueError, TypeError):
+                entry_type = TimesheetEntryType.ENGAGEMENT
+        if entry_type == TimesheetEntryType.HOLIDAY:
+            if engagement_name:
+                return [str(engagement_name)]
+            label = engagement_display_name or account_display_name or "PTO"
+            return [str(label)] if label else []
+        if entry_type == TimesheetEntryType.SALES:
+            out: List[str] = []
+            if account_company:
+                out.append(str(account_company))
+            if opportunity_name:
+                out.append(str(opportunity_name))
+            return out
+        if engagement_name:
+            return [str(engagement_name)]
+        if opportunity_name:
+            return [str(opportunity_name)]
+        return []
+
+    def _labels_by_timesheet_from_entry_rows(
+        self, rows: List[Tuple[Any, ...]]
+    ) -> Dict[UUID, List[str]]:
+        by_ts: Dict[UUID, set] = defaultdict(set)
+        for (
+            ts_id,
+            entry_type,
+            eng_name,
+            acc_co,
+            opp_name,
+            eng_disp,
+            acc_disp,
+        ) in rows:
+            for lbl in self._labels_for_flat_entry(
+                entry_type, eng_name, acc_co, opp_name, eng_disp, acc_disp
+            ):
+                if lbl:
+                    by_ts[ts_id].add(lbl)
+        return {k: sorted(v) for k, v in by_ts.items()}
 
     async def approve_timesheet(
         self,
@@ -276,15 +370,29 @@ class TimesheetApprovalService(BaseService):
                 )
                 logger.info(f"Permanent lock removed for opportunity {opp_id} (no blocking timesheets)")
 
+    async def _is_dc_approver_for_opportunity_async(
+        self, approver_employee_id: UUID, opportunity_id: UUID
+    ) -> bool:
+        """True if approver is a delivery-center approver for the opportunity's invoice (delivery) center."""
+        opp = await self.opportunity_repo.get(opportunity_id)
+        if not opp or not opp.delivery_center_id:
+            return False
+        from app.db.repositories.delivery_center_approver_repository import (
+            DeliveryCenterApproverRepository,
+        )
+
+        dc_repo = DeliveryCenterApproverRepository(self.session)
+        dc_approvers = await dc_repo.get_by_delivery_center(opp.delivery_center_id)
+        return any(a.employee_id == approver_employee_id for a in dc_approvers)
+
     async def _can_approve_async(self, approver_employee_id: UUID, timesheet: Timesheet) -> bool:
         """Async check if employee can approve.
-        Paths: (1) Engagement timesheet approver, (2) DC approver for opp's invoice center,
-        (3) DC approver for employee's delivery center (can approve entire timesheet).
+        Paths: (1) Engagement timesheet approver, (2) DC approver for opportunity invoice center
+        (engagement or opportunity-only entry), (3) DC approver for employee's center.
         """
         from app.db.repositories.delivery_center_approver_repository import DeliveryCenterApproverRepository
         from app.models.employee import Employee
 
-        # Path 3: DC approver for employee's delivery center - can approve entire timesheet
         if timesheet.employee_id:
             employee = await self.session.get(Employee, timesheet.employee_id)
             if employee and employee.delivery_center_id:
@@ -293,21 +401,24 @@ class TimesheetApprovalService(BaseService):
                 if any(a.employee_id == approver_employee_id for a in dc_approvers):
                     return True
 
-        # Paths 1 & 2: Engagement approver or DC approver for opp's invoice center
         for entry in timesheet.entries or []:
-            if not entry.engagement_id:
-                continue
-            eng = await self.engagement_repo.get(entry.engagement_id)
-            if not eng:
-                continue
-            approvers = await self.eng_approver_repo.list_by_engagement(entry.engagement_id)
-            if any(a.employee_id == approver_employee_id for a in approvers):
-                return True
-            dc_repo = DeliveryCenterApproverRepository(self.session)
-            opp = await self.opportunity_repo.get(eng.opportunity_id)
-            if opp and opp.delivery_center_id:
-                dc_approvers = await dc_repo.get_by_delivery_center(opp.delivery_center_id)
-                if any(a.employee_id == approver_employee_id for a in dc_approvers):
+            if entry.engagement_id:
+                approvers = await self.eng_approver_repo.list_by_engagement(entry.engagement_id)
+                if any(a.employee_id == approver_employee_id for a in approvers):
+                    return True
+                eng = await self.engagement_repo.get(entry.engagement_id)
+                if not eng:
+                    continue
+                dc_repo = DeliveryCenterApproverRepository(self.session)
+                opp = await self.opportunity_repo.get(eng.opportunity_id)
+                if opp and opp.delivery_center_id:
+                    dc_approvers = await dc_repo.get_by_delivery_center(opp.delivery_center_id)
+                    if any(a.employee_id == approver_employee_id for a in dc_approvers):
+                        return True
+            elif entry.opportunity_id:
+                if await self._is_dc_approver_for_opportunity_async(
+                    approver_employee_id, entry.opportunity_id
+                ):
                     return True
         return False
 
@@ -474,30 +585,36 @@ class TimesheetApprovalService(BaseService):
             await ts_service.ensure_timesheets_for_dc_employees(approver_dc_ids)
 
         status_enum = TimesheetStatus(status) if status else None
-        timesheets = await self.timesheet_repo.list_approvable_timesheets_for_approver(
-            approver_employee_id, status_filter=status_enum, employee_id_filter=employee_id, skip=skip, limit=limit
+        summaries = await self.timesheet_repo.list_approvable_timesheet_summaries_for_approver(
+            approver_employee_id,
+            status_filter=status_enum,
+            employee_id_filter=employee_id,
+            skip=skip,
+            limit=limit,
         )
+        total_count = await self.timesheet_repo.count_approvable_timesheets_for_approver(
+            approver_employee_id, status_filter=status_enum, employee_id_filter=employee_id
+        )
+        ts_ids = [s.id for s in summaries]
+        label_rows = await self.timesheet_repo.fetch_timesheet_entry_label_rows(ts_ids)
+        labels_by_ts = self._labels_by_timesheet_from_entry_rows(label_rows)
         items = []
-        for ts in timesheets:
-            total = sum(
-                Decimal(str(getattr(e, f"{d}_hours") or 0))
-                for e in (ts.entries or [])
-                for d in ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
-            )
-            entry_labels = self._entry_labels_from_timesheet(ts)
-            emp_name = f"{ts.employee.first_name} {ts.employee.last_name}" if ts.employee else ""
+        for s in summaries:
+            fn = (s.employee_first_name or "").strip()
+            ln = (s.employee_last_name or "").strip()
+            emp_name = f"{fn} {ln}".strip()
             items.append(
                 TimesheetApprovalSummary(
-                    id=ts.id,
-                    employee_id=ts.employee_id,
+                    id=s.id,
+                    employee_id=s.employee_id,
                     employee_name=emp_name,
-                    week_start_date=ts.week_start_date.isoformat(),
-                    status=ts.status.value,
-                    total_hours=total,
-                    engagement_names=entry_labels,
+                    week_start_date=s.week_start_date.isoformat(),
+                    status=s.status.value,
+                    total_hours=s.total_hours,
+                    engagement_names=labels_by_ts.get(s.id, []),
                 )
             )
-        return TimesheetApprovalListResponse(items=items, total=len(items))
+        return TimesheetApprovalListResponse(items=items, total=total_count)
 
     async def list_manageable_employees(
         self,
@@ -541,13 +658,10 @@ class TimesheetApprovalService(BaseService):
             for row in result.scalars().all():
                 employee_ids.add(row)
 
-        # Fallback: include employees who have timesheets in approver's scope (catches edge cases)
-        timesheets = await self.timesheet_repo.list_approvable_timesheets_for_approver(
-            approver_employee_id, status_filter=None, skip=0, limit=500
-        )
-        for ts in timesheets:
-            if ts.employee_id:
-                employee_ids.add(ts.employee_id)
+        # Fallback: employees with at least one approvable timesheet (same scope as approval list)
+        for eid in await self.timesheet_repo.list_approvable_employee_ids_for_approver(approver_employee_id):
+            if eid:
+                employee_ids.add(eid)
 
         if not employee_ids:
             return ManageableEmployeesResponse(items=[], total=0)

@@ -2,7 +2,6 @@
 
 import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useQueries } from "@tanstack/react-query";
 import {
   useOpportunities,
 } from "@/hooks/useOpportunities";
@@ -16,15 +15,14 @@ import { highlightText } from "@/lib/utils/highlight";
 import { cn } from "@/lib/utils";
 import { useAccounts } from "@/hooks/useAccounts";
 import { useDeliveryCenters } from "@/hooks/useDeliveryCenters";
-import { useBillingTerms } from "@/hooks/useBillingTerms";
-import { opportunitiesApi } from "@/lib/api/opportunities";
 import {
   formatCurrency,
   getForecastDisplayValue,
   getAccountName,
   getDeliveryCenterName,
-  getBillingTermName,
   getParentOpportunityName,
+  formatOpportunityDateListLong,
+  formatOpportunityDateListShort,
 } from "@/lib/opportunity-utils";
 import Link from "next/link";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -97,41 +95,7 @@ function OpportunitiesPageContent() {
     [accountsData]
   );
   const { data: deliveryCentersData } = useDeliveryCenters();
-  const { data: billingTermsData } = useBillingTerms();
   const { data: allOpportunitiesData } = useOpportunities({ limit: 100 });
-  
-  // Fetch opportunities with relationships for accurate counts (only for current page)
-  const opportunityIdsForCounts = useMemo(() => (data?.items || []).map(opp => opp.id), [data]);
-  const opportunityCountsQueries = useQueries({
-    queries: opportunityIdsForCounts.map(id => ({
-      queryKey: ["opportunities", "detail", id, true],
-      queryFn: () => opportunitiesApi.getOpportunity(id, true),
-      enabled: !!id,
-      staleTime: 30000,
-    })),
-  });
-
-  // Calculate employee counts per opportunity
-  const employeeCounts = useMemo(() => {
-    const counts: Record<string, Set<string>> = {};
-    
-    // Use opportunity data with relationships if available (most accurate)
-    opportunityCountsQueries.forEach((query) => {
-      if (query.data?.employees) {
-        const oppId = query.data.id;
-        const employeeIds = new Set(query.data.employees.map((emp: { id: string }) => emp.id));
-        counts[oppId] = employeeIds;
-      }
-    });
-    
-    // Convert Sets to counts
-    const countDict: Record<string, number> = {};
-    Object.keys(counts).forEach((oppId) => {
-      countDict[oppId] = counts[oppId].size;
-    });
-    
-    return countDict;
-  }, [opportunityCountsQueries]);
 
   const rows = data?.items ?? [];
 
@@ -147,11 +111,6 @@ function OpportunitiesPageContent() {
   const formatStatus = (status: string | undefined): string => {
     if (!status) return "—";
     return status.charAt(0).toUpperCase() + status.slice(1);
-  };
-
-  const formatDate = (dateStr: string | undefined): string => {
-    if (!dateStr) return "—";
-    return new Date(dateStr).toLocaleDateString();
   };
 
   return (
@@ -307,14 +266,14 @@ function OpportunitiesPageContent() {
                                 }
                               />
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={opportunity.start_date ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden min-w-0" title={formatOpportunityDateListLong(opportunity.start_date)}>
                               {opportunity.start_date
-                                ? new Date(opportunity.start_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
+                                ? formatOpportunityDateListShort(opportunity.start_date)
                                 : "—"}
                             </td>
-                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden" title={opportunity.end_date ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : "—"}>
+                            <td className="p-1.5 whitespace-nowrap text-xs overflow-hidden" title={formatOpportunityDateListLong(opportunity.end_date)}>
                               {opportunity.end_date
-                                ? new Date(opportunity.end_date).toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: '2-digit' })
+                                ? formatOpportunityDateListShort(opportunity.end_date)
                                 : "—"}
                             </td>
                             <td className="p-1.5 truncate text-xs overflow-hidden" title={getDeliveryCenterName(deliveryCentersData, opportunity.delivery_center_id) || "—"}>
@@ -508,7 +467,7 @@ function OpportunitiesPageContent() {
                                   Start Date
                                 </div>
                                 <div className="text-sm">
-                                  {new Date(opportunity.start_date).toLocaleDateString()}
+                                  {formatOpportunityDateListShort(opportunity.start_date)}
                                 </div>
                               </div>
                             )}

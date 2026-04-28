@@ -2,7 +2,9 @@
 Opportunity service with business logic.
 """
 
-from typing import List, Optional
+import asyncio
+from collections import defaultdict
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 from datetime import date, datetime
 from decimal import Decimal
@@ -15,6 +17,8 @@ from app.db.repositories.role_repository import RoleRepository
 from app.db.repositories.estimate_repository import EstimateRepository
 from app.db.repositories.estimate_line_item_repository import EstimateLineItemRepository
 from app.db.repositories.engagement_repository import EngagementRepository
+from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
+from app.db.repositories.quote_repository import QuoteRepository
 from app.schemas.opportunity import OpportunityCreate, OpportunityUpdate, OpportunityResponse
 from app.models.opportunity import OpportunityStatus
 from app.utils.currency_converter import convert_to_usd
@@ -307,7 +311,7 @@ class OpportunityService(BaseService):
             except ValueError:
                 return [], 0
 
-        opportunities = await self.opportunity_repo.list_for_list_api(
+        list_args = dict(
             skip=skip,
             limit=limit,
             account_id=account_id,
@@ -318,16 +322,42 @@ class OpportunityService(BaseService):
             sort_by=sort_by,
             sort_order=sort_order,
         )
-        total = await self.opportunity_repo.count_for_list_api(
+        count_args = dict(
             account_id=account_id,
             status_enum=status_enum,
             start_date=start_date,
             end_date=end_date,
             search=search,
         )
-        responses = []
+        opportunities, total = await asyncio.gather(
+            self.opportunity_repo.list_for_list_api(**list_args),
+            self.opportunity_repo.count_for_list_api(**count_args),
+        )
+        if not opportunities:
+            return [], total
+
+        ids: List[UUID] = [o.id for o in opportunities]
+        plan_by_id, locked_ids, quote_by_opp = await asyncio.gather(
+            self.batch_plan_actuals_for_opportunities(ids),
+            OpportunityPermanentLockRepository(self.session).list_locked_opportunity_ids_among(ids),
+            QuoteRepository(self.session).map_active_quotes_by_opportunity_ids(ids),
+        )
+        responses: List[OpportunityResponse] = []
         for opp in opportunities:
-            responses.append(await self._to_response(opp, include_plan_actuals=True))
+            oid = opp.id
+            pa: Dict[str, Any] = plan_by_id.get(oid) or {}
+            active_q = quote_by_opp.get(oid)
+            list_enrichment = {
+                "is_permanently_locked": oid in locked_ids,
+                "is_locked": active_q is not None,
+                "locked_by_quote_id": active_q.id if active_q else None,
+                "plan_amount": pa.get("plan_amount"),
+                "actuals_amount": pa.get("actuals_amount"),
+                "engagement_id": pa.get("engagement_id"),
+            }
+            responses.append(
+                await self._to_response(opp, include_plan_actuals=True, list_enrichment=list_enrichment)
+            )
         return responses, total
     
     async def list_child_opportunities(
@@ -749,39 +779,148 @@ class OpportunityService(BaseService):
             ) or result["actuals_amount"]
 
         return result
-    
+
+    async def batch_plan_actuals_for_opportunities(
+        self, opportunity_ids: List[UUID]
+    ) -> Dict[UUID, dict]:
+        """Compute plan $ and actuals $ for many opportunities using bulk queries.
+
+        Replaces per-opportunity ``_calculate_plan_actuals_for_opportunity`` loops so account
+        list sorting and paging stay fast on large datasets.
+        """
+        from app.models.engagement import Engagement
+        from app.models.opportunity import Opportunity
+        from app.models.quote import QuoteType, RateBillingUnit
+        from app.models.timesheet import TimesheetApprovedSnapshot, TimesheetEntry, Timesheet, TimesheetStatus
+        from app.services.engagement_service import EngagementService
+
+        unique: List[UUID] = list(dict.fromkeys(opportunity_ids))
+        if not unique:
+            return {}
+
+        result: Dict[UUID, dict] = {
+            oid: {"plan_amount": None, "actuals_amount": Decimal("0"), "engagement_id": None} for oid in unique
+        }
+
+        engagements = await self.engagement_repo.load_engagements_for_plan_actuals_batch(unique)
+        by_opp: Dict[UUID, List] = defaultdict(list)
+        eng_by_id: Dict[UUID, object] = {}
+        for e in engagements:
+            by_opp[e.opportunity_id].append(e)
+            eng_by_id[e.id] = e
+
+        eng_svc = EngagementService(self.session)
+
+        for oid in unique:
+            grp = by_opp.get(oid) or []
+            if not grp:
+                continue
+            primary = min(grp, key=lambda x: x.id)
+            result[oid]["engagement_id"] = primary.id
+            try:
+                plan_summary = await eng_svc.calculate_resource_plan_summary(primary)
+                rev = plan_summary.get("total_revenue") or Decimal("0")
+                currency = plan_summary.get("currency", "USD")
+                if rev > 0:
+                    result[oid]["plan_amount"] = await self.calculate_deal_value_usd(rev, currency)
+            except Exception:
+                pass
+
+        snap_q = (
+            select(
+                TimesheetApprovedSnapshot.hours,
+                TimesheetApprovedSnapshot.invoice_rate,
+                TimesheetApprovedSnapshot.billable,
+                TimesheetEntry.engagement_id,
+                Engagement.opportunity_id,
+            )
+            .select_from(TimesheetApprovedSnapshot)
+            .join(TimesheetEntry, TimesheetApprovedSnapshot.timesheet_entry_id == TimesheetEntry.id)
+            .join(Timesheet, TimesheetEntry.timesheet_id == Timesheet.id)
+            .join(Engagement, TimesheetEntry.engagement_id == Engagement.id)
+            .where(
+                Engagement.opportunity_id.in_(unique),
+                Timesheet.status.in_([TimesheetStatus.APPROVED, TimesheetStatus.INVOICED]),
+                TimesheetApprovedSnapshot.billable == True,
+            )
+        )
+        snap_rows = (await self.session.execute(snap_q)).all()
+
+        oc_rows = (
+            await self.session.execute(
+                select(Opportunity.id, Opportunity.default_currency).where(Opportunity.id.in_(unique))
+            )
+        ).all()
+        opp_currency = {r[0]: (r[1] or "USD") for r in oc_rows}
+
+        per_opp_actuals: Dict[UUID, Decimal] = defaultdict(lambda: Decimal("0"))
+        for row in snap_rows:
+            hours = Decimal(str(row.hours or 0))
+            if hours <= 0:
+                continue
+            oid = row.opportunity_id
+            eng = eng_by_id.get(row.engagement_id)
+            rate = Decimal(str(row.invoice_rate or 0))
+            if eng and getattr(eng, "quote_id", None) and getattr(eng, "quote", None):
+                quote = eng.quote
+                if quote.quote_type == QuoteType.TIME_MATERIALS:
+                    if quote.rate_billing_unit in (
+                        RateBillingUnit.HOURLY_BLENDED,
+                        RateBillingUnit.DAILY_BLENDED,
+                    ):
+                        if quote.blended_rate_amount:
+                            rate = Decimal(str(quote.blended_rate_amount))
+            per_opp_actuals[oid] += hours * rate
+
+        for oid in unique:
+            amt = per_opp_actuals[oid]
+            if amt > 0:
+                result[oid]["actuals_amount"] = (
+                    await self.calculate_deal_value_usd(amt, opp_currency.get(oid, "USD")) or amt
+                )
+
+        return result
+
     async def _to_response(
         self,
         opportunity,
         include_relationships: bool = False,
         include_plan_actuals: bool = False,
+        list_enrichment: Optional[dict] = None,
     ) -> OpportunityResponse:
-        """Convert opportunity model to response schema."""
+        """Convert opportunity model to response schema.
+
+        When ``list_enrichment`` is set (list API only), lock/plan-actuals fields come from
+        precomputed batch results instead of per-row queries.
+        """
         account_name = None
         if hasattr(opportunity, 'account') and opportunity.account:
             account_name = opportunity.account.company_name
         
-        # Check if opportunity is permanently locked (timesheet entries)
-        is_permanently_locked = False
-        try:
-            from app.db.repositories.opportunity_permanent_lock_repository import OpportunityPermanentLockRepository
-            lock_repo = OpportunityPermanentLockRepository(self.session)
-            is_permanently_locked = await lock_repo.is_opportunity_locked(opportunity.id)
-        except Exception:
-            pass
+        if list_enrichment is not None:
+            is_permanently_locked = list_enrichment["is_permanently_locked"]
+            is_locked = list_enrichment["is_locked"]
+            locked_by_quote_id = list_enrichment.get("locked_by_quote_id")
+        else:
+            # Check if opportunity is permanently locked (timesheet entries)
+            is_permanently_locked = False
+            try:
+                lock_repo = OpportunityPermanentLockRepository(self.session)
+                is_permanently_locked = await lock_repo.is_opportunity_locked(opportunity.id)
+            except Exception:
+                pass
 
-        # Check if opportunity is locked by active quote
-        is_locked = False
-        locked_by_quote_id = None
-        try:
-            from app.db.repositories.quote_repository import QuoteRepository
-            quote_repo = QuoteRepository(self.session)
-            active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity.id)
-            if active_quote:
-                is_locked = True
-                locked_by_quote_id = active_quote.id
-        except Exception:
-            pass  # If check fails, assume not locked
+            # Check if opportunity is locked by active quote
+            is_locked = False
+            locked_by_quote_id = None
+            try:
+                quote_repo = QuoteRepository(self.session)
+                active_quote = await quote_repo.get_active_quote_by_opportunity(opportunity.id)
+                if active_quote:
+                    is_locked = True
+                    locked_by_quote_id = active_quote.id
+            except Exception:
+                pass
         
         opportunity_dict = {
             "id": str(opportunity.id),
@@ -831,10 +970,16 @@ class OpportunityService(BaseService):
             opportunity_dict["employees"] = []
         
         if include_plan_actuals:
-            plan_actuals = await self._calculate_plan_actuals_for_opportunity(opportunity.id)
-            opportunity_dict["plan_amount"] = plan_actuals.get("plan_amount")
-            opportunity_dict["actuals_amount"] = plan_actuals.get("actuals_amount")
-            opportunity_dict["engagement_id"] = plan_actuals.get("engagement_id")
+            if list_enrichment is not None:
+                opportunity_dict["plan_amount"] = list_enrichment.get("plan_amount")
+                opportunity_dict["actuals_amount"] = list_enrichment.get("actuals_amount")
+                eid = list_enrichment.get("engagement_id")
+                opportunity_dict["engagement_id"] = eid
+            else:
+                plan_actuals = await self._calculate_plan_actuals_for_opportunity(opportunity.id)
+                opportunity_dict["plan_amount"] = plan_actuals.get("plan_amount")
+                opportunity_dict["actuals_amount"] = plan_actuals.get("actuals_amount")
+                opportunity_dict["engagement_id"] = plan_actuals.get("engagement_id")
         
         return OpportunityResponse.model_validate(opportunity_dict)
 

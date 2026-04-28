@@ -60,6 +60,22 @@ class EngagementWeeklyHoursRepository(BaseRepository[EngagementWeeklyHours]):
         )
         result = await self.session.execute(query)
         return result.scalar_one_or_none()
+
+    async def list_by_line_items_and_week(
+        self,
+        line_item_ids: List[UUID],
+        week_start_date: date,
+    ) -> List[EngagementWeeklyHours]:
+        """All weekly-hours rows for the given line items and a single week (one query)."""
+        if not line_item_ids:
+            return []
+        result = await self.session.execute(
+            select(EngagementWeeklyHours).where(
+                EngagementWeeklyHours.engagement_line_item_id.in_(line_item_ids),
+                EngagementWeeklyHours.week_start_date == week_start_date,
+            )
+        )
+        return list(result.scalars().all())
     
     async def create(self, **kwargs) -> EngagementWeeklyHours:
         """Create a new weekly hours record."""

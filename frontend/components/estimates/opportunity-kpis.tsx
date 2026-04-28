@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useEffect, useRef, useState } from "react";
 import { useEstimateDetail } from "@/hooks/useEstimates";
 import { useOpportunity } from "@/hooks/useOpportunities";
 import { Card } from "@/components/ui/card";
@@ -11,22 +11,49 @@ interface OpportunityKPIsProps {
 }
 
 export function OpportunityKPIs({ estimates }: OpportunityKPIsProps) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [kpiFetchEnabled, setKpiFetchEnabled] = useState(false);
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setKpiFetchEnabled(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setKpiFetchEnabled(true);
+        }
+      },
+      { root: null, rootMargin: "240px 0px", threshold: 0.01 }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   // Find the active version estimate
   const activeEstimate = useMemo(() => {
     return estimates.find((est) => est.active_version === true);
   }, [estimates]);
 
-  // Only fetch detail data for the active version estimate
+  const detailEnabled = !!activeEstimate?.id && kpiFetchEnabled;
+
+  // Only fetch detail for the active estimate once this card is near the viewport (avoids dozens
+  // of concurrent full-detail requests on the Estimates list, which starves navigation).
   const { data: estimateDetail, isLoading: isLoadingEstimate } = useEstimateDetail(
     activeEstimate?.id || "",
-    { enabled: !!activeEstimate?.id }
+    {
+      enabled: detailEnabled,
+      staleTime: 60 * 1000,
+    }
   );
 
   // Fetch opportunity to get the correct currency
   const { data: opportunity, isLoading: isLoadingOpportunity } = useOpportunity(
     activeEstimate?.opportunity_id || "",
     false, // includeRelationships
-    { enabled: !!activeEstimate?.opportunity_id }
+    { enabled: detailEnabled && !!activeEstimate?.opportunity_id }
   );
 
   // Calculate KPIs from fetched data (only for active version)
@@ -136,26 +163,42 @@ export function OpportunityKPIs({ estimates }: OpportunityKPIsProps) {
     };
   }, [estimateDetail, opportunity]);
 
-  if (isLoadingEstimate || isLoadingOpportunity) {
+  if (!activeEstimate) {
     return (
-      <div className="text-sm text-gray-500">Loading KPIs...</div>
+      <div ref={containerRef} className="text-sm text-gray-500">
+        No active version
+      </div>
     );
   }
 
-  if (!activeEstimate) {
+  if (!kpiFetchEnabled) {
     return (
-      <div className="text-sm text-gray-500">No active version</div>
+      <div
+        ref={containerRef}
+        className="min-h-[4.5rem] rounded-md bg-muted/25 animate-pulse"
+        aria-hidden
+      />
+    );
+  }
+
+  if (isLoadingEstimate || isLoadingOpportunity) {
+    return (
+      <div ref={containerRef} className="text-sm text-gray-500">
+        Loading KPIs...
+      </div>
     );
   }
 
   if (!kpis) {
     return (
-      <div className="text-sm text-gray-500">No data available</div>
+      <div ref={containerRef} className="text-sm text-gray-500">
+        No data available
+      </div>
     );
   }
 
   return (
-    <div className="space-y-2">
+    <div ref={containerRef} className="space-y-2">
       <div className="grid grid-cols-2 gap-2">
         <Card className="p-2">
           <div className="text-xs text-gray-600">Total Cost</div>

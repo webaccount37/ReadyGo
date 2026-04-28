@@ -67,6 +67,8 @@ export interface ComparativeSummary {
 export interface Engagement {
   id: string;
   quote_id: string;
+  /** Estimate UUID for the engagement's quote; use for /estimates/{id} (not quote_id). */
+  estimate_id?: string | null;
   opportunity_id: string;
   account_id?: string;
   name: string;
@@ -76,6 +78,9 @@ export interface Engagement {
   created_at: string;
   attributes?: Record<string, unknown>;
   opportunity_name?: string;
+  /** From related opportunity (engagement list) */
+  opportunity_start_date?: string;
+  opportunity_end_date?: string;
   account_name?: string;
   quote_number?: string;
   quote_display_name?: string;
