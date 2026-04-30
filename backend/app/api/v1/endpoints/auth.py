@@ -2,7 +2,10 @@
 Authentication API endpoints for Entra ID SSO.
 """
 
+import logging
 import secrets
+from urllib.parse import parse_qs, unquote, urlencode, urlparse
+
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +17,22 @@ from app.schemas.user import LoginResponse, AuthCallbackRequest
 from app.core.config import settings
 
 router = APIRouter()
+
+
+def _frontend_public_base_url() -> str:
+    """Where the SPA runs (browser origin), for redirects after OAuth."""
+    explicit = (settings.FRONTEND_PUBLIC_URL or "").strip().rstrip("/")
+    if explicit:
+        return explicit
+    api_host = urlparse(settings.AZURE_REDIRECT_URI).netloc.lower()
+    for origin in settings.CORS_ORIGINS:
+        o = (origin or "").strip().rstrip("/")
+        if not o:
+            continue
+        if urlparse(o).netloc.lower() == api_host:
+            continue
+        return o
+    return "http://localhost:3000"
 
 
 @router.get("/login", response_class=RedirectResponse)
@@ -75,10 +94,10 @@ async def callback(
         )
         
         # Extract frontend redirect URI and returnUrl from state
-        # State format from login: "random_state:http://frontend/callback?returnUrl=/"
-        frontend_redirect_uri = "http://localhost:3000/auth/callback"
+        frontend_base = _frontend_public_base_url()
+        frontend_redirect_uri = f"{frontend_base}/auth/callback"
         return_url = "/"
-        
+
         if state and ":" in state:
             try:
                 # Split state: "random_state:http://frontend/callback?returnUrl=/"
@@ -90,19 +109,15 @@ async def callback(
                         base_url, query_string = frontend_url.split("?", 1)
                         frontend_redirect_uri = base_url
                         # Extract returnUrl from query string
-                        from urllib.parse import parse_qs, unquote
                         query_params = parse_qs(query_string)
                         if "returnUrl" in query_params:
                             return_url = unquote(query_params["returnUrl"][0])
                     else:
                         frontend_redirect_uri = frontend_url
             except (IndexError, ValueError, KeyError) as e:
-                # Log error but use defaults
-                import logging
-                logging.warning(f"Error parsing state parameter: {e}, using defaults")
-        
+                logging.warning("Error parsing state parameter: %s, using defaults", e)
+
         # Build redirect URL with token and user info as query parameters
-        from urllib.parse import urlencode, quote
         params = {
             "token": login_response.token.access_token,
             "email": login_response.user.email,
@@ -114,14 +129,15 @@ async def callback(
         params["returnUrl"] = return_url
         
         redirect_url = f"{frontend_redirect_uri}?{urlencode(params)}"
-        
+
         return RedirectResponse(url=redirect_url)
     except HTTPException as e:
-        # Redirect to frontend with error
-        frontend_error_url = f"http://localhost:3000/auth/login?error={e.detail.replace(' ', '_')}"
+        fe = _frontend_public_base_url()
+        frontend_error_url = f"{fe}/auth/login?error={e.detail.replace(' ', '_')}"
         return RedirectResponse(url=frontend_error_url)
-    except Exception as e:
-        frontend_error_url = f"http://localhost:3000/auth/login?error=auth_failed"
+    except Exception:
+        fe = _frontend_public_base_url()
+        frontend_error_url = f"{fe}/auth/login?error=auth_failed"
         return RedirectResponse(url=frontend_error_url)
 
 

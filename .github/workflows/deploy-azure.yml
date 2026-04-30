@@ -1,0 +1,102 @@
+name: Deploy Azure
+
+on:
+  workflow_dispatch:
+    inputs:
+      environmentName:
+        description: "Bicep environmentName parameter (e.g. staging, prod)"
+        required: true
+        default: staging
+      resourceGroup:
+        description: "Existing Azure resource group name"
+        required: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  acr-build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve ACR in resource group
+        id: acr
+        run: |
+          set -e
+          ACR=$(az acr list -g "${{ inputs.resourceGroup }}" --query "[0].name" -o tsv)
+          if [ -z "$ACR" ] || [ "$ACR" = "null" ]; then
+            echo "No Azure Container Registry in resource group. Deploy infra/main.bicep once first (creates ACR)."
+            exit 1
+          fi
+          echo "name=$ACR" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push backend (ACR Tasks)
+        run: |
+          az acr build -r "${{ steps.acr.outputs.name }}" \
+            --image "backend:${{ github.sha }}" \
+            --file backend/Dockerfile \
+            ./backend
+
+      - name: Build and push frontend (ACR Tasks)
+        run: |
+          az acr build -r "${{ steps.acr.outputs.name }}" \
+            --image "frontend:${{ github.sha }}" \
+            --file frontend/Dockerfile \
+            --build-arg "NEXT_PUBLIC_API_URL=" \
+            ./frontend
+
+      - name: Deploy infrastructure (no Container Apps)
+        id: infra
+        run: |
+          set -e
+          DEPLOY_NAME="cc-${{ inputs.environmentName }}-${{ github.run_id }}"
+          echo "deploy_name=$DEPLOY_NAME" >> "$GITHUB_OUTPUT"
+          az deployment group create \
+            --resource-group "${{ inputs.resourceGroup }}" \
+            --template-file infra/main.bicep \
+            --name "$DEPLOY_NAME" \
+            --parameters environmentName="${{ inputs.environmentName }}" \
+            --parameters postgresAdminPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}' \
+            --parameters appSecretKey='${{ secrets.APP_SECRET_KEY }}' \
+            --parameters azureClientSecret='${{ secrets.AZURE_CLIENT_SECRET }}' \
+            --parameters backendImageTag='${{ github.sha }}' \
+            --parameters frontendImageTag='${{ github.sha }}' \
+            --parameters deployContainerApps=false
+
+      - name: Seed Key Vault app configuration secrets
+        env:
+          SEED_CORS_ORIGINS: ${{ vars.CORS_ORIGINS_JSON }}
+          SEED_AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          SEED_AZURE_CLIENT_ID: ${{ secrets.AZURE_ENTRA_APP_CLIENT_ID }}
+          SEED_OTEL_ENVIRONMENT: ${{ vars.OTEL_ENVIRONMENT }}
+          SEED_AZURE_REDIRECT_URI: ${{ vars.AZURE_REDIRECT_URI }}
+          FORCE_KV_CONFIG: ${{ vars.FORCE_KV_CONFIG }}
+        run: |
+          set -e
+          chmod +x infra/seed-keyvault-config.sh
+          infra/seed-keyvault-config.sh "${{ inputs.resourceGroup }}" "${{ steps.infra.outputs.deploy_name }}"
+
+      - name: Deploy Container Apps (images + ACA)
+        run: |
+          set -e
+          DEPLOY_NAME="${{ steps.infra.outputs.deploy_name }}"
+          az deployment group create \
+            --resource-group "${{ inputs.resourceGroup }}" \
+            --template-file infra/main.bicep \
+            --name "$DEPLOY_NAME" \
+            --parameters environmentName="${{ inputs.environmentName }}" \
+            --parameters postgresAdminPassword='${{ secrets.POSTGRES_ADMIN_PASSWORD }}' \
+            --parameters appSecretKey='${{ secrets.APP_SECRET_KEY }}' \
+            --parameters azureClientSecret='${{ secrets.AZURE_CLIENT_SECRET }}' \
+            --parameters backendImageTag='${{ github.sha }}' \
+            --parameters frontendImageTag='${{ github.sha }}' \
+            --parameters deployContainerApps=true

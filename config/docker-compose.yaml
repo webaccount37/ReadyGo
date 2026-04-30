@@ -70,14 +70,12 @@ services:
       context: ../frontend
       dockerfile: Dockerfile
       args:
-        # Empty = use relative URLs, proxied by Next.js to backend (fixes 404 when accessing via IP/hostname)
+        # Empty = browser uses same-origin /api; server proxy uses runtime BACKEND_URL only (not a build-arg).
         NEXT_PUBLIC_API_URL: ""
-        # Baked in at build time - Next.js rewrites are evaluated during build, not runtime
-        BACKEND_URL: http://backend:8000
     container_name: readygo-frontend
     environment:
       NEXT_PUBLIC_API_URL: ""
-      # Backend URL for Next.js rewrites (proxy) - use Docker service name
+      # Runtime only — must not be a Docker build-arg or Next middleware inlines http://backend:8000.
       BACKEND_URL: http://backend:8000
     ports:
       - "3000:3000"

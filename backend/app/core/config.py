@@ -4,22 +4,52 @@ Loads environment variables and provides typed configuration.
 """
 
 from pathlib import Path
-
-from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional
+from typing import Any, List, Optional
 from uuid import UUID
 import json
 
+from pydantic import AliasChoices, Field, computed_field, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 # backend/app/core/config.py -> parents[2] == backend/
-_BACKEND_DIR = Path(__file__).resolve().parents[2]
+_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+
+_DEFAULT_CORS_ORIGINS: list[str] = [
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "http://frontend:3000",
+]
+
+
+def _coerce_cors_origins(v: Any) -> list[str]:
+    """Build allow-origins list from Key Vault / env (plain URL, JSON array, or comma-separated)."""
+    if isinstance(v, list):
+        out = [str(x).strip() for x in v if str(x).strip()]
+        return out if out else list(_DEFAULT_CORS_ORIGINS)
+    if v is None:
+        return list(_DEFAULT_CORS_ORIGINS)
+    if isinstance(v, str):
+        s = v.strip()
+        if not s:
+            return list(_DEFAULT_CORS_ORIGINS)
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                if isinstance(parsed, list):
+                    out = [str(x).strip() for x in parsed if str(x).strip()]
+                    return out if out else list(_DEFAULT_CORS_ORIGINS)
+            except json.JSONDecodeError:
+                pass
+        parts = [p.strip() for p in s.split(",") if p.strip()]
+        return parts if parts else list(_DEFAULT_CORS_ORIGINS)
+    return list(_DEFAULT_CORS_ORIGINS)
 
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
     model_config = SettingsConfigDict(
-        env_file=str(_BACKEND_DIR / ".env"),
+        env_file=(str(_ENV_FILE) if _ENV_FILE.is_file() else None),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -46,31 +76,22 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
     
-    # CORS
-    CORS_ORIGINS: List[str] = [
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://frontend:3000",
-    ]
-    
-    @field_validator("CORS_ORIGINS", mode="before")
-    @classmethod
-    def parse_cors_origins(cls, v):
-        """Parse CORS_ORIGINS from JSON string or list."""
-        if isinstance(v, str):
-            try:
-                return json.loads(v)
-            except json.JSONDecodeError:
-                # If not JSON, try comma-separated
-                return [s.strip() for s in v.split(",") if s.strip()]
-        return v
-    
+    # CORS: read raw string from env/KV (pydantic-settings JSON-decodes List fields before validators).
+    # Accept a single URL (e.g. Key Vault secret), JSON array, or comma-separated origins.
+    cors_origins_env: str = Field(default="", validation_alias=AliasChoices("CORS_ORIGINS"))
+
+    @computed_field(return_type=list[str])
+    @property
+    def CORS_ORIGINS(self) -> list[str]:
+        return _coerce_cors_origins(self.cors_origins_env)
     # Azure credentials (placeholders)
     AZURE_STORAGE_ACCOUNT_NAME: str = ""
     AZURE_STORAGE_ACCOUNT_KEY: str = ""
     AZURE_STORAGE_EXPENSE_RECEIPTS_CONTAINER: str = "expense-receipts"
     AZURE_STORAGE_ACCOUNT_DOCUMENTS_CONTAINER: str = "account-documents"
     AZURE_KEY_VAULT_URL: str = ""
+    # User-assigned managed identity client ID for DefaultAzureCredential (Blob, Key Vault). Not the Entra app client id.
+    AZURE_MANAGED_IDENTITY_CLIENT_ID: str = ""
     
     # Entra ID (Azure AD) SSO Configuration
     AZURE_TENANT_ID: str = ""
@@ -81,6 +102,9 @@ class Settings(BaseSettings):
     AZURE_SP_REST_CLIENT_CERTIFICATE_PATH: str = ""
     AZURE_SP_REST_CLIENT_CERTIFICATE_PASSWORD: str = ""
     AZURE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/callback"
+    # Optional: browser origin for post-OAuth redirects (e.g. https://myapp-web.azurecontainerapps.io).
+    # If unset, the first CORS origin whose host differs from AZURE_REDIRECT_URI is used.
+    FRONTEND_PUBLIC_URL: str = ""
     AZURE_AUTHORITY: str = "https://login.microsoftonline.com"
     AZURE_SCOPES: List[str] = ["User.Read"]
     

@@ -12,38 +12,8 @@ from alembic import context
 from app.db.base import Base
 from app.core.config import settings
 
-# Import all models to ensure they're registered with Base
-from app.models import (
-    Employee,
-    Opportunity,
-    Calendar,
-    Account,
-    Role,
-    DeliveryCenter,
-    DeliveryCenterApprover,
-    CurrencyRate,
-    Engagement,
-    EngagementPhase,
-    EngagementLineItem,
-    EngagementWeeklyHours,
-    Timesheet,
-    TimesheetEntry,
-    TimesheetDayNote,
-    TimesheetApprovedSnapshot,
-    TimesheetStatusHistory,
-    EngagementTimesheetApprover,
-    OpportunityPermanentLock,
-    FinancialForecastExpenseLine,
-    FinancialForecastExpenseCell,
-    FinancialForecastLineOverride,
-    FinancialForecastChangeEvent,
-    ExpenseCategory,
-    ExpenseSheet,
-    ExpenseLine,
-    ExpenseStatusHistory,
-    ExpenseReceipt,
-    EngagementExpenseApprover,
-)
+# Import app.models so every model in __init__ registers on Base.metadata (autogenerate).
+import app.models  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

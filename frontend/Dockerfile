@@ -19,11 +19,10 @@ COPY . .
 # Ensure public directory exists (Next.js needs it)
 RUN mkdir -p ./public
 
-# Set environment variables for build (Next.js rewrites are evaluated at build time)
+# Do not set BACKEND_URL during build: Next inlines process.env.* into the Edge middleware
+# bundle, which would freeze e.g. http://backend:8000 and break Azure. Compose/ACA set it at runtime.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
-ARG BACKEND_URL=http://backend:8000
-ENV BACKEND_URL=$BACKEND_URL
 
 RUN npm run build
 

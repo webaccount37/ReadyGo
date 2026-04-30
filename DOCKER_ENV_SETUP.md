@@ -76,15 +76,15 @@ docker exec readygo-backend python -c "from app.core.config import settings; pri
 
 ## Important Notes
 
-1. **`.env` file is NOT copied into Docker image** - it's excluded by `.dockerignore` for security
-2. **Docker Compose reads from host filesystem** - your `backend/.env` file on your machine
+1. **`backend/.dockerignore` excludes `.env` from the image build** so `docker build` / `az acr build` does not bake secrets into layers. **Docker Compose** still uses your repo file via `env_file: ../backend/.env` and the bind mount `../backend:/app`, so at **runtime** the container sees `/app/.env` from your machine.
+2. **Pydantic** loads `.env` only when that file exists ([`backend/app/core/config.py`](backend/app/core/config.py)). In **Azure Container Apps**, there is no `.env` file — configuration comes from **Key Vault** references set in Bicep; edit secrets in the Azure Portal (see [`infra/README.md`](infra/README.md)).
 3. **Redirect URI must match** how you access the app:
    - Local: `http://localhost:8000/api/v1/auth/callback`
-   - Production: `https://your-domain.com/api/v1/auth/callback`
+   - Azure: set Key Vault secret `azure-redirect-uri` (and Entra app registration) to your API HTTPS callback URL.
 
 ## Frontend (`frontend/.env.local`) with Docker
 
-Next.js **inlines** `NEXT_PUBLIC_*` variables when `npm run build` runs inside the Docker **builder** stage. The frontend image build copies your app with `COPY . .`, and **`frontend/.env.local` is included** in that context (it is not listed in `frontend/.dockerignore`).
+Next.js **inlines** `NEXT_PUBLIC_*` when `npm run build` runs in the Docker **builder** stage. [`frontend/.dockerignore`](../frontend/.dockerignore) excludes generic `.env` / `.env.*` from the build context **except** `.env.local` (so local `docker compose build frontend` can still pick up `NEXT_PUBLIC_*` from your machine). **Do not** commit `frontend/.env.local` with secrets.
 
 1. Create `frontend/.env.local` with at least:
    ```env
@@ -99,6 +99,8 @@ Next.js **inlines** `NEXT_PUBLIC_*` variables when `npm run build` runs inside t
    docker compose up -d frontend
    ```
    A plain `up` without rebuild will keep the old client bundle without your new variables.
+
+For **Azure** frontend images built in CI (`az acr build` without `.env.local`), pass the required `NEXT_PUBLIC_*` values as Docker **`--build-arg`** in the pipeline if needed.
 
 ## Troubleshooting
 

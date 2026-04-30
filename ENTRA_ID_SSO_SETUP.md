@@ -414,6 +414,10 @@ If **`roles`** contains **`Sites.ReadWrite.All`** but **403 persists**, the issu
 6. Update frontend to use SSO authentication
 7. Protect API routes with authentication dependency
 
+## Production (Azure Container Apps)
+
+For Consult Cortex deployments on Azure Container Apps, register the API redirect URI as `https://<your-api-fqdn>/api/v1/auth/callback` (from Bicep outputs) and set backend `CORS_ORIGINS` to include the deployed frontend URL. See [infra/README.md](infra/README.md) for infrastructure and GitHub Actions OIDC setup.
+
 ## Support
 
 If you encounter issues:

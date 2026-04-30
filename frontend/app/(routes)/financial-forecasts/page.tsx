@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import { resolveApiBaseUrl } from "@/lib/fetchClient";
 
 function getThisWeekSunday(): string {
   const d = new Date();
@@ -340,7 +341,7 @@ export default function FinancialForecastsPage() {
   const downloadExport = async () => {
     if (!deliveryCenterId) return;
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-    const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const base = resolveApiBaseUrl();
     const u = new URLSearchParams({
       delivery_center_id: deliveryCenterId,
       start_week: startWeek,
@@ -362,7 +363,7 @@ export default function FinancialForecastsPage() {
   const uploadImport = async (file: File) => {
     if (!deliveryCenterId) return;
     const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-    const base = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+    const base = resolveApiBaseUrl();
     const fd = new FormData();
     fd.append("file", file);
     const res = await fetch(`${base}/api/v1/financial-forecast/import.xlsx?delivery_center_id=${deliveryCenterId}`, {

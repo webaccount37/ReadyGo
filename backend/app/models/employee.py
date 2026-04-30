@@ -45,7 +45,7 @@ class Employee(Base):
     billable = Column(Boolean, default=True, nullable=False)
     default_currency = Column(String(3), nullable=True, default="USD")
     timezone = Column(String(50), default="UTC", nullable=False)
-    delivery_center_id = Column(UUID(as_uuid=True), ForeignKey("delivery_centers.id"), nullable=True)
+    delivery_center_id = Column(UUID(as_uuid=True), ForeignKey("delivery_centers.id"), nullable=False)
     
     # Relationships
     delivery_center = relationship("DeliveryCenter")

@@ -91,6 +91,11 @@ jobs:
       - name: Install dependencies
         run: poetry install
       
+      - name: Apply database migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/readygo_test
+        run: poetry run alembic upgrade head
+
       - name: Run tests
         env:
           DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/readygo_test

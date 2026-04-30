@@ -2,7 +2,7 @@
 set -e
 
 echo "Applying database migrations..."
-# Do not stamp on every boot (would reset alembic_version). Migrations chain from 7dbe7fb867e1 -> expense_mgmt_001.
+# Single baseline revision (see alembic/versions/); do not stamp on every boot.
 alembic upgrade head
 
 echo "Starting application..."

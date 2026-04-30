@@ -41,7 +41,11 @@ def _build_blob_service_client():
     if DefaultAzureCredential is None:
         raise ValueError("AZURE_STORAGE_ACCOUNT_KEY is empty and DefaultAzureCredential is unavailable")
     account_url = f"https://{name}.blob.core.windows.net"
-    return BlobServiceClient(account_url, credential=DefaultAzureCredential())
+    mi_client = (settings.AZURE_MANAGED_IDENTITY_CLIENT_ID or "").strip()
+    cred_kwargs = {}
+    if mi_client:
+        cred_kwargs["managed_identity_client_id"] = mi_client
+    return BlobServiceClient(account_url, credential=DefaultAzureCredential(**cred_kwargs))
 
 
 class AzureBlobClient:
